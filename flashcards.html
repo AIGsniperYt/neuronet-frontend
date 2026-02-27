@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Flashcard Study App</title>
+<style>
+  * {
+    box-sizing: border-box;
+  }
+  body, html {
+    margin: 0; padding: 0; height: 100%;
+    font-family: Arial, sans-serif;
+    background: #121212;
+    color: #eee;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  /* Header Buttons */
+  .header-buttons {
+    position: fixed;
+    top: 10px;
+    z-index: 10;
+    display: flex;
+    gap: 10px;
+  }
+  #toggleMode {
+    left: 10px;
+    background: #333;
+    border: none;
+    padding: 10px 15px;
+    cursor: pointer;
+    color: #eee;
+    border-radius: 5px;
+  }
+  .utility-buttons {
+    right: 10px;
+  }
+  .utility-buttons button {
+    padding: 10px 15px;
+    border: none;
+    border-radius: 5px;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  #exportBtn { background: #4CAF50; }
+  #importBtn { background: #2196F3; }
+
+  /* Mode Containers */
+  #study-mode, #modify-mode {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding-top: 60px;
+  }
+  #modify-mode.hidden, #study-mode.hidden, #multiple-choice-options-container.hidden, #ms.hidden  {
+    display: none;
+  }
+
+  /* Study Mode Styles */
+  .card-container {
+    max-width: 900px;
+    width: 90vw;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  #question-markrow {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+  }
+  #question-card, #markscheme-card {
+    background: #222;
+    padding: 20px;
+    border-radius: 8px;
+    flex: 1;
+    min-width: 0;
+    box-shadow: 0 0 8px #000;
+    transition: transform 0.4s ease, opacity 0.4s ease;
+  }
+  #markscheme-card {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  #answer-row {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+  }
+  #user-answer {
+    flex: 1;
+    padding: 12px;
+    border-radius: 6px;
+    border: none;
+    font-size: 1rem;
+    background: #333;
+    color: #eee;
+    resize: vertical;
+    min-height: 60px;
+  }
+  #mark-input {
+    width: 60px;
+    padding: 8px;
+    border-radius: 6px;
+    border: none;
+    font-size: 1rem;
+    background: #333;
+    color: #eee;
+    display: none;
+  }
+  button {
+    background: #0057e7;
+    border: none;
+    color: white;
+    padding: 12px 18px;
+    font-size: 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.3s ease;
+  }
+  button:disabled {
+    background: #444;
+    cursor: default;
+  }
+  button:hover:not(:disabled) {
+    background: #0042b8;
+  }
+  #next-btn {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    display: none;
+    box-shadow: 0 0 8px #000;
+  }
+
+  /* Modify Mode Styles */
+  .modify-container {
+    width: 90%;
+    max-width: 1200px;
+    margin: 20px auto;
+    padding: 25px;
+    background: #222;
+    border-radius: 8px;
+    box-shadow: 0 0 15px rgba(0,0,0,0.5);
+  }
+  .modify-container h2 {
+    text-align: center;
+    margin-top: 0;
+    color: #eee;
+  }
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    gap: 30px;
+  }
+  .form-column {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+  }
+  .form-input {
+    width: 100%;
+    padding: 12px;
+    background: #333;
+    color: #eee;
+    border: 1px solid #444;
+    border-radius: 4px;
+    font-size: 1rem;
+  }
+  .form-input:focus {
+    outline: 2px solid #0057e7;
+  }
+  .big-textarea {
+    min-height: 150px;
+    resize: vertical;
+  }
+  .form-actions {
+    display: flex;
+    gap: 15px;
+    margin-top: 25px;
+    align-items: center;
+  }
+  #modify-message {
+    margin-left: 10px;
+    font-size: 0.9rem;
+    display: none;
+  }
+
+  /* Exam-style formatting */
+  .exam-header {
+    border-bottom: 2px solid #333;
+    padding-bottom: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .exam-subject {
+    font-weight: bold;
+    font-size: 1.2rem;
+  }
+
+  .exam-meta {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 0.5rem;
+    font-size: 0.9rem;
+    color: #555;
+  }
+
+  .exam-content {
+    margin-top: 1.5rem;
+  }
+
+  .question-text {
+    margin-bottom: 1.5rem;
+    line-height: 1.6;
+  }
+
+  .answer-space {
+    min-height: 100px;
+    border-bottom: 1px dashed #ccc;
+    margin-bottom: 1rem;
+  }
+
+  .markscheme-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 2px solid #333;
+    padding-bottom: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .markscheme-content ul {
+    margin-left: 1.5rem;
+    line-height: 1.6;
+  }
+
+  .markscheme-content li {
+    margin-bottom: 0.5rem;
+  }
+
+  /* Form styling */
+  #modify-subject, #modify-topic {
+    width: 100%;
+    padding: 0.5rem;
+    margin-bottom: 1rem;
+  }
+  #neuronet {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+}
+
+/* Multiple choice options styling */
+.multiple-choice-option {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+  padding: 8px;
+  background: #333;
+  border-radius: 4px;
+}
+
+.multiple-choice-option input[type="checkbox"] {
+  margin-right: 10px;
+}
+
+.multiple-choice-option input[type="text"] {
+  flex: 1;
+  padding: 8px;
+  background: #444;
+  border: none;
+  border-radius: 4px;
+  color: #eee;
+}
+
+.multiple-choice-option button {
+  margin-left: 10px;
+  background: #f44336;
+  border: none;
+  color: white;
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#multiple-choice-options-container {
+  margin-top: 15px;
+}
+
+/* Study mode multiple choice styling */
+.multiple-choice-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 15px;
+}
+
+.multiple-choice-item {
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  background: #333;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.multiple-choice-item:hover {
+  background: #444;
+}
+
+.multiple-choice-item input {
+  margin-right: 10px;
+}
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .form-grid {
+      grid-template-columns: 1fr;
+    }
+    .header-buttons {
+      flex-wrap: wrap;
+      justify-content: center;
+      width: 100%;
+      top: 5px;
+    }
+    #toggleMode {
+      position: static;
+    }
+    .utility-buttons {
+      position: static;
+    }
+  }
+  @media (max-width: 600px) {
+    #question-markrow {
+      flex-direction: column;
+    }
+    #question-card, #markscheme-card {
+      width: 100%;
+      min-width: auto;
+    }
+    #answer-row {
+      flex-direction: column;
+      gap: 10px;
+    }
+    #user-answer {
+      min-height: 100px;
+    }
+    .form-actions {
+      flex-direction: column;
+      align-items: stretch;
+    }
+  }
+</style>
+</head>
+<body>
+  <canvas id="neuronet"></canvas>
+
+<div class="header-buttons">
+  <button id="toggleMode">Switch to Modify Mode</button>
+  <div class="utility-buttons header-buttons">
+    <button id="exportBtn">Export All</button>
+    <button id="importBtn">Import</button>
+    <input type="file" id="importFile" accept=".json" style="display: none;" />
+  </div>
+</div>
+
+<div id="study-mode">
+  <div class="card-container">
+    <div id="question-markrow">
+      <div id="question-card">Loading question...</div>
+      <div id="markscheme-card">Mark scheme will appear here.</div>
+    </div>
+    <div id="answer-row">
+      <textarea id="user-answer" placeholder="Type your answer here..."></textarea>
+      <input id="mark-input" type="number" min="0" max="20" placeholder="Mark" />
+      <button id="submit-btn">Submit</button>
+    </div>
+  </div>
+</div>
+
+<div id="modify-mode" class="hidden">
+  <div class="modify-container">
+    <h2>Flashcard Editor</h2>
+    
+    <div class="form-grid">
+      <div class="form-column">
+        <label>
+          Subject:
+          <select id="modify-subject" class="form-input">
+            <option value="">Select a subject</option>
+          </select>
+        </label>
+
+        <label>
+          Topic:
+          <select id="modify-topic" class="form-input">
+            <option value="">Select a topic</option>
+          </select>
+        </label>
+
+        <label>
+          Question Type:
+          <select id="modify-question-type" class="form-input">
+            <option value="standard">Standard</option>
+            <option value="multiple-choice">Multiple Choice</option>
+          </select>
+        </label>
+
+        <label>
+          Difficulty:
+          <select id="modify-difficulty" class="form-input">
+            <option value="1">⭐ Easy</option>
+            <option value="2">⭐⭐ Medium</option>
+            <option value="3">⭐⭐⭐ Hard</option>
+            <option value="4">⭐⭐⭐⭐ Expert</option>
+          </select>
+        </label>
+
+        <label>
+          Max Marks:
+          <input id="modify-maxmarks" type="number" min="1" max="20" value="4" class="form-input">
+        </label>
+      </div>
+
+      <div class="form-column">
+        <label>
+          Question:
+          <textarea id="modify-question" rows="5" class="form-input big-textarea" placeholder="Enter your question here..."></textarea>
+        </label>
+
+        <div id="multiple-choice-options-container" class="hidden">
+          <label>Multiple Choice Options:</label>
+          <div id="multiple-choice-options-list"></div>
+          <button type="button" id="add-multiple-choice-option" style="background: #673AB7; margin-top: 10px;">+ Add Option</button>
+        </div>
+
+        <label id="ms">
+          Mark Scheme:
+          <textarea id="modify-markscheme" rows="5" class="form-input big-textarea" placeholder="Enter the correct answer/mark scheme..."></textarea>
+        </label>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button id="save-flashcard-btn" style="background: #4CAF50;">Save Flashcard</button>
+      <button id="clear-form-btn" style="background: #f44336;">Clear Form</button>
+      <div id="modify-message"></div>
+    </div>
+  </div>
+</div>
+
+<button id="next-btn">Next</button>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quote Bank</title>
+<style>
+:root {
+  --bg-1: #0b1f17;
+  --bg-2: #102b20;
+  --panel-bg: rgba(16,43,32,0.6);
+  --panel-strong: rgba(10,30,22,0.75);
+  --glass-border: rgba(255,255,255,0.08);
+  --accent: #2cffb3;
+  --accent-soft: rgba(44,255,179,0.45);
+  --accent-glow: rgba(44,255,179,0.35);
+  --text-main: #e6fff5;
+  --text-muted: rgba(230,255,245,0.65);
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:Inter,system-ui,sans-serif;color:var(--text-main);background:radial-gradient(1200px 600px at 50% -10%,#143b2b,var(--bg-1));min-height:100vh;overflow-x:hidden;}
+canvas{position:fixed;inset:0;z-index:-1;}
+
+header{padding:2rem;text-align:center;}
+header h1{font-size:2.8rem;color:var(--accent);}
+header p{margin-top:0.5rem;color:var(--text-muted);}
+
+.container{max-width:1000px;margin:2rem auto;padding:0 1rem;}
+.panel{background:var(--panel-bg);border:1px solid var(--glass-border);border-radius:20px;padding:1.5rem;margin-bottom:2rem;backdrop-filter:blur(12px);}
+.panel h2{color:var(--accent);margin-bottom:1rem;}
+
+.add-form{display:flex;flex-wrap:wrap;gap:0.5rem;margin-bottom:1rem;align-items:center;}
+.add-form select, .add-form input, .add-form textarea{padding:0.5rem;border-radius:8px;border:none;background:var(--panel-strong);color:var(--text-main);flex:1;}
+.add-form button{padding:0.6rem 1rem;border-radius:8px;border:none;background:var(--accent);color:var(--bg-1);cursor:pointer;flex:none;}
+.add-form button:hover{box-shadow:0 0 10px var(--accent-glow);}
+
+#quotesTable{width:100%;border-collapse:collapse;}
+#quotesTable th, #quotesTable td{padding:0.6rem 0.8rem;border-bottom:1px solid var(--glass-border);color:var(--text-main);}
+#quotesTable th{color:var(--accent);}
+.edit-btn{cursor:pointer;color:var(--accent);}
+
+.header-actions{display:flex;gap:0.5rem;margin-bottom:1rem;justify-content:flex-end;}
+.secondary-button{background:transparent;border:1px solid var(--accent);color:var(--accent);padding:0.4rem 0.8rem;border-radius:6px;cursor:pointer;}
+.secondary-button:hover{background:var(--accent-soft);color:var(--bg-1);}
+textarea{resize:none;}
+</style>
+</head>
+<body>
+
+<canvas id="bgCanvas"></canvas>
+
+<header>
+  <h1>Quote Bank</h1>
+  <p>Add, analyze, and manage your quotes quickly</p>
+</header>
+
+<div class="container">
+
+  <div class="panel">
+    <h2>Add Quote</h2>
+<button id="toggleCharManager" class="secondary-button" style="margin-bottom:1rem;">Toggle Character Manager</button>
+<div class="panel" id="characterManager" style="display:none;">
+  <h2>Manage Characters</h2>
+  <div class="add-form">
+    <input type="text" id="newCharacter" placeholder="Add new character">
+    <button type="button" id="addCharacterBtn">Add Character</button>
+  </div>
+  <select id="charSelectDropdown">
+    <option value="">Select Character</option>
+  </select>
+</div>
+
+    <form id="addQuoteForm" class="add-form" autocomplete="off">
+    <select id="characterSelect" required>
+    <option value="">Select Character</option>
+    </select>
+      <input type="text" id="quoteText" placeholder="Quote text..." required>
+      <textarea id="quoteAnalysis" placeholder="Analysis..." rows="1"></textarea>
+      <button type="submit">Save</button>
+    </form>
+    <div class="header-actions">
+      <button id="importBtn" class="secondary-button">Import JSON</button>
+      <button id="exportBtn" class="secondary-button">Export JSON</button>
+      <input type="file" id="importFile" accept=".json" hidden>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Quote Bank</h2>
+    <table id="quotesTable">
+      <thead>
+        <tr>
+          <th>Character</th>
+          <th>Quote</th>
+          <th>Analysis</th>
+          <th>Edit</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+const dbName = 'QuoteBankDB';
+const storeName = 'quotes';
+let characters = [];
+
+const canvas = document.getElementById('bgCanvas');
+const ctx = canvas.getContext('2d');
+function resizeCanvas(){ canvas.width=window.innerWidth; canvas.height=window.innerHeight; }
+window.addEventListener('resize', resizeCanvas); resizeCanvas();
+
+let nodes=[], nodeCount=60;
+class Node{constructor(){this.x=Math.random()*canvas.width;this.y=Math.random()*canvas.height;this.vx=(Math.random()-0.5)*1;this.vy=(Math.random()-0.5)*1;this.r=1+Math.random()*2;}update(){this.x+=this.vx;this.y+=this.vy;if(this.x<0||this.x>canvas.width)this.vx*=-1;if(this.y<0||this.y>canvas.height)this.vy*=-1;}draw(){ctx.beginPath();ctx.arc(this.x,this.y,this.r,0,Math.PI*2);ctx.fillStyle='rgba(44,255,179,0.5)';ctx.fill();}};
+function initNodes(){nodes=[];for(let i=0;i<nodeCount;i++)nodes.push(new Node());}
+function animate(){ctx.fillStyle='rgba(11,31,23,0.2)';ctx.fillRect(0,0,canvas.width,canvas.height);nodes.forEach(n=>{n.update();n.draw();});requestAnimationFrame(animate);}
+initNodes();animate();
+
+// IndexedDB functions
+function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open(dbName,1);r.onerror=()=>rej(r.error);r.onsuccess=()=>res(r.result);r.onupgradeneeded=e=>{const db=e.target.result;if(!db.objectStoreNames.contains(storeName))db.createObjectStore(storeName,{keyPath:'id',autoIncrement:true});};});}
+async function addQuote(quote){const db=await openDB();return new Promise(res=>{const tx=db.transaction(storeName,'readwrite');const store=tx.objectStore(storeName);store.add(quote);tx.oncomplete=()=>res();});}
+async function getAllQuotes(){const db=await openDB();return new Promise(res=>{const tx=db.transaction(storeName,'readonly');const store=tx.objectStore(storeName);const req=store.getAll();req.onsuccess=()=>res(req.result);});}
+async function updateQuote(id,data){const db=await openDB();return new Promise(res=>{const tx=db.transaction(storeName,'readwrite');const store=tx.objectStore(storeName);store.get(id).onsuccess=e=>{const val=e.target.result;store.put({...val,...data});};tx.oncomplete=()=>res();});}
+async function importJSON(data){const db=await openDB();const tx=db.transaction(storeName,'readwrite');const store=tx.objectStore(storeName);data.forEach(q=>store.put(q));return new Promise(res=>{tx.oncomplete=()=>res();});}
+
+// DOM
+const characterSelect=document.getElementById('characterSelect');
+const quoteText=document.getElementById('quoteText');
+const quoteAnalysis=document.getElementById('quoteAnalysis');
+const quotesTable=document.querySelector('#quotesTable tbody');
+const addQuoteForm=document.getElementById('addQuoteForm');
+
+function refreshCharacterOptions(){characterSelect.innerHTML='<option value="">Select Character</option>';characters.forEach(c=>{const opt=document.createElement('option');opt.value=c;opt.textContent=c;characterSelect.appendChild(opt);});}
+async function renderTable(){const quotes=await getAllQuotes();quotesTable.innerHTML='';quotes.forEach(q=>{const tr=document.createElement('tr');['character','quote','analysis'].forEach(k=>{const td=document.createElement('td');td.textContent=q[k]||'';tr.appendChild(td);});const editTd=document.createElement('td');const editBtn=document.createElement('span');editBtn.textContent='✎';editBtn.className='edit-btn';editBtn.onclick=()=>editQuote(q);editTd.appendChild(editBtn);tr.appendChild(editTd);quotesTable.appendChild(tr);});}
+
+addQuoteForm.onsubmit=async e=>{e.preventDefault();let char=characterSelect.value.trim();if(!char)char='Unknown';if(!characters.includes(char))characters.push(char);refreshCharacterOptions();await addQuote({character:char,quote:quoteText.value.trim(),analysis:quoteAnalysis.value.trim()});quoteText.value='';quoteAnalysis.value='';renderTable();};
+
+function editQuote(q){const newQuote=prompt('Edit quote text:',q.quote);if(newQuote!==null){const newAnalysis=prompt('Edit analysis:',q.analysis||'');updateQuote(q.id,{quote:newQuote,analysis:newAnalysis}).then(()=>renderTable());}}
+
+document.getElementById('exportBtn').onclick=async()=>{const data=await getAllQuotes();const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='quotes.json';a.click();}
+document.getElementById('importBtn').onclick=()=>document.getElementById('importFile').click();
+document.getElementById('importFile').onchange=async e=>{const f=e.target.files[0];if(!f)return;const text=await f.text();try{const data=JSON.parse(text);await importJSON(data);renderTable();alert('Import successful');}catch(err){alert('Invalid JSON');}};
+
+renderTable();
+
+const toggleBtn = document.getElementById('toggleCharManager');
+const charManager = document.getElementById('characterManager');
+const charDropdown = document.getElementById('charSelectDropdown');
+
+// Toggle visibility
+toggleBtn.onclick = () => {
+  charManager.style.display = charManager.style.display === 'none' ? 'block' : 'none';
+};
+
+// Add new character
+const newCharInput = document.getElementById('newCharacter');
+const addCharBtn = document.getElementById('addCharacterBtn');
+
+addCharBtn.onclick = () => {
+  const char = newCharInput.value.trim();
+  if (!char) return alert('Enter a character name');
+  if (!characters.includes(char)) {
+    characters.push(char);
+    refreshCharacterOptions();
+    newCharInput.value = '';
+  } else {
+    alert('Character already exists');
+  }
+};
+
+// Update both dropdowns
+function refreshCharacterOptions() {
+  [characterSelect, charDropdown].forEach(drop => {
+    drop.innerHTML = '<option value="">Select Character</option>';
+    characters.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c;
+      opt.textContent = c;
+      drop.appendChild(opt);
+    });
+  });
+}
+
+
+
+</script>
+
+</body>
+</html>

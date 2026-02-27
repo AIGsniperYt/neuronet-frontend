@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Past Papers Tracker</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter&display=swap');
+  body {
+    margin: 0; background: #121212; color: #eee;
+    font-family: 'Inter', sans-serif;
+    display: flex; flex-direction: column; height: 100vh;
+  }
+  header {
+    padding: 1rem 1.5rem; background: #1f1f1f; font-size: 1.5rem;
+    font-weight: 600; user-select: none;
+    border-bottom: 1px solid #333;
+  }
+  #bgCanvas {
+  opacity: 0.3; /* Adjust transparency */
+  background: transparent; /* Ensure no background blocks gradient */
+}
+
+  .tabs {
+    display: flex; background: #1a1a1a; border-bottom: 1px solid #333;
+  }
+  .tab {
+    flex: 1; text-align: center; padding: 0.8rem 0; cursor: pointer;
+    user-select: none; font-weight: 500;
+    border-bottom: 3px solid transparent;
+    transition: border-color 0.3s;
+  }
+  .tab.active {
+    border-bottom-color: #0af;
+    color: #0af;
+  }
+  main {
+    flex: 1; overflow-y: auto; padding: 1rem 1.5rem;
+  }
+  table {
+    width: 100%; border-collapse: collapse;
+    margin-top: 1rem;
+  }
+  th, td {
+    padding: 0.6rem 1rem; border-bottom: 1px solid #333;
+    text-align: left; vertical-align: middle;
+  }
+  th {
+    color: #0af;
+    user-select: none;
+  }
+  td.editable {
+    cursor: pointer;
+    position: relative;
+  }
+  td.editable:hover {
+    background: #222;
+  }
+  .header-actions {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .secondary-button {
+    background: transparent;
+    border: 1px solid #0af;
+    color: #0af;
+    padding: 0.4rem 0.8rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+  }
+  .secondary-button:hover {
+    background: #0af2;
+    color: white;
+  }
+
+  .edit-icon {
+    width: 16px; height: 16px;
+    fill: #0af;
+    cursor: pointer;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+  input[type="text"], input[type="number"] {
+    background: #222; border: none; color: #eee;
+    font-size: 1rem; padding: 4px 6px;
+    border-radius: 4px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .add-form {
+    margin-top: 1rem; display: flex; gap: 10px; flex-wrap: wrap;
+    align-items: center;
+  }
+  .add-form input, .add-form button {
+    font-size: 1rem; padding: 0.5rem 0.8rem; border-radius: 4px;
+    border: none; background: #0af; color: #121212;
+    cursor: pointer;
+    user-select: none;
+  }
+  .add-form input[type="text"], .add-form input[type="number"] {
+    background: #222; color: #eee;
+    flex: 1 1 150px;
+  }
+  .add-form button:hover {
+    background: #08c;
+  }
+  .message {
+    margin-top: 0.6rem; color: #0fa;
+    font-size: 0.9rem;
+  }
+  /* Scrollbar */
+  main::-webkit-scrollbar {
+    width: 8px;
+  }
+  main::-webkit-scrollbar-thumb {
+    background: #0af6;
+    border-radius: 4px;
+  }
+  main::-webkit-scrollbar-track {
+    background: transparent;
+  }
+</style>
+</head>
+<body>
+<header>Past Papers Tracker</header>
+<div class="header-actions">
+    <button id="importBtn" class="secondary-button">Import JSON</button>
+    <button id="exportBtn" class="secondary-button">Export JSON</button>
+    <input type="file" id="importFile" accept=".json" hidden>
+</div>
+
+<div class="tabs" id="subjectTabs"></div>
+<main>
+  <div>
+    <form id="addPaperForm" class="add-form" autocomplete="off">
+      <input type="number" id="paperSequence" placeholder="Order (e.g. 1)" min="1" required />
+      <input type="text" id="paperYear" placeholder="Year (e.g. 2022J)" required />
+      <input type="text" id="paper1" placeholder="Paper 1 Score (e.g. 89/100)" />
+      <input type="text" id="paper2" placeholder="Paper 2 Score (e.g. 78/100)" />
+      <!-- paper3 only shown dynamically for Maths and Geography -->
+      <input type="text" id="paper3" placeholder="Paper 3 Score (e.g. 92/100)" style="display:none" />
+      <input type="text" id="totalScore" placeholder="Total Score (e.g. 170/200)" />
+      <input type="number" id="gradeBoundary" placeholder="Grade Boundary for 9" min="0" step="1" />
+      <input type="text" id="averagePercent" placeholder="Average %" />
+      <input type="text" id="paperNotes" placeholder="Notes (optional)" />
+      <button type="submit">Add Paper</button>
+    </form>
+    <div id="message" class="message"></div>
+  </div>
+
+  <table id="papersTable" aria-label="Past papers table">
+    <thead>
+      <tr>
+        <th>Order</th>
+        <th>Year</th>
+        <th>Paper 1</th>
+        <th>Paper 2</th>
+        <th id="paper3Header" style="display:none">Paper 3</th>
+        <th>Total</th>
+        <th>Grade Boundary (9)</th>
+        <th>Average %</th>
+        <th>Notes</th>
+        <th>Edit</th>
+      </tr>
+    </thead>
+    <tbody>
+      <!-- Rows go here -->
+    </tbody>
+  </table>
+</main>
+<canvas id="bgCanvas" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1;"></canvas>
+
+
+<script>
+  const subjects = ['Biology', 'Chemistry', 'Physics', 'Maths', 'English Lit', 'English Lang', 'Computer Science', 'Geography'];
+  let currentSubject = subjects[0];
+
+  const dbName = 'PastPapersDB';
+  const storeName = 'papers';
+
+const canvas = document.getElementById('bgCanvas');
+const ctx = canvas.getContext('2d');
+let width, height;
+function resize() {
+  width = canvas.width = window.innerWidth;
+  height = canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+let gradientShift = 0;
+function draw() {
+  gradientShift += 0.5;
+  const gradient = ctx.createLinearGradient(0, 0, width, height);
+  gradient.addColorStop(0, `hsl(${(gradientShift) % 360}, 60%, 15%)`);
+  gradient.addColorStop(1, `hsl(${(gradientShift + 60) % 360}, 60%, 25%)`);
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, width, height);
+  requestAnimationFrame(draw);
+}
+draw();
+
+  // Show/hide Paper 3 input & header based on subject
+  function updatePaper3Visibility() {
+    const paper3Input = document.getElementById('paper3');
+    const paper3Header = document.getElementById('paper3Header');
+    if (currentSubject === 'Maths' || currentSubject === 'Geography') {
+      paper3Input.style.display = 'inline-block';
+      paper3Header.style.display = '';
+    } else {
+      paper3Input.style.display = 'none';
+      paper3Header.style.display = 'none';
+      paper3Input.value = '';
+    }
+  }
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(dbName, 3); // Increment to version 3 to force migration
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+    request.onupgradeneeded = e => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(storeName)) {
+        db.createObjectStore(storeName, { keyPath: 'id', autoIncrement: true })
+          .createIndex('subject', 'subject', { unique: false });
+      } else {
+        // Migration for existing data
+        const tx = e.target.transaction;
+        const store = tx.objectStore(storeName);
+        store.getAll().onsuccess = function(event) {
+          const papers = event.target.result;
+          papers.forEach(paper => {
+            // Remove old field if exists
+            if (paper.dateAdded) delete paper.dateAdded;
+            
+            // Add new date fields for existing marks
+            ['paper1', 'paper2', 'paper3'].forEach(p => {
+              if (paper[p] && !paper[`${p}Date`]) {
+                paper[`${p}Date`] = "Previously added before 31/07/25"; // Or use a default date
+              }
+            });
+            store.put(paper);
+          });
+        };
+      }
+    };
+  });
+}
+
+  async function getPapersBySubject(subject) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, 'readonly');
+      const store = tx.objectStore(storeName);
+      const index = store.index('subject');
+      const request = index.getAll(subject);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function addPaper(paper) {
+    const db = await openDB();
+    const tx = db.transaction(storeName, 'readwrite');
+    const store = tx.objectStore(storeName);
+    await store.add(paper);
+    return tx.complete;
+  }
+
+function updateMarkDates(originalPaper, updatedPaper) {
+  const dates = {};
+  ['paper1', 'paper2', 'paper3'].forEach(paper => {
+    // Always update date if mark exists and is different from original
+    if (updatedPaper[paper] && updatedPaper[paper] !== originalPaper[paper]) {
+      dates[`${paper}Date`] = new Date().toLocaleDateString('en-GB');
+    }
+  });
+  return { ...updatedPaper, ...dates };
+}
+async function updatePaper(paperId, updatedData) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readwrite');
+    const store = tx.objectStore(storeName);
+    
+    // First get the current paper to compare
+    const getRequest = store.get(paperId);
+    
+    getRequest.onsuccess = () => {
+      const currentPaper = getRequest.result;
+      const paperWithDates = {...currentPaper, ...updatedData};
+      
+      // Update dates for any changed marks
+      ['paper1', 'paper2', 'paper3'].forEach(p => {
+        if (updatedData[p] !== undefined && updatedData[p] !== currentPaper[p]) {
+          paperWithDates[`${p}Date`] = new Date().toLocaleDateString('en-GB');
+        }
+      });
+      console.log('Updating paper:', {
+  id: paperId,
+  current: currentPaper,
+  updates: updatedData,
+  final: paperWithDates
+});
+      store.put(paperWithDates);
+      resolve();
+    };
+    
+    getRequest.onerror = () => reject(getRequest.error);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+  const tabsContainer = document.getElementById('subjectTabs');
+  const tableBody = document.querySelector('#papersTable tbody');
+  const addForm = document.getElementById('addPaperForm');
+  const messageEl = document.getElementById('message');
+
+  function renderTabs() {
+    tabsContainer.innerHTML = '';
+    subjects.forEach(subj => {
+      const tab = document.createElement('div');
+      tab.className = 'tab' + (subj === currentSubject ? ' active' : '');
+      tab.textContent = subj;
+      tab.onclick = () => {
+        currentSubject = subj;
+        updatePaper3Visibility();
+        renderTabs();
+        loadAndRenderTable();
+        clearMessage();
+      };
+      tabsContainer.appendChild(tab);
+    });
+  }
+
+  function clearMessage() {
+    messageEl.textContent = '';
+  }
+
+function createCell(paper, key) {
+  const td = document.createElement('td');
+  td.classList.add('editable');
+  td.textContent = paper[key] !== undefined ? paper[key] : '';
+  td.dataset.key = key;
+  
+  // Show date for mark cells if available
+  if (['paper1', 'paper2', 'paper3'].includes(key) && paper[`${key}Date`]) {
+    td.title = `Marked on: ${paper[`${key}Date`]}`;
+  }
+  
+  return td;
+}
+
+  function createEditButton() {
+    const svgNS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(svgNS, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.classList.add('edit-icon');
+    svg.innerHTML = `<path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1.003 1.003 0 000-1.42l-2.34-2.34a1.003 1.003 0 00-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z"/>`;
+    return svg;
+  }
+
+function toggleEdit(row, paper) {
+  const editing = row.classList.toggle('editing');
+  if (editing) {
+    // Edit mode - no changes needed here
+    for (const td of row.querySelectorAll('td.editable')) {
+      const key = td.dataset.key;
+      const input = document.createElement('input');
+      input.type = (key === 'gradeBoundary' || key === 'sequence') ? 'number' : 'text';
+      input.value = key === 'notes' ? (paper.notes || '') : td.textContent.trim();
+      input.min = key === 'sequence' ? '1' : '0';
+      input.step = 'any';
+      td.textContent = '';
+      td.appendChild(input);
+    }
+  } else {
+    // Save mode
+    const updatedData = {};
+    
+    const cells = row.querySelectorAll('td.editable');
+    cells.forEach(td => {
+      const key = td.dataset.key;
+      const input = td.querySelector('input');
+      if (!input) return;
+      
+      let val = input.value.trim();
+      if (key === 'sequence' || key === 'gradeBoundary') {
+        val = val === '' ? null : parseFloat(val);
+      }
+      updatedData[key] = val;
+
+      if (key === 'notes') {
+        const icon = document.createElement('span');
+        icon.textContent = 'ℹ️';
+        icon.title = val || '';
+        icon.style.cursor = 'help';
+        td.textContent = '';
+        td.appendChild(icon);
+      } else {
+        td.textContent = val !== null && val !== undefined ? val : '';
+      }
+    });
+    
+    // Update with fresh comparison
+    updatePaper(paper.id, updatedData).then(() => {
+      loadAndRenderTable();
+    }).catch(err => {
+      console.error('Update failed:', err);
+    });
+  }
+}
+
+  async function loadAndRenderTable() {
+    const papers = await getPapersBySubject(currentSubject);
+    papers.sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
+    tableBody.innerHTML = '';
+
+    papers.forEach(paper => {
+      const tr = document.createElement('tr');
+
+      // Order
+      tr.appendChild(createCell(paper, 'sequence'));
+      // Year
+      tr.appendChild(createCell(paper, 'year'));
+      // Paper 1
+      tr.appendChild(createCell(paper, 'paper1'));
+      // Paper 2
+      tr.appendChild(createCell(paper, 'paper2'));
+      // Paper 3 (only for Maths and Geo)
+      const paper3Td = createCell(paper, 'paper3');
+      if (currentSubject === 'Maths' || currentSubject === 'Geography') {
+        paper3Td.style.display = '';
+      } else {
+        paper3Td.style.display = 'none';
+      }
+      tr.appendChild(paper3Td);
+
+      tr.appendChild(createCell(paper, 'total'));
+
+      // Grade Boundary
+      tr.appendChild(createCell(paper, 'gradeBoundary'));
+
+      tr.appendChild(createCell(paper, 'averagePercent', 'text'));
+
+      const notesTd = document.createElement('td');
+      notesTd.classList.add('editable');
+      const noteIcon = document.createElement('span');
+      noteIcon.textContent = 'ℹ️';
+      noteIcon.title = paper.notes || ''; // Only show notes here
+      noteIcon.style.cursor = 'help';
+      notesTd.appendChild(noteIcon);
+      notesTd.dataset.key = 'notes';
+      tr.appendChild(notesTd);
+
+      // Edit button
+      const editTd = document.createElement('td');
+      const editBtn = createEditButton();
+      editBtn.addEventListener('click', () => toggleEdit(tr, paper));
+      editTd.appendChild(editBtn);
+      tr.appendChild(editTd);
+
+      tableBody.appendChild(tr);
+    });
+  }
+
+addForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  clearMessage();
+
+  const sequence = parseInt(document.getElementById('paperSequence').value.trim());
+  const year = document.getElementById('paperYear').value.trim();
+  const paper1 = document.getElementById('paper1').value.trim();
+  const paper2 = document.getElementById('paper2').value.trim();
+  const paper3Input = document.getElementById('paper3');
+  const paper3 = (currentSubject === 'Maths' || currentSubject === 'Geography') ? paper3Input.value.trim() : undefined;
+  const total = document.getElementById('totalScore').value.trim();
+  const gradeBoundary = parseFloat(document.getElementById('gradeBoundary').value.trim());
+  const notes = document.getElementById('paperNotes').value.trim();
+  const averagePercent = document.getElementById('averagePercent').value.trim();
+
+  if (!sequence || !year) {
+    messageEl.textContent = 'Order and Year are required.';
+    return;
+  }
+
+  const newPaper = {
+    subject: currentSubject,
+    sequence,
+    year,
+    paper1,
+    paper2,
+    total,
+    gradeBoundary: isNaN(gradeBoundary) ? null : gradeBoundary,
+    notes,
+    averagePercent: averagePercent || null
+  };
+
+  // Add dates for any marks being entered
+  if (paper1) newPaper.paper1Date = new Date().toLocaleDateString('en-GB');
+  if (paper2) newPaper.paper2Date = new Date().toLocaleDateString('en-GB');
+  if (paper3) newPaper.paper3Date = new Date().toLocaleDateString('en-GB');
+
+  if (paper3 !== undefined) newPaper.paper3 = paper3;
+
+  await addPaper(newPaper);
+  messageEl.textContent = 'Paper added successfully.';
+  addForm.reset();
+  updatePaper3Visibility();
+  loadAndRenderTable();
+});
+
+  // Import/Export JSON handlers
+  async function exportAllData() {
+    const db = await openDB();
+    const tx = db.transaction(storeName, 'readonly');
+    const store = tx.objectStore(storeName);
+    const request = store.getAll();
+
+    request.onsuccess = () => {
+      const dataStr = JSON.stringify(request.result, null, 2);
+      const blob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'past_papers_data.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    };
+
+    request.onerror = () => {
+      console.error('Export failed:', request.error);
+    };
+  }
+
+  document.getElementById('exportBtn').addEventListener('click', exportAllData);
+
+  document.getElementById('importBtn').onclick = () => {
+    document.getElementById('importFile').click();
+  };
+
+document.getElementById('importFile').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const text = await file.text();
+  try {
+    const data = JSON.parse(text);
+    if (!Array.isArray(data)) throw new Error('Invalid JSON format');
+
+    const db = await openDB();
+    const tx = db.transaction(storeName, 'readwrite');
+    const store = tx.objectStore(storeName);
+    
+    for (const entry of data) {
+      // Remove old dateAdded field if present
+      if (entry.dateAdded) delete entry.dateAdded;
+      
+      // Ensure date fields exist for any marks
+      ['paper1', 'paper2', 'paper3'].forEach(p => {
+        if (entry[p] && !entry[`${p}Date`]) {
+          entry[`${p}Date`] = new Date().toLocaleDateString('en-GB');
+        }
+      });
+      
+      await store.put(entry);
+    }
+    
+    await tx.complete;
+    messageEl.textContent = 'Import successful.';
+    loadAndRenderTable();
+  } catch (err) {
+    messageEl.textContent = 'Failed to import JSON: ' + err.message;
+  }
+});
+
+  renderTabs();
+  updatePaper3Visibility();
+  loadAndRenderTable();
+</script>
+</body>
+</html>
