@@ -1,4 +1,5 @@
 const BACKEND = "https://neuronet-backend.onrender.com";
+const DEV_MODE = false;
 
 // ========== CANVAS BACKGROUND ==========
 const canvas = document.getElementById("neuronet");
@@ -217,7 +218,7 @@ canvas.addEventListener("mouseleave", () => {
   delete mouse.y;
 });
 
-// ========== AUTH & API (INTEGRATED WITH BACKEND) ==========
+// ========== AUTH & API ==========
 async function fetchUser() {
   try {
     const res = await fetch(`${BACKEND}/auth/user`, {
@@ -231,25 +232,101 @@ async function fetchUser() {
 
     const pfp = document.getElementById("userPfp");
     pfp.src = user.picture || "https://via.placeholder.com/40";
+    
+    const userName = document.getElementById("userName");
+    if (userName) {
+      userName.textContent = user.name || user.email || "User";
+    }
 
     window.currentUser = user;
     return user;
   } catch {
-    window.location.href = `${BACKEND}/auth/google`;
+  if (DEV_MODE) {
+    console.log("DEV MODE: skipping auth");
+
+    const fakeUser = {
+      name: "Dev User",
+      email: "dev@local",
+      picture: "https://via.placeholder.com/40"
+    };
+
+    document.getElementById("userPfp").src = fakeUser.picture;
+    document.getElementById("userName").textContent = fakeUser.name;
+
+    window.currentUser = fakeUser;
+    return fakeUser;
   }
+
+  window.location.href = `${BACKEND}/auth/google`;
+}
 }
 
-async function loadQuotes() {
-  const res = await fetch(`${BACKEND}/api/quotes`, {
-    credentials: "include",
+async function loadNodes() {
+  const res = await fetch(`${BACKEND}/api/nodes`, {
+    credentials: "include"
   });
 
   if (!res.ok) return;
 
-  const quotes = await res.json();
-  document.getElementById("quotesList").innerHTML = quotes
-    .map((q) => `<li>${q.text}</li>`)
-    .join("");
+  const nodes = await res.json();
+  console.log("Nodes:", nodes);
+}
+
+async function getNodes() {
+  const res = await fetch(`${BACKEND}/api/nodes`, {
+    credentials: "include"
+  });
+  return await res.json();
+}
+
+async function createNode(node) {
+  await fetch(`${BACKEND}/api/nodes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(node)
+  });
+}
+
+// ========== TOOL SWITCHING SYSTEM ==========
+const toolContainer = document.getElementById("toolContainer");
+const toolButtons = document.querySelectorAll(".tool-btn");
+
+function setActiveTool(activeBtn) {
+  toolButtons.forEach(btn => btn.classList.remove("active"));
+  activeBtn.classList.add("active");
+}
+
+async function loadTool(tool) {
+  const res = await fetch(`./tools/${tool}.html`);
+  const html = await res.text();
+  toolContainer.innerHTML = html;
+
+  if (tool === "analysis") initAnalysisTool();
+  //if (tool === "memory") initMemoryTool();
+  //if (tool === "mindmap") initMindmapTool();
+  //if (tool === "tracker") initTrackerTool();
+}
+
+function initAnalysisTool() {
+  document.getElementById("save").onclick = async () => {
+
+    const quote = document.getElementById("quote").value;
+    const analysis = document.getElementById("analysis").value;
+
+    const res = await fetch(`${BACKEND}/api/nodes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        type: "analysis",
+        quote,
+        analysis
+      })
+    });
+
+    console.log("saved:", await res.json());
+  };
 }
 
 // ========== EVENT LISTENERS ==========
@@ -259,44 +336,64 @@ document.addEventListener("DOMContentLoaded", () => {
   const pfpElem = document.getElementById("userPfp");
   const dropdown = document.getElementById("dropdown");
 
-  pfpElem.addEventListener("click", () => {
-    dropdown.style.display =
-      dropdown.style.display === "block" ? "none" : "block";
-  });
-
-  document.getElementById("logoutBtn").addEventListener("click", async () => {
-    const res = await fetch(`${BACKEND}/auth/logout`, {
-      credentials: "include",
+  if (pfpElem) {
+    pfpElem.addEventListener("click", (e) => {
+      e.stopPropagation();
+      dropdown.style.display =
+        dropdown.style.display === "block" ? "none" : "block";
     });
+  }
 
-    if (res.ok) {
-      window.location.href = `${BACKEND}/auth/google`;
-    }
-  });
 
-  document.getElementById("themeToggle").addEventListener("click", () => {
-    // Theme toggle logic if needed
-    console.log("Theme toggle clicked");
-  });
+document.addEventListener("click", async (e) => {
+  // Close dropdown when clicking elsewhere
+  if (dropdown) dropdown.style.display = "none";
 
-  document.getElementById("saveQuoteBtn").addEventListener("click", async () => {
-    const text = document.getElementById("quoteInput").value.trim();
-    if (!text) return;
-
-    await fetch(`${BACKEND}/api/quotes`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ text }),
+  if (e.target.id === "saveNodeBtn") {
+    await createNode({
+      type: "analysis",
+      subject: "Macbeth",
+      section: "Act 1",
+      link: {
+        quote: document.getElementById("quote").value,
+        analysis: document.getElementById("analysis").value
+      }
     });
+  }
+});
 
-    document.getElementById("quoteInput").value = "";
-    loadQuotes();
+  const logoutBtn = document.getElementById("logoutBtn");
+  if (logoutBtn) {
+    logoutBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const res = await fetch(`${BACKEND}/auth/logout`, {
+        credentials: "include",
+      });
+
+      if (res.ok) {
+        window.location.href = `${BACKEND}/auth/google`;
+      }
+    });
+  }
+
+  // Tool switching
+  toolButtons.forEach(btn => {
+    btn.addEventListener("click", () => {
+      const tool = btn.dataset.tool;
+      setActiveTool(btn);
+      loadTool(tool);
+    });
   });
 
-  // Initialize auth and quotes
+
+  // Initialize auth
   (async () => {
     await fetchUser();
-    loadQuotes();
+
+    if (!DEV_MODE) {
+      loadNodes();
+    } else {
+      console.log("DEV MODE: skipping backend");
+    }
   })();
 });
