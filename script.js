@@ -1,5 +1,39 @@
+import { initDB, addNode, getAllNodes } from "./db.js";
+import { syncLocalWithCloud, syncToCloud } from "./sync.js";
+
 const BACKEND = "https://neuronet-backend.onrender.com";
 const DEV_MODE = false;
+let DB_READY = false;
+const OFFLINE_MODE = false;
+const DEFAULT_PROFILE = {
+  name: "Offline Mode",
+  email: "local@device",
+  picture: "https://via.placeholder.com/40"
+};
+
+let syncInProgress = false;
+
+const tools = {
+  analysis: {
+    file: "analysis.html",
+    init: initAnalysisTool
+  },
+
+  memory: {
+    file: "memory.html",
+    init: null
+  },
+
+  mindmap: {
+    file: "mindmap.html",
+    init: null
+  },
+
+  tracker: {
+    file: "tracker.html",
+    init: null
+  }
+};
 
 // ========== CANVAS BACKGROUND ==========
 const canvas = document.getElementById("neuronet");
@@ -219,6 +253,25 @@ canvas.addEventListener("mouseleave", () => {
 });
 
 // ========== AUTH & API ==========
+function setProfileUI(user) {
+  const pfp = document.getElementById("userPfp");
+  const userName = document.getElementById("userName");
+  const authActionBtn = document.getElementById("authActionBtn");
+  const logoutBtn = document.getElementById("logoutBtn");
+
+  const activeUser = user || DEFAULT_PROFILE;
+
+  if (pfp) pfp.src = activeUser.picture || DEFAULT_PROFILE.picture;
+  if (userName) {
+    userName.textContent = user
+      ? user.name || user.email || "User"
+      : DEFAULT_PROFILE.name;
+  }
+
+  if (authActionBtn) authActionBtn.style.display = user ? "none" : "block";
+  if (logoutBtn) logoutBtn.style.display = user ? "block" : "none";
+}
+
 async function fetchUser() {
   try {
     const res = await fetch(`${BACKEND}/auth/user`, {
@@ -230,62 +283,49 @@ async function fetchUser() {
     const user = await res.json();
     console.log("Fetched user:", user);
 
-    const pfp = document.getElementById("userPfp");
-    pfp.src = user.picture || "https://via.placeholder.com/40";
-    
-    const userName = document.getElementById("userName");
-    if (userName) {
-      userName.textContent = user.name || user.email || "User";
-    }
-
     window.currentUser = user;
+    setProfileUI(user);
     return user;
-  } catch {
-  if (DEV_MODE) {
-    console.log("DEV MODE: skipping auth");
-
-    const fakeUser = {
-      name: "Dev User",
-      email: "dev@local",
-      picture: "https://via.placeholder.com/40"
-    };
-
-    document.getElementById("userPfp").src = fakeUser.picture;
-    document.getElementById("userName").textContent = fakeUser.name;
-
-    window.currentUser = fakeUser;
-    return fakeUser;
+  } catch (error) {
+    console.log("Running in offline mode until user logs in", error);
+    window.currentUser = null;
+    setProfileUI(null);
+    return null;
   }
+}
 
+async function backupLocalNodesToCloud() {
+  if (!window.currentUser || syncInProgress) return;
+
+  syncInProgress = true;
+
+  try {
+    const localNodes = await getAllNodes();
+    await syncToCloud(localNodes);
+  } catch (error) {
+    console.log("Background cloud backup skipped", error);
+  } finally {
+    syncInProgress = false;
+  }
+}
+
+async function syncAfterLogin() {
+  if (!window.currentUser || syncInProgress) return;
+
+  syncInProgress = true;
+
+  try {
+    await syncLocalWithCloud();
+    console.log("Local IndexedDB and cloud backup are in sync");
+  } catch (error) {
+    console.log("Cloud merge failed, continuing with local IndexedDB only", error);
+  } finally {
+    syncInProgress = false;
+  }
+}
+
+function startGoogleLogin() {
   window.location.href = `${BACKEND}/auth/google`;
-}
-}
-
-async function loadNodes() {
-  const res = await fetch(`${BACKEND}/api/nodes`, {
-    credentials: "include"
-  });
-
-  if (!res.ok) return;
-
-  const nodes = await res.json();
-  console.log("Nodes:", nodes);
-}
-
-async function getNodes() {
-  const res = await fetch(`${BACKEND}/api/nodes`, {
-    credentials: "include"
-  });
-  return await res.json();
-}
-
-async function createNode(node) {
-  await fetch(`${BACKEND}/api/nodes`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify(node)
-  });
 }
 
 // ========== TOOL SWITCHING SYSTEM ==========
@@ -297,103 +337,141 @@ function setActiveTool(activeBtn) {
   activeBtn.classList.add("active");
 }
 
-async function loadTool(tool) {
-  const res = await fetch(`./tools/${tool}.html`);
-  const html = await res.text();
-  toolContainer.innerHTML = html;
+async function loadTool(toolName) {
+  const tool = tools[toolName];
+  const res = await fetch(`./tools/${tool.file}`);
+  toolContainer.innerHTML = await res.text();
 
-  if (tool === "analysis") initAnalysisTool();
-  //if (tool === "memory") initMemoryTool();
-  //if (tool === "mindmap") initMindmapTool();
-  //if (tool === "tracker") initTrackerTool();
+  if (tool.init) setTimeout(tool.init, 0);
 }
 
-function initAnalysisTool() {
-  document.getElementById("save").onclick = async () => {
+async function initAnalysisTool() {
+  const list = document.getElementById("list");
+  const saveBtn = document.getElementById("save");
+  const quoteInput = document.getElementById("quote");
+  const analysisInput = document.getElementById("analysis");
 
-    const quote = document.getElementById("quote").value;
-    const analysis = document.getElementById("analysis").value;
-
-    const res = await fetch(`${BACKEND}/api/nodes`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({
-        type: "analysis",
-        quote,
-        analysis
-      })
+  async function render() {
+    const nodes = (await getAllNodes()).filter((n) => {
+      if (n.type === "analysis") return true;
+      return typeof n.quote === "string" || typeof n.analysis === "string";
     });
 
-    console.log("saved:", await res.json());
+    if (!nodes.length) {
+      list.innerHTML = `<p style="opacity:0.75;">No analysis nodes saved yet.</p>`;
+      return;
+    }
+
+    list.innerHTML = nodes
+      .slice()
+      .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))
+      .map(n => `
+        <div style="padding:10px;margin:10px 0;border:1px solid #2cffb3;border-radius:8px;">
+          <b>Quote:</b> ${n.quote || ""}
+          <br/>
+          <b>Analysis:</b> ${n.analysis || ""}
+        </div>
+      `)
+      .join("");
+  }
+
+  await render();
+
+  saveBtn.onclick = async () => {
+    const quote = quoteInput.value.trim();
+    const analysis = analysisInput.value.trim();
+
+    if (!quote && !analysis) {
+      return;
+    }
+
+    const timestamp = Date.now();
+
+    await addNode({
+      id: crypto.randomUUID(),
+      type: "analysis",
+      quote,
+      analysis,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+
+    quoteInput.value = "";
+    analysisInput.value = "";
+
+    await render();
+    await backupLocalNodesToCloud();
   };
 }
 
 // ========== EVENT LISTENERS ==========
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   initCanvas();
+  setProfileUI(null);
 
-  const pfpElem = document.getElementById("userPfp");
+  await initDB();
+  DB_READY = true;
+  console.log("IndexedDB ready", { DB_READY, OFFLINE_MODE, DEV_MODE });
+
+  const user = await fetchUser();
+  if (user) {
+    await syncAfterLogin();
+  }
+
+  const profileElem = document.getElementById("sidebarProfile");
   const dropdown = document.getElementById("dropdown");
+  const authActionBtn = document.getElementById("authActionBtn");
+  const logoutBtn = document.getElementById("logoutBtn");
 
-  if (pfpElem) {
-    pfpElem.addEventListener("click", (e) => {
+  if (profileElem) {
+    profileElem.addEventListener("click", (e) => {
       e.stopPropagation();
       dropdown.style.display =
         dropdown.style.display === "block" ? "none" : "block";
     });
   }
 
+  document.addEventListener("click", () => {
+    if (dropdown) dropdown.style.display = "none";
+  });
 
-document.addEventListener("click", async (e) => {
-  // Close dropdown when clicking elsewhere
-  if (dropdown) dropdown.style.display = "none";
-
-  if (e.target.id === "saveNodeBtn") {
-    await createNode({
-      type: "analysis",
-      subject: "Macbeth",
-      section: "Act 1",
-      link: {
-        quote: document.getElementById("quote").value,
-        analysis: document.getElementById("analysis").value
-      }
-    });
-  }
-});
-
-  const logoutBtn = document.getElementById("logoutBtn");
-  if (logoutBtn) {
-    logoutBtn.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      const res = await fetch(`${BACKEND}/auth/logout`, {
-        credentials: "include",
-      });
-
-      if (res.ok) {
-        window.location.href = `${BACKEND}/auth/google`;
-      }
-    });
-  }
-
-  // Tool switching
   toolButtons.forEach(btn => {
     btn.addEventListener("click", () => {
-      const tool = btn.dataset.tool;
       setActiveTool(btn);
-      loadTool(tool);
+      loadTool(btn.dataset.tool);
     });
   });
 
+  const defaultToolButton =
+    document.querySelector(".tool-btn.active") || toolButtons[0];
 
-  // Initialize auth
-  (async () => {
-    await fetchUser();
+  if (defaultToolButton) {
+    setActiveTool(defaultToolButton);
+    await loadTool(defaultToolButton.dataset.tool);
+  }
 
-    if (!DEV_MODE) {
-      loadNodes();
-    } else {
-      console.log("DEV MODE: skipping backend");
-    }
-  })();
+  if (authActionBtn) {
+    authActionBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      startGoogleLogin();
+    });
+  }
+
+  if (logoutBtn) {
+    logoutBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+
+      try {
+        await fetch(`${BACKEND}/auth/logout`, {
+          credentials: "include",
+        });
+      } catch (error) {
+        console.log("Logout request failed, staying offline locally", error);
+      }
+
+      window.currentUser = null;
+      setProfileUI(null);
+      if (dropdown) dropdown.style.display = "none";
+    });
+  }
 });
