@@ -139,7 +139,19 @@ canvas { position: fixed; inset:0; z-index:-1; }
   text-align: left;
 }
 
-#logoutBtn:hover {
+#authActionBtn {
+  padding: 10px 16px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--text-main);
+  cursor: pointer;
+  font-weight: 500;
+  text-align: left;
+}
+
+#logoutBtn:hover,
+#authActionBtn:hover {
   background: rgba(255,107,107,0.1);
 }
 
@@ -167,19 +179,17 @@ canvas { position: fixed; inset:0; z-index:-1; }
       <span id="userName">Loading...</span>
     </div>
     <div id="dropdown" style="display: none;">
+      <button id="authActionBtn">Log In with Google</button>
       <button id="logoutBtn">Logout</button>
     </div>
   </aside>
 
   <main id="mainContent">
     <div id="toolContainer">
-      <h2 style="color: var(--accent); margin-bottom: 24px;">Analysis Tool</h2>
-      <p style="color: var(--text-muted);">Select a tool from the sidebar to begin.</p>
     </div>
   </main>
 </div>
 
-
-<script src="script.js" defer></script>
+<script type="module" src="script.js"></script>
 </body>
 </html>
