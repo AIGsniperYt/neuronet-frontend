@@ -1,9 +1,14 @@
 export async function initAnalysisToolV2(deps) {
   const {
     getAllNodes,
+    getAllQuotes,
     addNode,
+    addQuote,
+    getQuote,
+    deleteQuote,
     backupLocalNodesToCloud,
     removeNodeEverywhere,
+    removeQuoteEverywhere,
     normalizeHierarchyPath,
     buildSection,
     parseTags,
@@ -87,6 +92,51 @@ const allowedTags = new Set(["P","DIV","BR","STRONG","B","EM","I","U","UL","OL",
     focusedRangeKey: null,
     selectedQuoteRef: null // NEW: for quote picker in analysis form
   };
+
+  function clampPriority(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return 3;
+    return Math.min(5, Math.max(1, Math.round(num)));
+  }
+
+  function getPriorityColor(priority) {
+    switch (clampPriority(priority)) {
+      case 1: return "#9aa4ad";
+      case 2: return "#4ba3ff";
+      case 3: return "#3fd07d";
+      case 4: return "#ff9b39";
+      case 5: return "#ff4d4d";
+      default: return "#3fd07d";
+    }
+  }
+
+  function cloneQuoteRef(ref = {}) {
+    return {
+      quoteId: ref.quoteId || crypto.randomUUID(),
+      section: ref.section || "",
+      quote: ref.quote || "",
+      sourceId: ref.sourceId,
+      start: Number.isFinite(Number(ref.start)) ? Number(ref.start) : undefined,
+      end: Number.isFinite(Number(ref.end)) ? Number(ref.end) : undefined,
+      priority: clampPriority(ref.priority)
+    };
+  }
+
+  function buildQuoteRefFromQuoteNode(quoteNode) {
+    return {
+      quoteId: quoteNode.id,
+      section: quoteNode.section || "",
+      quote: quoteNode.quote || "",
+      sourceId: quoteNode.link?.sourceId,
+      start: Number.isFinite(Number(quoteNode.link?.start)) ? Number(quoteNode.link.start) : undefined,
+      end: Number.isFinite(Number(quoteNode.link?.end)) ? Number(quoteNode.link.end) : undefined,
+      priority: clampPriority(quoteNode.priority)
+    };
+  }
+
+  function getSelectedQuoteRefs() {
+    return Array.isArray(state.selectedQuoteRef) ? state.selectedQuoteRef : [];
+  }
 
 function htmlToPlainText(html) {
   const div = document.createElement("div");
@@ -651,6 +701,13 @@ function htmlToPlainText(html) {
     return state.subjectNodes.find((node) => (node.subject || node.title) === name) || null;
   }
 
+  function subjectExists(name) {
+    const target = String(name || "").trim();
+    if (!target) return false;
+    if (getSubjectNodeByName(target)) return true;
+    return state.sources.some((source) => source.subject === target);
+  }
+
   function getSourcesForSelectedSubject() {
     return state.sources.filter((source) => source.subject === state.selectedSubject);
   }
@@ -698,11 +755,23 @@ function htmlToPlainText(html) {
         const q = ref.quote || "";
         const truncated = `${escapeHtml(q.substring(0, previewLen))}${q.length > previewLen ? "..." : ""}`;
         const origin = quoteRefOriginLineHtml(ref);
+        const priority = clampPriority(ref.priority);
+        const stars = [1, 2, 3, 4, 5]
+          .map((value) => {
+            const active = value <= priority;
+            const color = active ? getPriorityColor(value) : "rgba(230,255,245,0.2)";
+            return `<button type="button" class="icon-btn" title="Set priority ${value}" aria-label="Set priority ${value}" onclick="setQuotePriorityForAnalysis(${idx}, ${value})" style="margin: 0; color: ${color};">${active ? "★" : "☆"}</button>`;
+          })
+          .join("");
         return `
             <div class="quote-ref-form-row" style="background: rgba(44, 255, 179, 0.08); padding: 8px; border-radius: 6px; font-size: 0.85rem;">
               <div style="display: flex; justify-content: space-between; align-items: start; gap: 8px;">
                 <span style="flex: 1; line-height: 1.3; font-style: italic;">"${truncated}"</span>
                 <button type="button" data-idx="${idx}" class="btn" style="padding: 4px 8px; font-size: 0.75rem;" onclick="removeQuoteRefFromAnalysis(${idx})">Remove</button>
+              </div>
+              <div style="display: flex; align-items: center; gap: 4px; margin-top: 8px;">
+                <span style="font-size: 0.75rem; color: rgba(230,255,245,0.7);">Priority</span>
+                <div style="display: flex; align-items: center; gap: 2px;">${stars}</div>
               </div>
               ${origin}
             </div>
@@ -808,15 +877,7 @@ function htmlToPlainText(html) {
   }
 
   function countQuoteRefsAcrossAnalyses() {
-    let total = 0;
-    for (const a of state.analysisNodes) {
-      if (Array.isArray(a.quoteRefs) && a.quoteRefs.length) {
-        total += a.quoteRefs.length;
-      } else if (a.quote) {
-        total += 1;
-      }
-    }
-    return total;
+    return state.quotes.length;
   }
 
   function getSelectionFromReader() {
@@ -941,6 +1002,7 @@ function htmlToPlainText(html) {
       section: source.section,
       title: source.title,
       quote: quoteText,
+      priority: 3,
       link: {
         sourceId: sourceId,
         start: start,
@@ -956,7 +1018,7 @@ function htmlToPlainText(html) {
       updatedAt: now
     };
 
-    await addNode(quoteNode);
+    await addQuote(quoteNode);
     return quoteNode;
   }
 
@@ -979,7 +1041,7 @@ function htmlToPlainText(html) {
     if (!quoteNode.meta.analysisNodeIds.includes(analysisId)) {
       quoteNode.meta.analysisNodeIds.push(analysisId);
       quoteNode.updatedAt = Date.now();
-      await addNode(quoteNode);
+      await addQuote(quoteNode);
     }
 
     // 2. Add quoteRef to analysis's quoteRefs array
@@ -1003,22 +1065,117 @@ function htmlToPlainText(html) {
     const quoteNode = state.quotes.find(q => q.id === quoteId);
     if (!quoteNode) return;
 
-    const analysisNode = state.analysisNodes.find(n => n.id === analysisId);
-    if (!analysisNode) return;
-
     // 1. Remove analysisId from quote
     if (quoteNode.meta?.analysisNodeIds) {
       quoteNode.meta.analysisNodeIds = quoteNode.meta.analysisNodeIds.filter(id => id !== analysisId);
       quoteNode.updatedAt = Date.now();
-      await addNode(quoteNode);
+      await addQuote(quoteNode);
+    }
+  }
+
+  async function ensureQuoteRecord(ref) {
+    const priority = clampPriority(ref.priority);
+    const existingQuote = ref.quoteId ? (state.quotes.find((quote) => quote.id === ref.quoteId) || await getQuote(ref.quoteId)) : null;
+
+    if (existingQuote) {
+      const updatedQuote = {
+        ...existingQuote,
+        quote: ref.quote || existingQuote.quote,
+        section: ref.section || existingQuote.section,
+        priority,
+        link: {
+          ...(existingQuote.link || {}),
+          sourceId: ref.sourceId || existingQuote.link?.sourceId,
+          start: Number.isFinite(Number(ref.start)) ? Number(ref.start) : existingQuote.link?.start,
+          end: Number.isFinite(Number(ref.end)) ? Number(ref.end) : existingQuote.link?.end
+        },
+        updatedAt: Date.now()
+      };
+      await addQuote(updatedQuote);
+      return updatedQuote;
     }
 
-    // 2. Remove quoteRef from analysis
-    if (analysisNode.quoteRefs) {
-      analysisNode.quoteRefs = analysisNode.quoteRefs.filter(ref => ref.quoteId !== quoteId);
-      analysisNode.updatedAt = Date.now();
-      await addNode(analysisNode);
+    const createdQuote = await createQuoteNode(ref.quote || "", ref.sourceId, ref.start, ref.end);
+    const savedQuote = {
+      ...createdQuote,
+      priority,
+      updatedAt: Date.now()
+    };
+    await addQuote(savedQuote);
+    return savedQuote;
+  }
+
+  async function reconcileAnalysisQuoteLinks(analysisId, previousRefs, nextRefs) {
+    const previousIds = new Set((previousRefs || []).map((ref) => ref.quoteId).filter(Boolean));
+    const nextIds = new Set((nextRefs || []).map((ref) => ref.quoteId).filter(Boolean));
+
+    for (const quoteId of previousIds) {
+      if (nextIds.has(quoteId)) continue;
+      await unlinkAnalysisFromQuote(analysisId, quoteId);
+      const quoteNode = state.quotes.find((quote) => quote.id === quoteId) || await getQuote(quoteId);
+      const remainingAnalysisIds = (quoteNode?.meta?.analysisNodeIds || []).filter((id) => id !== analysisId);
+      if (!quoteNode) continue;
+      if (!remainingAnalysisIds.length) {
+        await removeQuoteEverywhere(quoteId);
+      }
     }
+
+    for (const ref of nextRefs || []) {
+      if (!ref.quoteId) continue;
+      await linkAnalysisToQuote(analysisId, ref.quoteId);
+    }
+  }
+
+  async function saveAnalysisNodeWithIntegrity({ analysisId, analysis, tags }) {
+    const existing = state.analysisNodes.find((node) => node.id === analysisId) || null;
+    const now = Date.now();
+    const draftRefs = getSelectedQuoteRefs().map(cloneQuoteRef);
+    const savedQuoteRefs = [];
+
+    for (const ref of draftRefs) {
+      const quoteNode = await ensureQuoteRecord(ref);
+      savedQuoteRefs.push(buildQuoteRefFromQuoteNode(quoteNode));
+    }
+
+    const analysisNode = {
+      id: analysisId,
+      type: "analysis",
+      subject: state.selectedSubject,
+      section: null,
+      title: "",
+      content: "",
+      analysis,
+      quoteRefs: savedQuoteRefs,
+      meta: {
+        ...(existing?.meta || {}),
+        globalScope: true,
+        tags,
+        confidence: existing?.meta?.confidence ?? 0.7,
+        nextReview: existing?.meta?.nextReview ?? null
+      },
+      createdAt: existing?.createdAt || now,
+      updatedAt: now
+    };
+
+    await addNode(analysisNode);
+    await refreshData();
+    await reconcileAnalysisQuoteLinks(analysisId, existing?.quoteRefs || [], savedQuoteRefs);
+    await refreshData();
+  }
+
+  async function deleteAnalysisNodeWithIntegrity(node) {
+    for (const ref of node?.quoteRefs || []) {
+      if (!ref.quoteId) continue;
+      await unlinkAnalysisFromQuote(node.id, ref.quoteId);
+      const quoteNode = state.quotes.find((quote) => quote.id === ref.quoteId) || await getQuote(ref.quoteId);
+      if (!quoteNode) continue;
+      const remainingAnalysisIds = quoteNode.meta?.analysisNodeIds || [];
+      if (!remainingAnalysisIds.length) {
+        await removeQuoteEverywhere(ref.quoteId);
+      }
+    }
+
+    await removeNodeEverywhere(node.id);
   }
 
   /**
@@ -1059,6 +1216,14 @@ function htmlToPlainText(html) {
         <article class="stat-card"><strong>${countQuoteRefsAcrossAnalyses()}</strong><span>Quotes</span></article>
       </div>
     `;
+  }
+
+  function updateSubjectCreateState() {
+    if (!newSubjectName || !addSubjectBtn) return;
+    const subject = (newSubjectName.value || "").trim();
+    const disabled = !subject || subjectExists(subject);
+    addSubjectBtn.disabled = disabled;
+    addSubjectBtn.setAttribute("aria-disabled", disabled ? "true" : "false");
   }
 
   function renderSubjects() {
@@ -1146,11 +1311,13 @@ function htmlToPlainText(html) {
                 const text = ref.quote || state.quotes.find((q) => q.id === ref.quoteId)?.quote || "";
                 if (!text) return "";
                 const origin = quoteRefOriginLineHtml(ref);
+                const priority = clampPriority(ref.priority);
+                const priorityStars = `<div style="display:flex; gap:2px; margin: 0 0 6px 0;">${[1,2,3,4,5].map((value) => `<span style="color:${value <= priority ? getPriorityColor(value) : "rgba(230,255,245,0.16)"};">${value <= priority ? "★" : "☆"}</span>`).join("")}</div>`;
                 const jump = resolveRefJumpForRef(ref);
                 if (jump) {
-                  return `<button type="button" class="analysis-quote-jump" data-analysis-id="${escapeHtml(node.id)}" data-jump-source="${escapeHtml(jump.sourceId)}" data-jump-start="${jump.start}" data-jump-end="${jump.end}" title="Show this quote in the source"><blockquote class="analysis-quote-preview">${formatQuoteForDisplay(text)}</blockquote>${origin}</button>`;
+                  return `<button type="button" class="analysis-quote-jump" data-analysis-id="${escapeHtml(node.id)}" data-jump-source="${escapeHtml(jump.sourceId)}" data-jump-start="${jump.start}" data-jump-end="${jump.end}" title="Show this quote in the source">${priorityStars}<blockquote class="analysis-quote-preview">${formatQuoteForDisplay(text)}</blockquote>${origin}</button>`;
                 }
-                return `<div class="analysis-quote-static"><blockquote class="analysis-quote-preview">${formatQuoteForDisplay(text)}</blockquote>${origin}</div>`;
+                return `<div class="analysis-quote-static">${priorityStars}<blockquote class="analysis-quote-preview">${formatQuoteForDisplay(text)}</blockquote>${origin}</div>`;
               })
               .filter(Boolean)
               .join("");
@@ -1217,12 +1384,14 @@ function htmlToPlainText(html) {
   }
 
   async function refreshData() {
-    state.nodes = await getAllNodes();
-    state.quotes = state.nodes.filter((node) => node?.type === "quote"); // NEW: load quotes
+    const [nodes, quotes] = await Promise.all([getAllNodes(), getAllQuotes()]);
+    state.nodes = nodes;
+    state.quotes = quotes;
     state.subjectNodes = state.nodes.filter((node) => node?.type === "subject" || node?.meta?.kind === "subject");
     state.sources = state.nodes.filter((node) => isSourceNode(node) && node?.type === "source");
     state.analysisNodes = state.nodes.filter((node) => node?.type === "analysis");
     renderState();
+    updateSubjectCreateState();
   }
 
   async function renameSubject(subjectName) {
@@ -1251,6 +1420,20 @@ function htmlToPlainText(html) {
       await addNode(copy);
     }
 
+    const relatedQuotes = state.quotes.filter((quote) => quote.subject === subjectName);
+    for (const quote of relatedQuotes) {
+      const path = Array.isArray(quote.meta?.hierarchyPath) ? quote.meta.hierarchyPath : [];
+      await addQuote({
+        ...quote,
+        subject: next,
+        meta: {
+          ...(quote.meta || {}),
+          hierarchyPath: path.length ? [next, ...path.slice(1)] : path
+        },
+        updatedAt: now
+      });
+    }
+
     if (state.selectedSubject === subjectName) {
       state.selectedSubject = next;
     }
@@ -1271,7 +1454,15 @@ function htmlToPlainText(html) {
     });
 
     for (const node of related) {
-      await removeNodeEverywhere(node.id);
+      if (node.type === "analysis") {
+        await deleteAnalysisNodeWithIntegrity(node);
+      } else {
+        await removeNodeEverywhere(node.id);
+      }
+    }
+
+    for (const quote of state.quotes.filter((item) => item.subject === subjectName)) {
+      await removeQuoteEverywhere(quote.id);
     }
 
     if (state.selectedSubject === subjectName) {
@@ -1291,7 +1482,7 @@ function htmlToPlainText(html) {
 
   addSubjectBtn.addEventListener("click", async () => {
     const subject = (newSubjectName.value || "").trim();
-    if (!subject || getSubjectNodeByName(subject)) return;
+    if (!subject || subjectExists(subject)) return;
 
     const now = Date.now();
     await addNode({
@@ -1306,9 +1497,14 @@ function htmlToPlainText(html) {
     });
 
     newSubjectName.value = "";
+    updateSubjectCreateState();
     await refreshData();
     await backupLocalNodesToCloud();
   });
+
+  if (newSubjectName) {
+    newSubjectName.addEventListener("input", updateSubjectCreateState);
+  }
 
   subjectList.addEventListener("click", async (event) => {
     const button = event.target.closest("button[data-action]");
@@ -1380,12 +1576,15 @@ function htmlToPlainText(html) {
       const source = getSourceById(state.selectedSourceId);
       if (!source) return;
 
-      const linked = state.analysisNodes.filter((node) => node?.link?.sourceId === source.id);
+      const linked = state.analysisNodes.filter((node) => analysisTouchesSource(node, source.id));
       const approved = window.confirm(`Delete "${source.title}" and ${linked.length} linked analysis node(s)?`);
       if (!approved) return;
 
       for (const node of linked) {
-        await removeNodeEverywhere(node.id);
+        await deleteAnalysisNodeWithIntegrity(node);
+      }
+      for (const quote of state.quotes.filter((item) => item.link?.sourceId === source.id)) {
+        await removeQuoteEverywhere(quote.id);
       }
       await removeNodeEverywhere(source.id);
 
@@ -1509,39 +1708,34 @@ function htmlToPlainText(html) {
   if (quoteSelectionBtn) {
     quoteSelectionBtn.addEventListener("click", () => {
       if (state.selectedRange?.quote) {
-        // Add the highlighted quote as a reference to the analysis form
         const quoteText = state.selectedRange.quote;
-        const quoteId = crypto.randomUUID(); // Create a temporary ID for this quote reference
-        
-        // Initialize selectedQuoteRef if needed
         if (!state.selectedQuoteRef) {
           state.selectedQuoteRef = [];
         }
-        
-        // Add the quote reference
+
         const quoteRef = {
-          quoteId: quoteId,
-          section: state.selectedSubject,
+          quoteId: crypto.randomUUID(),
+          section: getSourceById(state.selectedSourceId)?.section || "",
           quote: quoteText,
           sourceId: state.selectedSourceId,
           start: state.selectedRange.start,
-          end: state.selectedRange.end
+          end: state.selectedRange.end,
+          priority: 3
         };
-        
-        // Prevent duplicates
-        if (!state.selectedQuoteRef.some(ref => ref.quote === quoteText)) {
+
+        if (!state.selectedQuoteRef.some(ref =>
+          ref.quote === quoteText &&
+          ref.sourceId === quoteRef.sourceId &&
+          Number(ref.start) === Number(quoteRef.start) &&
+          Number(ref.end) === Number(quoteRef.end)
+        )) {
           state.selectedQuoteRef.push(quoteRef);
         }
-        
-        // Update the form display to show the quote reference
+
         if (quoteRefsList) {
           quoteRefsList.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
         }
-        
-        // Ensure we're in create mode (not edit mode) when using quote selection
-        state.analysisEditMode = false;
-        analysisNodeIdInput.value = "";
-        
+
         showAnalysisCard();
         analysisNotesInput.focus();
       }
@@ -1563,34 +1757,8 @@ function htmlToPlainText(html) {
       }
 
       const analysisId = analysisNodeIdInput?.value || crypto.randomUUID();
-      const existing = state.analysisNodes.find((node) => node.id === analysisId);
-      const now = Date.now();
-
-      // NEW: Analysis nodes are now independent - not tied to a source section
-      // They can reference multiple quotes from anywhere in the subject
-      // FIXED: Use state.selectedQuoteRef to save the selected quotes, not existing?.quoteRefs
-      const analysisNode = {
-        id: analysisId,
-        type: "analysis",
-        subject: state.selectedSubject, // Global subject scope
-        section: null, // NEW: No longer section-specific
-        title: "",
-        content: "",
-        analysis: analysis,
-        quoteRefs: state.selectedQuoteRef || [], // FIXED: Use selectedQuoteRef array
-        meta: {
-          globalScope: true, // NEW: marks this as independent
-          tags: tags,
-          confidence: existing?.meta?.confidence ?? 0.7,
-          nextReview: existing?.meta?.nextReview ?? null
-        },
-        createdAt: existing?.createdAt || now,
-        updatedAt: now
-      };
-
-      await addNode(analysisNode);
+      await saveAnalysisNodeWithIntegrity({ analysisId, analysis, tags });
       dismissAnalysisModal();
-      await refreshData();
       await backupLocalNodesToCloud();
     });
   }
@@ -1636,20 +1804,15 @@ function htmlToPlainText(html) {
 
   // NEW: Function to add a quote reference to the current analysis form
   window.addQuoteRefToAnalysis = async function(quoteText, quoteId) {
-    const analysisId = analysisNodeIdInput.value || crypto.randomUUID();
-    analysisNodeIdInput.value = analysisId;
-
     if (!state.selectedQuoteRef) {
       state.selectedQuoteRef = [];
     }
 
+    const quoteNode = state.quotes.find((quote) => quote.id === quoteId) || await getQuote(quoteId);
+    if (!quoteNode) return;
+
     // Add quote reference to state
-    const quoteRef = {
-      quoteId: quoteId,
-      section: "",
-      quote: quoteText,
-      sourceId: state.selectedSourceId || undefined
-    };
+    const quoteRef = buildQuoteRefFromQuoteNode(quoteNode);
 
     // Prevent duplicates
     if (!state.selectedQuoteRef.some(ref => ref.quoteId === quoteId)) {
@@ -1672,6 +1835,14 @@ function htmlToPlainText(html) {
           ? renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100)
           : "";
       }
+    }
+  };
+
+  window.setQuotePriorityForAnalysis = function(idx, priority) {
+    if (!state.selectedQuoteRef?.[idx]) return;
+    state.selectedQuoteRef[idx].priority = clampPriority(priority);
+    if (quoteRefsList) {
+      quoteRefsList.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
     }
   };
 
@@ -1781,8 +1952,13 @@ function htmlToPlainText(html) {
           quote: node.quote || ""
         };
         
-        // FIXED: Populate selectedQuoteRef with existing quotes from the node
-        state.selectedQuoteRef = node.quoteRefs ? [...node.quoteRefs] : [];
+        state.selectedQuoteRef = (node.quoteRefs || []).map((ref) => {
+          const quoteNode = state.quotes.find((quote) => quote.id === ref.quoteId);
+          return cloneQuoteRef({
+            ...ref,
+            priority: quoteNode?.priority ?? ref.priority ?? 3
+          });
+        });
         
         // Render the existing quote references in the form
         if (quoteRefsList) {
@@ -1827,7 +2003,7 @@ function htmlToPlainText(html) {
         const confirmed = window.confirm("Delete this analysis node?");
         if (!confirmed) return;
         const wasEditingThis = analysisNodeIdInput?.value === node.id;
-        await removeNodeEverywhere(node.id);
+        await deleteAnalysisNodeWithIntegrity(node);
         state.focusedNodeId = null;
         state.focusedRangeKey = null;
         if (wasEditingThis) dismissAnalysisModal();

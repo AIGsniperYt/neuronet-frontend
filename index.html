@@ -204,11 +204,25 @@ body.analysis-focus-mode .tool-btn::before {
   font-weight: 500;
   text-align: left;
 }
+
+#exportJsonBtn,
+#importJsonBtn {
+  padding: 10px 16px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--text-main);
+  cursor: pointer;
+  font-weight: 500;
+  text-align: left;
+}
 #analysisReader blockquote {
   margin-left: 2em;
 }
 #logoutBtn:hover,
-#authActionBtn:hover {
+#authActionBtn:hover,
+#exportJsonBtn:hover,
+#importJsonBtn:hover {
   background: rgba(255,107,107,0.1);
 }
 
@@ -256,6 +270,9 @@ body.analysis-focus-mode .tool-btn::before {
     <div id="dropdown" style="display: none;">
       <button id="authActionBtn">Log In with Google</button>
       <button id="logoutBtn">Logout</button>
+      <button id="exportJsonBtn">Export JSON Data</button>
+      <button id="importJsonBtn">Import JSON Data</button>
+      <input id="importJsonInput" type="file" accept=".json,application/json" hidden />
     </div>
   </aside>
 

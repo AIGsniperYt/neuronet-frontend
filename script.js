@@ -1,7 +1,6 @@
-import { initDB, addNode, getAllNodes, deleteNode, addQuote, addQuotes, getAllQuotes, getQuote, getQuotesForSource, deleteQuote, linkAnalysisToQuote, unlinkAnalysisFromQuote } from "./db.js";
-import { syncLocalWithCloud, syncToCloud, deleteCloudNode } from "./sync.js";
+import { initDB, addNode, addNodes, getAllNodes, deleteNode, addQuote, addQuotes, getAllQuotes, getQuote, deleteQuote, clearNodes, clearQuotes } from "./db.js";
+import { syncLocalWithCloud, syncToCloud, deleteCloudNode, deleteCloudQuote, fetchCloudNodes, fetchCloudQuotes } from "./sync.js";
 import { initAnalysisToolV2 } from "./analysisTool.js";
-import { performMigration } from "./migrations.js";
 
 const BACKEND = "https://neuronet-backend.onrender.com";
 const DEV_MODE = false;
@@ -20,9 +19,14 @@ const tools = {
     file: "analysis.html",
     init: () => initAnalysisToolV2({
       getAllNodes,
+      getAllQuotes,
       addNode,
+      addQuote,
+      getQuote,
+      deleteQuote,
       backupLocalNodesToCloud,
       removeNodeEverywhere,
+      removeQuoteEverywhere,
       normalizeHierarchyPath,
       buildSection,
       parseTags,
@@ -314,8 +318,8 @@ async function backupLocalNodesToCloud() {
   syncInProgress = true;
 
   try {
-    const localNodes = await getAllNodes();
-    await syncToCloud(localNodes);
+    const [localNodes, localQuotes] = await Promise.all([getAllNodes(), getAllQuotes()]);
+    await syncToCloud(localNodes, localQuotes);
   } catch (error) {
     console.log("Background cloud backup skipped", error);
   } finally {
@@ -441,6 +445,61 @@ async function removeNodeEverywhere(id) {
   }
 }
 
+async function removeQuoteEverywhere(id) {
+  await deleteQuote(id);
+
+  if (!window.currentUser) return;
+
+  try {
+    await deleteCloudQuote(id);
+  } catch (error) {
+    console.log("Cloud quote delete skipped", error);
+  }
+}
+
+async function exportDatabaseJson() {
+  const [nodes, quotes] = await Promise.all([getAllNodes(), getAllQuotes()]);
+  const payload = {
+    schemaVersion: 3,
+    exportedAt: new Date().toISOString(),
+    nodes,
+    quotes
+  };
+
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `neuronet-export-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+async function importDatabaseJson(file) {
+  const text = await file.text();
+  const payload = JSON.parse(text);
+  const nodes = Array.isArray(payload?.nodes) ? payload.nodes : [];
+  const quotes = Array.isArray(payload?.quotes) ? payload.quotes : [];
+
+  await clearNodes();
+  await clearQuotes();
+  await addNodes(nodes);
+  await addQuotes(quotes);
+
+  if (window.currentUser) {
+    const [cloudNodes, cloudQuotes] = await Promise.all([fetchCloudNodes(), fetchCloudQuotes()]);
+    await Promise.all([
+      ...cloudNodes.map((node) => deleteCloudNode(node.id)),
+      ...cloudQuotes.map((quote) => deleteCloudQuote(quote.id))
+    ]);
+    await syncToCloud(nodes, quotes);
+  }
+
+  if (currentToolName) {
+    await loadTool(currentToolName);
+  }
+}
+
 // ========== EVENT LISTENERS ==========
 document.addEventListener("DOMContentLoaded", async () => {
   initCanvas();
@@ -449,13 +508,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   await initDB();
   DB_READY = true;
   console.log("IndexedDB ready", { DB_READY, OFFLINE_MODE, DEV_MODE });
-
-  // NEW: Perform migration from old structure to new quote/analysis separation
-  try {
-    await performMigration(getAllNodes, addNode, addQuote);
-  } catch (error) {
-    console.warn("[MIGRATION] Migration check completed or skipped:", error);
-  }
 
   const user = await fetchUser();
   if (user) {
@@ -467,6 +519,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   const authActionBtn = document.getElementById("authActionBtn");
   const logoutBtn = document.getElementById("logoutBtn");
   const focusToggleBtn = document.getElementById("focusToggleBtn");
+  const exportJsonBtn = document.getElementById("exportJsonBtn");
+  const importJsonBtn = document.getElementById("importJsonBtn");
+  const importJsonInput = document.getElementById("importJsonInput");
 
   if (profileElem) {
     profileElem.addEventListener("click", (e) => {
@@ -527,5 +582,39 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (dropdown) dropdown.style.display = "none";
     });
   }
-});
 
+  if (exportJsonBtn) {
+    exportJsonBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await exportDatabaseJson();
+      if (dropdown) dropdown.style.display = "none";
+    });
+  }
+
+  if (importJsonBtn && importJsonInput) {
+    importJsonBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      importJsonInput.click();
+    });
+
+    importJsonInput.addEventListener("change", async () => {
+      const [file] = importJsonInput.files || [];
+      if (!file) return;
+      const confirmed = window.confirm("Importing JSON will overwrite your current NeuroNet database. Continue?");
+      if (!confirmed) {
+        importJsonInput.value = "";
+        return;
+      }
+
+      try {
+        await importDatabaseJson(file);
+        if (dropdown) dropdown.style.display = "none";
+      } catch (error) {
+        console.error("Import failed", error);
+        alert("Import failed. Please check the JSON file format.");
+      } finally {
+        importJsonInput.value = "";
+      }
+    });
+  }
+});

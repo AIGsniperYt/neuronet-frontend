@@ -1,5 +1,5 @@
 const DB_NAME = "neuronet";
-const DB_VERSION = 2; // Updated for new quote/analysis separation
+const DB_VERSION = 3; // Alpha reset: quote priority + clean store separation
 
 let db;
 
@@ -16,38 +16,20 @@ export function initDB() {
     request.onupgradeneeded = (e) => {
       db = e.target.result;
 
-      // Clear old data during migration
-      const stores = Array.from(db.objectStoreNames);
-      
-      // Create nodes store (for all node types: source, analysis)
-      if (!db.objectStoreNames.contains("nodes")) {
-        db.createObjectStore("nodes", { keyPath: "id" });
+      // Alpha reset: recreate stores cleanly instead of migrating legacy data.
+      for (const storeName of Array.from(db.objectStoreNames)) {
+        db.deleteObjectStore(storeName);
       }
 
-      // Create separate quotes store
-      if (!db.objectStoreNames.contains("quotes")) {
-        const quoteStore = db.createObjectStore("quotes", { keyPath: "id" });
-        quoteStore.createIndex("subject", "subject", { unique: false });
-        quoteStore.createIndex("sourceId", "link.sourceId", { unique: false });
-        quoteStore.createIndex("subjectSource", ["subject", "link.sourceId"], { unique: false });
-      }
+      const nodeStore = db.createObjectStore("nodes", { keyPath: "id" });
+      nodeStore.createIndex("type", "type", { unique: false });
+      nodeStore.createIndex("subject", "subject", { unique: false });
+      nodeStore.createIndex("subjectType", ["subject", "type"], { unique: false });
 
-      // Add indices to nodes store for better querying
-      if (!db.objectStoreNames.contains("nodes")) {
-        const nodeStore = db.createObjectStore("nodes", { keyPath: "id" });
-        nodeStore.createIndex("type", "type", { unique: false });
-        nodeStore.createIndex("subject", "subject", { unique: false });
-        nodeStore.createIndex("subjectType", ["subject", "type"], { unique: false });
-      } else {
-        // If nodes already exists, try to add indices if they don't exist
-        try {
-          if (!db.objectStoreNames.contains("nodes").indices?.contains("type")) {
-            // This will fail in onupgradeneeded but that's okay
-          }
-        } catch (e) {
-          // Indices already exist or can't be added
-        }
-      }
+      const quoteStore = db.createObjectStore("quotes", { keyPath: "id" });
+      quoteStore.createIndex("subject", "subject", { unique: false });
+      quoteStore.createIndex("sourceId", "link.sourceId", { unique: false });
+      quoteStore.createIndex("subjectSource", ["subject", "link.sourceId"], { unique: false });
     };
 
     request.onsuccess = (e) => {
@@ -167,6 +149,25 @@ export function deleteNode(id) {
   });
 }
 
+export function clearNodes() {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error("IndexedDB is not initialized"));
+      return;
+    }
+
+    const tx = db.transaction("nodes", "readwrite");
+    const req = tx.objectStore("nodes").clear();
+    req.onerror = () => reject(req.error);
+    tx.oncomplete = () => {
+      emitDBChange({ type: "clear", store: "nodes" });
+      resolve();
+    };
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+
 // ========== QUOTE STORE OPERATIONS ==========
 
 /**
@@ -182,7 +183,8 @@ export function addQuote(quote) {
     const record = {
       ...quote,
       id: quote.id || crypto.randomUUID(),
-      type: "quote"
+      type: "quote",
+      priority: Number.isFinite(Number(quote.priority)) ? Math.min(5, Math.max(1, Number(quote.priority))) : 3
     };
 
     const tx = db.transaction("quotes", "readwrite");
@@ -331,6 +333,25 @@ export function deleteQuote(id) {
   });
 }
 
+export function clearQuotes() {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error("IndexedDB is not initialized"));
+      return;
+    }
+
+    const tx = db.transaction("quotes", "readwrite");
+    const req = tx.objectStore("quotes").clear();
+    req.onerror = () => reject(req.error);
+    tx.oncomplete = () => {
+      emitDBChange({ type: "clear", store: "quotes" });
+      resolve();
+    };
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+
 // ========== ANALYSIS NODES (stored in nodes) ==========
 
 /**
@@ -365,6 +386,7 @@ export async function linkAnalysisToQuote(quoteId, analysisId) {
   if (!quote.meta.analysisNodeIds.includes(analysisId)) {
     quote.meta.analysisNodeIds.push(analysisId);
   }
+  quote.updatedAt = Date.now();
   
   return addQuote(quote);
 }
@@ -379,6 +401,7 @@ export async function unlinkAnalysisFromQuote(quoteId, analysisId) {
   if (quote.meta?.analysisNodeIds) {
     quote.meta.analysisNodeIds = quote.meta.analysisNodeIds.filter(id => id !== analysisId);
   }
+  quote.updatedAt = Date.now();
   
   return addQuote(quote);
 }
