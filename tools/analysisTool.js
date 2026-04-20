@@ -1,4 +1,4 @@
-export async function initAnalysisToolV2(deps) {
+export async function initAnalysisToolV2(deps, context = {}) {
   const {
     getAllNodes,
     getAllQuotes,
@@ -14,15 +14,18 @@ export async function initAnalysisToolV2(deps) {
     parseTags,
     escapeHtml,
     getNodeTimestamp,
-    isSourceNode,
-    setAnalysisFocus
+    isSourceNode
   } = deps;
+
+  const { subject: contextSubject } = context;
+
+  function setAnalysisFocus(enabled) {}
 
   if (typeof window.__neuronetAnalysisCleanup === "function") {
     window.__neuronetAnalysisCleanup();
   }
 
-  const launchpadView = document.getElementById("launchpadView");
+  const launchpadView = document.getElementById("analysisLaunchpad");
   const studyView = document.getElementById("studyView");
   const analysisStats = document.getElementById("analysisStats");
   const subjectList = document.getElementById("subjectList");
@@ -92,6 +95,11 @@ const allowedTags = new Set(["P","DIV","BR","STRONG","B","EM","I","U","UL","OL",
     focusedRangeKey: null,
     selectedQuoteRef: null // NEW: for quote picker in analysis form
   };
+
+  // Handle context subject from global launchpad
+  if (contextSubject) {
+    state.selectedSubject = contextSubject;
+  }
 
   function clampPriority(value) {
     const num = Number(value);
@@ -1532,13 +1540,33 @@ function htmlToPlainText(html) {
     }
   });
 
-  backToLaunchpad.addEventListener("click", () => {
-    state.selectedSubject = "";
-    state.selectedSourceId = "";
-    resetSourceForm();
-    resetAnalysisForm();
-    renderState();
-  });
+  // Back to launchpad button handler
+  if (backToLaunchpad) {
+    backToLaunchpad.addEventListener("click", () => {
+      state.selectedSubject = "";
+      state.selectedSourceId = "";
+      resetSourceForm();
+      resetAnalysisForm();
+      // Return to global launchpad
+      if (typeof window.__neuronetReturnToLaunchpad === "function") {
+        window.__neuronetReturnToLaunchpad();
+      }
+    });
+  } else {
+    // Fallback: use event delegation on document
+    document.addEventListener("click", (e) => {
+      const btn = e.target.closest("#backToLaunchpad");
+      if (btn) {
+        state.selectedSubject = "";
+        state.selectedSourceId = "";
+        resetSourceForm();
+        resetAnalysisForm();
+        if (typeof window.__neuronetReturnToLaunchpad === "function") {
+          window.__neuronetReturnToLaunchpad();
+        }
+      }
+    }, { once: true });
+  }
 
   if (sourceSelect) {
     sourceSelect.addEventListener("change", () => {

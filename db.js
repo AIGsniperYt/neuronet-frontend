@@ -1,5 +1,5 @@
 const DB_NAME = "neuronet";
-const DB_VERSION = 3; // Alpha reset: quote priority + clean store separation
+const DB_VERSION = 4; // Pinned tools + global subjects
 
 let db;
 
@@ -30,6 +30,9 @@ export function initDB() {
       quoteStore.createIndex("subject", "subject", { unique: false });
       quoteStore.createIndex("sourceId", "link.sourceId", { unique: false });
       quoteStore.createIndex("subjectSource", ["subject", "link.sourceId"], { unique: false });
+
+      const pinnedStore = db.createObjectStore("pinnedTools", { keyPath: "toolId" });
+      pinnedStore.createIndex("position", "position", { unique: false });
     };
 
     request.onsuccess = (e) => {
@@ -430,4 +433,158 @@ export async function getQuotesReferencedByAnalysis(analysisId) {
     if (quote) quotes.push(quote);
   }
   return quotes;
+}
+
+// ========== PINNED TOOLS ==========
+
+export async function getPinnedTools() {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error("IndexedDB is not initialized"));
+      return;
+    }
+
+    const tx = db.transaction("pinnedTools", "readonly");
+    const req = tx.objectStore("pinnedTools").getAll();
+    req.onsuccess = () => {
+      const tools = req.result || [];
+      tools.sort((a, b) => (a.position || 0) - (b.position || 0));
+      resolve(tools);
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function pinTool(toolId) {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error("IndexedDB is not initialized"));
+      return;
+    }
+
+    const tx = db.transaction("pinnedTools", "readwrite");
+    const store = tx.objectStore("pinnedTools");
+
+    store.get(toolId).onsuccess = (e) => {
+      const existing = e.target.result;
+      if (existing) {
+        resolve(existing);
+        return;
+      }
+
+      store.getAll().onsuccess = (getAllReq) => {
+        const allTools = getAllReq.target.result || [];
+        const maxPosition = allTools.reduce((max, t) => Math.max(max, t.position || 0), 0);
+
+        const record = {
+          toolId,
+          position: maxPosition + 1,
+          createdAt: Date.now()
+        };
+        store.put(record);
+        tx.oncomplete = () => resolve(record);
+      };
+    };
+
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+
+export async function unpinTool(toolId) {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error("IndexedDB is not initialized"));
+      return;
+    }
+
+    const tx = db.transaction("pinnedTools", "readwrite");
+    const store = tx.objectStore("pinnedTools");
+    const req = store.delete(toolId);
+
+    req.onsuccess = () => resolve(toolId);
+    req.onerror = () => reject(req.error);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+
+export async function isToolPinned(toolId) {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error("IndexedDB is not initialized"));
+      return;
+    }
+
+    const tx = db.transaction("pinnedTools", "readonly");
+    const req = tx.objectStore("pinnedTools").get(toolId);
+    req.onsuccess = () => resolve(!!req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function setPinnedToolsOrder(toolIds) {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error("IndexedDB is not initialized"));
+      return;
+    }
+
+    const tx = db.transaction("pinnedTools", "readwrite");
+    const store = tx.objectStore("pinnedTools");
+
+    toolIds.forEach((toolId, index) => {
+      store.get(toolId).onsuccess = (e) => {
+        const existing = e.target.result;
+        if (existing) {
+          existing.position = index + 1;
+          store.put(existing);
+        }
+      };
+    });
+
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+
+// ========== SUBJECTS ==========
+
+export async function getSubjects() {
+  const allNodes = await getAllNodes();
+  const subjects = new Set();
+  allNodes.forEach(node => {
+    if (node.subject) subjects.add(node.subject);
+  });
+  return Array.from(subjects).sort();
+}
+
+export async function addSubject(name) {
+  const subjectNode = {
+    id: `subject-${crypto.randomUUID()}`,
+    type: "subject",
+    subject: name,
+    name: name,
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  };
+  return addNode(subjectNode);
+}
+
+export async function deleteSubject(subjectName) {
+  const allNodes = await getAllNodes();
+  const allQuotes = await getAllQuotes();
+
+  const subjectNodes = allNodes.filter(n => n.subject === subjectName);
+  const subjectQuotes = allQuotes.filter(q => q.subject === subjectName);
+
+  for (const node of subjectNodes) {
+    await deleteNode(node.id);
+  }
+  for (const quote of subjectQuotes) {
+    await deleteQuote(quote.id);
+  }
+
+  return subjectName;
 }

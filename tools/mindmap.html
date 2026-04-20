@@ -1,0 +1,383 @@
+<style>
+  .mindmap-shell {
+    display: grid;
+    gap: 8px;
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    padding: 12px;
+  }
+
+  /* Hide scrollbars globally */
+  ::-webkit-scrollbar,
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-thumb {
+    display: none;
+  }
+
+  html, body, * {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .panel {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: linear-gradient(160deg, rgba(14, 34, 26, 0.88), rgba(9, 26, 19, 0.82));
+    border-radius: 12px;
+    padding: 14px;
+    box-shadow: 0 22px 38px rgba(0, 0, 0, 0.22);
+    backdrop-filter: blur(6px);
+    transition: all 0.3s ease;
+  }
+
+  .panel h2,
+  .panel h3 {
+    margin: 0;
+  }
+
+  .kicker {
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 0.72rem;
+    color: rgba(44, 255, 179, 0.75);
+    margin-bottom: 8px;
+  }
+
+  .mindmap-view {
+    display: grid;
+    gap: 16px;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .view-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .view-mode-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.05);
+    color: #e6fff5;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.85rem;
+    transition: all 0.2s ease;
+  }
+
+  .view-mode-btn:hover {
+    border-color: rgba(44, 255, 179, 0.45);
+    background: rgba(44, 255, 179, 0.08);
+  }
+
+  .view-mode-btn.active {
+    background: linear-gradient(130deg, rgba(44, 255, 179, 0.24), rgba(44, 255, 179, 0.11));
+    border-color: rgba(44, 255, 179, 0.45);
+  }
+
+  .view-mode-btn.active:hover {
+    background: linear-gradient(130deg, rgba(44, 255, 179, 0.32), rgba(44, 255, 179, 0.18));
+    box-shadow: 0 0 12px rgba(44, 255, 179, 0.2);
+  }
+
+  .canvas-container {
+    position: relative;
+    width: 100%;
+    height: calc(100% - 60px);
+    background: rgba(7, 20, 15, 0.6);
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+  }
+
+  #mindmapCanvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  .node-floating-card {
+    position: absolute;
+    pointer-events: none;
+    display: none;
+    z-index: 1000;
+  }
+
+  .node-floating-card.visible {
+    display: block;
+    pointer-events: all;
+  }
+
+  .node-card {
+    background: rgba(7, 20, 15, 0.96);
+    border: 1px solid rgba(44, 255, 179, 0.25);
+    border-radius: 14px;
+    padding: 16px;
+    box-shadow: 0 35px 60px rgba(0, 0, 0, 0.3), inset 0 0 1px rgba(44, 255, 179, 0.1);
+    backdrop-filter: blur(8px);
+    max-width: 320px;
+    width: 100%;
+  }
+
+  .node-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+
+  .node-card-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #e6fff5;
+  }
+
+  .node-card-type {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    color: rgba(44, 255, 179, 0.7);
+  }
+
+  .node-card-content {
+    margin-bottom: 16px;
+    line-height: 1.5;
+    color: rgba(230, 255, 245, 0.85);
+  }
+
+  .node-card-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .node-card-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .icon-btn {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    color: #e6fff5;
+    cursor: pointer;
+    font: inherit;
+    font-size: 1rem;
+    transition: all 0.2s ease;
+  }
+
+  .icon-btn:hover {
+    border-color: rgba(44, 255, 179, 0.45);
+    background: rgba(44, 255, 179, 0.12);
+  }
+
+  .icon-btn.edit-btn {
+    color: #2cffb3;
+  }
+
+  .icon-btn.delete-btn {
+    color: #ff6b6b;
+  }
+
+  .node-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .tag {
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 0.75rem;
+    background: rgba(44, 255, 179, 0.16);
+    border: 1px solid rgba(44, 255, 179, 0.26);
+  }
+
+  .connection-info {
+    font-size: 0.8rem;
+    color: rgba(168, 188, 178, 0.6);
+  }
+
+  .node-link-indicator {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.8rem;
+    color: rgba(44, 255, 179, 0.6);
+  }
+
+  .empty-state {
+    text-align: center;
+    color: rgba(230, 255, 245, 0.65);
+    padding: 40px 20px;
+  }
+
+  .empty-state-icon {
+    font-size: 3rem;
+    margin-bottom: 16px;
+    opacity: 0.5;
+  }
+
+  .connection-line {
+    position: absolute;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .connection-line path {
+    stroke: rgba(44, 255, 179, 0.3);
+    stroke-width: 1.5;
+    fill: none;
+  }
+
+  .connection-line path.active {
+    stroke: rgba(44, 255, 179, 0.6);
+    stroke-width: 2;
+  }
+
+  .node-point {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    background: rgba(44, 255, 179, 0.8);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 2;
+    transition: all 0.2s ease;
+  }
+
+  .node-point:hover {
+    background: rgba(44, 255, 179, 1);
+    transform: translate(-50%, -50%) scale(1.2);
+  }
+
+  .node-label {
+    position: absolute;
+    pointer-events: none;
+    font-size: 0.8rem;
+    color: rgba(230, 255, 245, 0.8);
+    white-space: nowrap;
+    transform: translate(-50%, -30px);
+    z-index: 3;
+  }
+
+  .stats-panel {
+    display: grid;
+    gap: 10px;
+  }
+
+  .stat-card {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    padding: 12px;
+    text-align: center;
+  }
+
+  .stat-card strong {
+    display: block;
+    font-size: 1.5rem;
+  }
+
+  .stat-label {
+    font-size: 0.85rem;
+    color: rgba(230, 255, 245, 0.7);
+  }
+
+  @media (max-width: 980px) {
+    .view-controls {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    
+    .node-floating-card {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 90%;
+      max-width: 400px;
+    }
+  }
+</style>
+
+<div class="mindmap-shell">
+  <div class="panel">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+      <div>
+        <p class="kicker">Database Visualization</p>
+        <h2>Mindmap Tool</h2>
+        <p>Visualize connections between your knowledge nodes</p>
+      </div>
+      <div class="view-controls">
+        <button id="networkViewBtn" class="view-mode-btn active" data-view="network">Network View</button>
+        <button id="hierarchyViewBtn" class="view-mode-btn" data-view="hierarchy">Hierarchy View</button>
+        <button id="exportMapBtn" class="view-mode-btn" data-action="export">Export</button>
+      </div>
+    </div>
+    
+    <div id="mindmapStats" class="stats-panel">
+      <div class="stat-card">
+        <strong id="totalNodes">0</strong>
+        <div class="stat-label">Total Nodes</div>
+      </div>
+      <div class="stat-card">
+        <strong id="totalQuotes">0</strong>
+        <div class="stat-label">Quotes</div>
+      </div>
+      <div class="stat-card">
+        <strong id="totalAnalyses">0</strong>
+        <div class="stat-label">Analysis</div>
+      </div>
+      <div class="stat-card">
+        <strong id="totalConnections">0</strong>
+        <div class="stat-label">Connections</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel mindmap-view">
+    <div class="canvas-container">
+      <canvas id="mindmapCanvas"></canvas>
+      <div id="connectionLines"></div>
+      <div id="nodePoints"></div>
+      <div id="nodeLabels"></div>
+    </div>
+    
+    <div id="nodeFloatingCard" class="node-floating-card">
+      <div class="node-card">
+        <div class="node-card-header">
+          <h3 class="node-card-title"></h3>
+          <div class="node-card-type"></div>
+        </div>
+        <div class="node-card-content"></div>
+        <div class="node-card-footer">
+          <div class="connection-info"></div>
+          <div class="node-card-actions">
+            <button class="icon-btn edit-btn" title="Edit node">✎</button>
+            <button class="icon-btn delete-btn" title="Delete node">🗑</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

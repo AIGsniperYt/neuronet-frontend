@@ -1,6 +1,8 @@
-import { initDB, addNode, addNodes, getAllNodes, deleteNode, addQuote, addQuotes, getAllQuotes, getQuote, deleteQuote, clearNodes, clearQuotes } from "./db.js";
+import { initDB, addNode, addNodes, getAllNodes, getNode, deleteNode, addQuote, addQuotes, getAllQuotes, getQuote, deleteQuote, clearNodes, clearQuotes, getQuotesForSubject, getAnalysisNodesForSubject, getQuotesReferencedByAnalysis, getAnalysesReferencingQuote, getPinnedTools, pinTool, unpinTool, isToolPinned, setPinnedToolsOrder, getSubjects, addSubject, deleteSubject } from "./db.js";
 import { syncLocalWithCloud, syncToCloud, deleteCloudNode, deleteCloudQuote, fetchCloudNodes, fetchCloudQuotes } from "./sync.js";
-import { initAnalysisToolV2 } from "./analysisTool.js";
+import { initAnalysisToolV2 } from "./tools/analysisTool.js";
+import { initMemoryTool } from "./tools/memoryTool.js";
+import { initMindmapTool } from "./tools/mindmapTool.js";
 
 const BACKEND = "https://neuronet-backend.onrender.com";
 const DEV_MODE = false;
@@ -14,10 +16,14 @@ const DEFAULT_PROFILE = {
 
 let syncInProgress = false;
 
+let currentToolName = "";
+let currentSubject = null;
+let toolContainer;
+
 const tools = {
   analysis: {
-    file: "analysis.html",
-    init: () => initAnalysisToolV2({
+    file: "analysis.html",  // loaded from ./tools/ by loadTool
+    init: (context) => initAnalysisToolV2({
       getAllNodes,
       getAllQuotes,
       addNode,
@@ -32,33 +38,55 @@ const tools = {
       parseTags,
       escapeHtml,
       getNodeTimestamp,
-      isSourceNode,
-      setAnalysisFocus
-    })
+      isSourceNode
+    }, context)
   },
 
   memory: {
     file: "memory.html",
-    init: null
+    init: (context) => initMemoryTool({
+      getAllNodes,
+      getAllQuotes,
+      getQuotesForSubject,
+      getAnalysisNodesForSubject,
+      getQuotesReferencedByAnalysis,
+      getAnalysesReferencingQuote,
+      getNode,
+      getNodeTimestamp,
+      escapeHtml
+    }, context)
   },
 
   mindmap: {
     file: "mindmap.html",
-    init: null
+    init: (context) => initMindmapTool({
+      getAllNodes,
+      getAllQuotes,
+      addNode,
+      addQuote,
+      deleteNode,
+      deleteQuote,
+      removeNodeEverywhere,
+      removeQuoteEverywhere,
+      escapeHtml
+    }, context)
   },
-
   tracker: {
+    name: "Tracker",
     file: "tracker.html",
     init: null
   }
 };
 
-// ========== CANVAS BACKGROUND ==========
-const canvas = document.getElementById("neuronet");
-const ctx = canvas.getContext("2d");
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
+const toolDefinitions = {
+  analysis: { name: "Analysis", file: "analysis.html", icon: "A", desc: "Create source-linked analysis nodes" },
+  memory: { name: "Memory", file: "memory.html", icon: "M", desc: "Flashcard study across subjects" },
+  mindmap: { name: "Mindmap", file: "mindmap.html", icon: "N", desc: "Visual database overview" },
+  tracker: { name: "Tracker", file: "tracker.html", icon: "T", desc: "Track study progress" }
+};
 
+// ========== CANVAS BACKGROUND ==========
+let canvas, ctx;
 let nodes = [],
   nodeCount = 92,
   maxDist = 150,
@@ -119,15 +147,11 @@ class Node {
     if (this.x < edgeBuffer)
       moveX += edgeRepulsionStrength * (1 - this.x / edgeBuffer);
     if (this.x > canvas.width - edgeBuffer)
-      moveX -=
-        edgeRepulsionStrength *
-        ((this.x - (canvas.width - edgeBuffer)) / edgeBuffer);
+      moveX -= edgeRepulsionStrength * ((this.x - (canvas.width - edgeBuffer)) / edgeBuffer);
     if (this.y < edgeBuffer)
       moveY += edgeRepulsionStrength * (1 - this.y / edgeBuffer);
     if (this.y > canvas.height - edgeBuffer)
-      moveY -=
-        edgeRepulsionStrength *
-        ((this.y - (canvas.height - edgeBuffer)) / edgeBuffer);
+      moveY -= edgeRepulsionStrength * ((this.y - (canvas.height - edgeBuffer)) / edgeBuffer);
 
     const mouseForceRadius = 50,
       mouseRepelStrength = 0.5;
@@ -156,22 +180,10 @@ class Node {
     this.x += this.vx;
     this.y += this.vy;
 
-    if (this.x < 0) {
-      this.x = 0;
-      this.vx *= -1;
-    }
-    if (this.x > canvas.width) {
-      this.x = canvas.width;
-      this.vx *= -1;
-    }
-    if (this.y < 0) {
-      this.y = 0;
-      this.vy *= -1;
-    }
-    if (this.y > canvas.height) {
-      this.y = canvas.height;
-      this.vy *= -1;
-    }
+    if (this.x < 0) { this.x = 0; this.vx *= -1; }
+    if (this.x > canvas.width) { this.x = canvas.width; this.vx *= -1; }
+    if (this.y < 0) { this.y = 0; this.vy *= -1; }
+    if (this.y > canvas.height) { this.y = canvas.height; this.vy *= -1; }
   }
 
   draw() {
@@ -239,15 +251,17 @@ function connectNodes() {
 
 function animate() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  nodes.forEach((n) => {
-    n.update();
-    n.draw();
-  });
+  nodes.forEach((n) => { n.update(); n.draw(); });
   connectNodes();
   requestAnimationFrame(animate);
 }
 
 function initCanvas() {
+  canvas = document.getElementById("neuronet");
+  if (!canvas) return;
+  ctx = canvas.getContext("2d");
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
   nodes = [];
   resetGrid();
   for (let i = 0; i < nodeCount; i++) nodes.push(new Node());
@@ -255,20 +269,25 @@ function initCanvas() {
 }
 
 window.addEventListener("resize", () => {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
   initCanvas();
 });
 
 const mouse = {};
-canvas.addEventListener("mousemove", (e) => {
-  mouse.x = e.clientX;
-  mouse.y = e.clientY;
-});
-canvas.addEventListener("mouseleave", () => {
-  delete mouse.x;
-  delete mouse.y;
-});
+function initCanvasListeners() {
+  const c = document.getElementById("neuronet");
+  if (!c) {
+    setTimeout(initCanvasListeners, 100);
+    return;
+  }
+  c.addEventListener("mousemove", (e) => {
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+  });
+  c.addEventListener("mouseleave", () => {
+    delete mouse.x;
+    delete mouse.y;
+  });
+}
 
 // ========== AUTH & API ==========
 function setProfileUI(user) {
@@ -281,9 +300,7 @@ function setProfileUI(user) {
 
   if (pfp) pfp.src = activeUser.picture || DEFAULT_PROFILE.picture;
   if (userName) {
-    userName.textContent = user
-      ? user.name || user.email || "User"
-      : DEFAULT_PROFILE.name;
+    userName.textContent = user ? user.name || user.email || "User" : DEFAULT_PROFILE.name;
   }
 
   if (authActionBtn) authActionBtn.style.display = user ? "none" : "block";
@@ -292,20 +309,14 @@ function setProfileUI(user) {
 
 async function fetchUser() {
   try {
-    const res = await fetch(`${BACKEND}/auth/user`, {
-      credentials: "include",
-    });
-
+    const res = await fetch(`${BACKEND}/auth/user`, { credentials: "include" });
     if (!res.ok) throw new Error("Not logged in");
 
     const user = await res.json();
-    console.log("Fetched user:", user);
-
     window.currentUser = user;
     setProfileUI(user);
     return user;
   } catch (error) {
-    console.log("Running in offline mode until user logs in", error);
     window.currentUser = null;
     setProfileUI(null);
     return null;
@@ -314,9 +325,7 @@ async function fetchUser() {
 
 async function backupLocalNodesToCloud() {
   if (!window.currentUser || syncInProgress) return;
-
   syncInProgress = true;
-
   try {
     const [localNodes, localQuotes] = await Promise.all([getAllNodes(), getAllQuotes()]);
     await syncToCloud(localNodes, localQuotes);
@@ -329,14 +338,11 @@ async function backupLocalNodesToCloud() {
 
 async function syncAfterLogin() {
   if (!window.currentUser || syncInProgress) return;
-
   syncInProgress = true;
-
   try {
     await syncLocalWithCloud();
-    console.log("Local IndexedDB and cloud backup are in sync");
   } catch (error) {
-    console.log("Cloud merge failed, continuing with local IndexedDB only", error);
+    console.log("Cloud merge failed", error);
   } finally {
     syncInProgress = false;
   }
@@ -346,41 +352,14 @@ function startGoogleLogin() {
   window.location.href = `${BACKEND}/auth/google`;
 }
 
-// ========== TOOL SWITCHING SYSTEM ==========
-const toolContainer = document.getElementById("toolContainer");
-const toolButtons = document.querySelectorAll(".tool-btn");
-let currentToolName = "";
-let analysisFocusEnabled = false;
-
-function setActiveTool(activeBtn) {
-  toolButtons.forEach(btn => btn.classList.remove("active"));
-  activeBtn.classList.add("active");
+function setActiveTool(toolName) {
+  const wrappers = document.querySelectorAll(".tool-btn-wrapper");
+  wrappers.forEach(w => w.classList.remove("active"));
+  const activeWrapper = document.querySelector(`.tool-btn-wrapper[data-tool="${toolName}"]`);
+  if (activeWrapper) activeWrapper.classList.add("active");
 }
 
-function setAnalysisFocus(enabled) {
-  analysisFocusEnabled = Boolean(enabled);
-  const focusBtn = document.getElementById("focusToggleBtn");
-  const canFocus = typeof window.__neuronetCanFocus === "function" && window.__neuronetCanFocus();
-  const active = currentToolName === "analysis" && canFocus && analysisFocusEnabled;
-  document.body.classList.toggle("analysis-focus-mode", active);
-
-  if (focusBtn) {
-    const visible = currentToolName === "analysis";
-    focusBtn.style.display = visible ? "block" : "none";
-    focusBtn.textContent = analysisFocusEnabled ? "Exit Focus" : "Enter Focus";
-  }
-}
-
-function setAnalysisToolActive(active) {
-  document.body.classList.toggle("analysis-tool-active", Boolean(active));
-  if (!active) {
-    setAnalysisFocus(false);
-  } else {
-    setAnalysisFocus(analysisFocusEnabled);
-  }
-}
-
-async function loadTool(toolName) {
+async function loadTool(toolName, context = {}) {
   if (currentToolName === "analysis" && toolName !== "analysis") {
     if (typeof window.__neuronetAnalysisCleanup === "function") {
       window.__neuronetAnalysisCleanup();
@@ -388,13 +367,14 @@ async function loadTool(toolName) {
   }
 
   currentToolName = toolName;
-  setAnalysisToolActive(toolName === "analysis");
+  currentSubject = context.subject || null;
+  setActiveTool(toolName);
 
   const tool = tools[toolName];
   const res = await fetch(`./tools/${tool.file}`);
   toolContainer.innerHTML = await res.text();
 
-  if (tool.init) setTimeout(tool.init, 0);
+  if (tool.init) setTimeout(() => tool.init(context), 0);
 }
 
 function escapeHtml(value) {
@@ -500,9 +480,293 @@ async function importDatabaseJson(file) {
   }
 }
 
+// ========== LAUNCHPAD FUNCTIONS ==========
+
+function showLaunchpad() {
+  const launchpad = document.getElementById("globalLaunchpad");
+  const tc = document.getElementById("toolContainer");
+  if (launchpad) {
+    launchpad.style.display = "grid";
+  }
+  if (tc) {
+    tc.style.display = "none";
+  }
+}
+
+function hideLaunchpad() {
+  const launchpad = document.getElementById("globalLaunchpad");
+  const tc = document.getElementById("toolContainer");
+  if (launchpad) {
+    launchpad.style.display = "none";
+  }
+  if (tc) {
+    tc.style.display = "block";
+  }
+}
+
+async function updateGlobalStats() {
+  const [allNodes, allQuotes] = await Promise.all([getAllNodes(), getAllQuotes()]);
+
+  const subjects = new Set();
+  const sources = [];
+  const analyses = [];
+
+  allNodes.forEach(node => {
+    if (node.subject) subjects.add(node.subject);
+    if (node.type === "source" || node.meta?.kind === "source") sources.push(node);
+    if (node.type === "analysis") analyses.push(node);
+  });
+
+  document.getElementById("statSubjects").textContent = subjects.size;
+  document.getElementById("statSources").textContent = sources.length;
+  document.getElementById("statQuotes").textContent = allQuotes.length;
+  document.getElementById("statAnalyses").textContent = analyses.length;
+}
+
+async function renderSubjectList() {
+  const subjectList = document.getElementById("subjectList");
+  const [allNodes, allQuotes] = await Promise.all([getAllNodes(), getAllQuotes()]);
+
+  const subjectData = {};
+  allNodes.forEach(node => {
+    if (node.subject) {
+      if (!subjectData[node.subject]) {
+        subjectData[node.subject] = { sources: 0, analyses: 0 };
+      }
+      if (node.type === "source" || node.meta?.kind === "source") {
+        subjectData[node.subject].sources++;
+      }
+      if (node.type === "analysis") {
+        subjectData[node.subject].analyses++;
+      }
+    }
+  });
+  allQuotes.forEach(quote => {
+    if (quote.subject && subjectData[quote.subject]) {
+      subjectData[quote.subject].quotes = (subjectData[quote.subject].quotes || 0) + 1;
+    }
+  });
+
+  const subjects = Object.keys(subjectData).sort();
+
+  if (subjects.length === 0) {
+    subjectList.innerHTML = '<p class="empty-note">No subjects yet. Create one to get started.</p>';
+    return;
+  }
+
+  subjectList.innerHTML = subjects.map(subject => `
+    <div class="subject-card" data-subject="${escapeHtml(subject)}">
+      <span class="subject-name">${escapeHtml(subject)}</span>
+      <div class="subject-actions">
+        <button class="btn study-subject-btn" data-subject="${escapeHtml(subject)}">Study</button>
+        <button class="icon-btn delete-btn delete-subject-btn" data-subject="${escapeHtml(subject)}" title="Delete">✕</button>
+      </div>
+    </div>
+  `).join("");
+
+  subjectList.querySelectorAll(".study-subject-btn").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      const subject = e.target.dataset.subject;
+      enterSubjectWorkspace(subject);
+    });
+  });
+
+  subjectList.querySelectorAll(".delete-subject-btn").forEach(btn => {
+    btn.addEventListener("click", async (e) => {
+      const subject = e.target.dataset.subject;
+      if (confirm(`Delete subject "${subject}" and all its content?`)) {
+        await deleteSubject(subject);
+        await updateGlobalStats();
+        await renderSubjectList();
+      }
+    });
+  });
+}
+
+async function addSubjectFromInput() {
+  const input = document.getElementById("newSubjectName");
+  const name = input.value.trim();
+  if (!name) return;
+
+  await addSubject(name);
+  input.value = "";
+  await renderSubjectList();
+  await updateGlobalStats();
+}
+
+async function initLaunchpad() {
+  await updateGlobalStats();
+  await renderSubjectList();
+  await renderToolCatalogue();
+
+  const addSubjectBtn = document.getElementById("addSubjectBtn");
+  const newSubjectInput = document.getElementById("newSubjectName");
+
+  if (addSubjectBtn) {
+    addSubjectBtn.addEventListener("click", addSubjectFromInput);
+  }
+  if (newSubjectInput) {
+    newSubjectInput.addEventListener("keypress", (e) => {
+      if (e.key === "Enter") addSubjectFromInput();
+    });
+  }
+}
+
+async function enterSubjectWorkspace(subject) {
+  currentSubject = subject;
+  hideLaunchpad();
+  await loadTool("analysis", { subject });
+}
+
+function returnToGlobalLaunchpad() {
+  console.log("Returning to global launchpad");
+  currentToolName = "";
+  currentSubject = null;
+  setActiveTool("");
+  showLaunchpad();
+}
+
+// Wire up back button handler
+window.__neuronetReturnToLaunchpad = returnToGlobalLaunchpad;
+
+// ========== PINNED TOOLS SIDEBAR ==========
+
+async function initPinnedToolsSidebar() {
+  const container = document.getElementById("toolButtonsContainer");
+  if (!container) return;
+
+  const pinnedTools = await getPinnedTools();
+  const pinnedIds = pinnedTools.map(t => t.toolId);
+
+  // Default: pin all tools initially
+  const toolsToShow = Object.keys(toolDefinitions);
+  for (const toolId of toolsToShow) {
+    if (!pinnedIds.includes(toolId)) {
+      await pinTool(toolId);
+    }
+  }
+
+  await renderPinnedToolsSidebar();
+}
+
+async function renderPinnedToolsSidebar() {
+  const container = document.getElementById("toolButtonsContainer");
+  if (!container) return;
+
+  const pinnedTools = await getPinnedTools();
+
+  container.innerHTML = pinnedTools.map(pinned => {
+    const def = toolDefinitions[pinned.toolId];
+    if (!def) return "";
+    const isActive = currentToolName === pinned.toolId ? "active" : "";
+    return `
+      <div class="tool-btn-wrapper ${isActive}" data-tool="${pinned.toolId}">
+        <button class="tool-btn" data-tool="${pinned.toolId}">${def.icon} ${def.name}</button>
+        <button class="tool-pin-btn pinned" data-tool="${pinned.toolId}" title="Unpin">📌</button>
+      </div>
+    `;
+  }).join("");
+
+  container.querySelectorAll(".tool-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const toolName = btn.dataset.tool;
+      const subject = currentSubject;
+      hideLaunchpad();
+      loadTool(toolName, { subject });
+    });
+
+    btn.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      const toolId = btn.dataset.tool;
+      showUnpinModal(toolId);
+    });
+  });
+
+  container.querySelectorAll(".tool-pin-btn").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const toolId = btn.dataset.tool;
+      showUnpinModal(toolId);
+    });
+  });
+}
+
+// ========== UNPIN MODAL ==========
+
+let pendingUnpinTool = null;
+
+function showUnpinModal(toolId) {
+  pendingUnpinTool = toolId;
+  const def = toolDefinitions[toolId];
+  document.getElementById("unpinToolName").textContent = def?.name || toolId;
+  document.getElementById("unpinModal").style.display = "flex";
+}
+
+function hideUnpinModal() {
+  pendingUnpinTool = null;
+  document.getElementById("unpinModal").style.display = "none";
+}
+
+async function confirmUnpin() {
+  if (!pendingUnpinTool) return;
+  await unpinTool(pendingUnpinTool);
+  hideUnpinModal();
+  await renderPinnedToolsSidebar();
+  await renderToolCatalogue();
+}
+
+// ========== TOOL CATALOGUE ==========
+
+async function renderToolCatalogue() {
+  const grid = document.getElementById("toolCardsGrid");
+  if (!grid) return;
+
+  const pinnedTools = await getPinnedTools();
+  const pinnedIds = new Set(pinnedTools.map(t => t.toolId));
+
+  grid.innerHTML = Object.entries(toolDefinitions).map(([toolId, def]) => {
+    const isPinned = pinnedIds.has(toolId);
+    return `
+      <div class="tool-card" data-tool="${toolId}">
+        <button class="tool-card-pin ${isPinned ? 'pinned' : ''}" data-tool="${toolId}">${isPinned ? '📌' : '📍'}</button>
+        <div class="tool-card-icon">${def.icon}</div>
+        <div class="tool-card-title">${def.name}</div>
+        <div class="tool-card-desc">${def.desc}</div>
+      </div>
+    `;
+  }).join("");
+
+  grid.querySelectorAll(".tool-card").forEach(card => {
+    card.addEventListener("click", (e) => {
+      if (e.target.classList.contains("tool-card-pin")) return;
+      const toolName = card.dataset.tool;
+      hideLaunchpad();
+      loadTool(toolName, {});
+    });
+  });
+
+  grid.querySelectorAll(".tool-card-pin").forEach(btn => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const toolId = btn.dataset.tool;
+      const isPinned = btn.classList.contains("pinned");
+
+      if (isPinned) {
+        showUnpinModal(toolId);
+      } else {
+        await pinTool(toolId);
+        await renderPinnedToolsSidebar();
+        await renderToolCatalogue();
+      }
+    });
+  });
+}
+
 // ========== EVENT LISTENERS ==========
 document.addEventListener("DOMContentLoaded", async () => {
+  toolContainer = document.getElementById("toolContainer");
   initCanvas();
+  initCanvasListeners();
   setProfileUI(null);
 
   await initDB();
@@ -518,7 +782,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   const dropdown = document.getElementById("dropdown");
   const authActionBtn = document.getElementById("authActionBtn");
   const logoutBtn = document.getElementById("logoutBtn");
-  const focusToggleBtn = document.getElementById("focusToggleBtn");
   const exportJsonBtn = document.getElementById("exportJsonBtn");
   const importJsonBtn = document.getElementById("importJsonBtn");
   const importJsonInput = document.getElementById("importJsonInput");
@@ -535,27 +798,39 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (dropdown) dropdown.style.display = "none";
   });
 
-  if (focusToggleBtn) {
-    focusToggleBtn.addEventListener("click", () => {
-      if (currentToolName !== "analysis") return;
-      if (typeof window.__neuronetCanFocus === "function" && !window.__neuronetCanFocus()) return;
-      setAnalysisFocus(!analysisFocusEnabled);
-    });
+  const unpinCancel = document.getElementById("unpinCancel");
+  const unpinConfirm = document.getElementById("unpinConfirm");
+
+  if (unpinCancel) {
+    unpinCancel.addEventListener("click", hideUnpinModal);
+  }
+  if (unpinConfirm) {
+    unpinConfirm.addEventListener("click", confirmUnpin);
   }
 
-  toolButtons.forEach(btn => {
-    btn.addEventListener("click", () => {
-      setActiveTool(btn);
-      loadTool(btn.dataset.tool);
+  // Initialize pinned tools sidebar
+  await initPinnedToolsSidebar();
+
+  // Initialize launchpad
+  await initLaunchpad();
+
+  // Default to launchpad (no tool selected)
+  showLaunchpad();
+
+  // Logo click - return to launchpad
+  const logo = document.getElementById("logo");
+  if (logo) {
+    logo.addEventListener("click", () => {
+      returnToGlobalLaunchpad();
     });
-  });
-
-  const defaultToolButton =
-    document.querySelector(".tool-btn.active") || toolButtons[0];
-
-  if (defaultToolButton) {
-    setActiveTool(defaultToolButton);
-    await loadTool(defaultToolButton.dataset.tool);
+  } else {
+    // Fallback: use event delegation
+    document.addEventListener("click", (e) => {
+      const h2 = e.target.closest("h2");
+      if (h2 && h2.id === "logo") {
+        returnToGlobalLaunchpad();
+      }
+    });
   }
 
   if (authActionBtn) {
