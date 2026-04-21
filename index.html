@@ -38,7 +38,7 @@ body {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
-canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast(1.15) blur(12px); transition: filter 1s ease; }
+canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast(1.15) blur(8px); transition: filter 1s ease; }
 
 /* Styles for linked analyses and quotes in flashcards */
 .linked-analyses,
@@ -76,6 +76,90 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
   position: relative;
   z-index: 1;
   opacity: 1;
+}
+
+/* Loading Overlay */
+.shimmer-text {
+  background: linear-gradient(90deg, var(--text-main) 0%, var(--accent) 35%, var(--text-main) 65%, var(--text-main) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 0.8s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+#loadingOverlay {
+  position: fixed;
+  inset: 0;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  gap: 24px;
+  transition: opacity 0.8s ease, backdrop-filter 1s ease;
+}
+
+#loadingOverlay.fade-out {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#loadingOverlay.completed {
+  background: transparent;
+}
+
+#loadingOverlay h1 {
+  font-size: 3rem;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: var(--accent);
+  opacity: 0;
+  animation: fadeSlideIn 0.6s ease 0.2s forwards, shimmer 0.8s ease-in-out infinite;
+}
+
+#loadingOverlay p {
+  font-size: 1.1rem;
+  color: var(--text-muted);
+  opacity: 0;
+  animation: fadeSlideIn 0.6s ease 0.4s forwards, shimmer 0.8s ease-in-out infinite;
+}
+
+#loadingOverlay .checkmark {
+  width: 48px;
+  height: 48px;
+  border: 3px solid var(--accent);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  color: var(--accent);
+  opacity: 0;
+  transform: scale(0);
+}
+
+#loadingOverlay .checkmark.show {
+  opacity: 1;
+  transform: scale(1);
+  animation: popIn 0.4s ease;
+}
+
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes popIn {
+  0% { transform: scale(0); }
+  70% { transform: scale(1.15); }
+  100% { transform: scale(1); }
 }
 
 #sidebar {
@@ -699,128 +783,6 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
   #app { flex-direction: column; }
   #sidebar { width: 100%; padding: 16px; }
   #mainContent { padding: 20px; }
-}
-
-.shimmer-text {
-  background: linear-gradient(
-    90deg,
-    var(--text-main) 0%,
-    var(--accent) 50%,
-    var(--text-main) 100%
-  );
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: shimmer 0.4s linear infinite;
-}
-
-@keyframes shimmer {
-  0% { background-position: 100% 0; }
-  100% { background-position: -100% 0; }
-}
-
-#loadingOverlay {
-  position: fixed;
-  inset: 0;
-  background: transparent;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
-  gap: 24px;
-  transition: opacity 0.8s ease, backdrop-filter 1s ease;
-  user-select: none;
-}
-
-#loadingOverlay.fade-out {
-  opacity: 0;
-  backdrop-filter: blur(0px);
-  pointer-events: none;
-  transition: opacity 0.8s ease;
-}
-
-#loadingOverlay.completed {
-  background: transparent;
-  backdrop-filter: blur(0px);
-}
-
-#loadingOverlay.completed h1,
-#loadingOverlay.completed #loadingMessage {
-  animation: none;
-  background: none;
-  -webkit-text-fill-color: var(--accent);
-  color: var(--accent);
-}
-
-#loadingOverlay h1 {
-  font-size: 3rem;
-  font-weight: 800;
-  letter-spacing: 2px;
-  color: var(--accent);
-  opacity: 0;
-  animation: fadeSlideIn 0.6s ease 0.2s forwards, shimmer 2s ease-in-out infinite;
-  background: linear-gradient(
-    90deg,
-    var(--text-main) 0%,
-    var(--accent) 35%,
-    var(--text-main) 65%,
-    var(--text-main) 100%
-  );
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-#loadingOverlay p {
-  font-size: 1.1rem;
-  color: var(--text-muted);
-  opacity: 0;
-  animation: fadeSlideIn 0.6s ease 0.4s forwards, shimmer 2s ease-in-out infinite;
-  background: linear-gradient(
-    90deg,
-    var(--text-main) 0%,
-    var(--accent) 35%,
-    var(--text-main) 65%,
-    var(--text-main) 100%
-  );
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-#loadingOverlay .checkmark {
-  width: 48px;
-  height: 48px;
-  border: 3px solid var(--accent);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.5rem;
-  color: var(--accent);
-  opacity: 0;
-  transform: scale(0);
-}
-
-#loadingOverlay .checkmark.show {
-  opacity: 1;
-  transform: scale(1);
-  animation: popIn 0.4s ease;
-}
-
-@keyframes fadeSlideIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes popIn {
-  0% { transform: scale(0); }
-  70% { transform: scale(1.15); }
-  100% { transform: scale(1); }
 }
 </style>
 </head>
