@@ -17,7 +17,7 @@ export async function initAnalysisToolV2(deps, context = {}) {
     isSourceNode
   } = deps;
 
-  const { subject: contextSubject } = context;
+  const { subject: contextSubject, nodeId: contextNodeId } = context;
 
   function setAnalysisFocus(enabled) {}
 
@@ -2139,4 +2139,27 @@ function htmlToPlainText(html) {
   resetSourceForm();
   resetAnalysisForm();
   await refreshData();
+
+  if (contextNodeId) {
+    const targetNode = state.nodes.find(n => n.id === contextNodeId) || state.quotes.find(q => q.id === contextNodeId);
+    if (targetNode) {
+      const nodeSubject = targetNode.subject;
+      if (nodeSubject && nodeSubject !== state.selectedSubject) {
+        state.selectedSubject = nodeSubject;
+        await refreshData();
+      }
+      if (launchpadView) launchpadView.style.display = "none";
+      if (studyView) studyView.style.display = "block";
+      
+      if (targetNode.type === "analysis" || targetNode.type === "source") {
+        state.selectedSourceId = targetNode.id;
+        renderSourceSelect();
+      }
+      
+      if (targetNode.type === "analysis" && analysisReader) {
+        analysisReader.innerHTML = formatAnalysisForDisplay(targetNode.analysis || "");
+        analysisReader.dataset.nodeId = targetNode.id;
+      }
+    }
+  }
 }
