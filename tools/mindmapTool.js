@@ -21,39 +21,41 @@ export async function initMindmapTool(deps, context = {}) {
     nodes: [],
     quotes: [],
     currentSubject: contextSubject || null,
-    viewMode: "network",
     selectedNodeId: null,
     hoveredNodeId: null,
-    isDragging: false,
-    dragStartPos: { x: 0, y: 0 },
-    forcePositions: new Map()
+    nodePositions: new Map(),
+    draggingNodeId: null,
+    dragOffset: { x: 0, y: 0 },
+    zoom: 1,
+    panOffset: { x: 0, y: 0 },
+    isPanning: false,
+    panStartPos: { x: 0, y: 0 }
   };
 
   const canvas = document.getElementById("mindmapCanvas");
   const ctx = canvas?.getContext("2d");
-  const nodeFloatingCard = document.getElementById("nodeFloatingCard");
-  const nodePointsContainer = document.getElementById("nodePoints");
-  const nodeLabelsContainer = document.getElementById("nodeLabels");
+  const blueprintArea = document.getElementById("blueprintArea");
+  const emptyState = document.getElementById("emptyState");
+  const nodeSidebar = document.getElementById("nodeSidebar");
+  const sidebarTitle = document.getElementById("sidebarTitle");
+  const sidebarType = document.getElementById("sidebarType");
+  const fullContent = document.getElementById("fullContent");
+  const deleteNodeBtn = document.getElementById("deleteNodeBtn");
+  const editNodeBtn = document.getElementById("editNodeBtn");
+  const sidebarClose = document.getElementById("sidebarClose");
 
   const config = {
-    nodeRadius: 6,
-    labelOffset: 20,
-    connectionDistance: 150,
-    repulsionStrength: 500,
-    attractionStrength: 0.01,
-    centerPull: 0.001,
-    damping: 0.9,
-    minSpeed: 0.1
-  };
-
-  function getNodeColor(type) {
-    switch (type) {
-      case "source": return "#4da6ff";
-      case "quote": return "#ff9b39";
-      case "analysis": return "#2cffb3";
-      default: return "#9aa4ad";
+    nodeRadius: 8,
+    nodeHoverRadius: 12,
+    labelOffset: 18,
+    minZoom: 0.25,
+    maxZoom: 3,
+    colors: {
+      source: "#4da6ff",
+      quote: "#ff9b39",
+      analysis: "#2cffb3"
     }
-  }
+  };
 
   function getNodeTypeIcon(type) {
     switch (type) {
@@ -64,86 +66,103 @@ export async function initMindmapTool(deps, context = {}) {
     }
   }
 
+  function getNodeColor(type) {
+    return config.colors[type] || "#9aa4ad";
+  }
+
   function getNodeDisplayTitle(node) {
     if (node.type === "quote") {
-      return node.quote?.substring(0, 50) + (node.quote?.length > 50 ? "..." : "") || "Untitled Quote";
+      const text = node.quote || "";
+      return text.substring(0, 40) + (text.length > 40 ? "..." : "") || "Untitled Quote";
     }
     if (node.type === "analysis") {
-      return node.title || node.analysis?.substring(0, 50) + (node.analysis?.length > 50 ? "..." : "") || "Untitled Analysis";
+      return node.title || node.analysis?.substring(0, 40) + (node.analysis?.length > 40 ? "..." : "") || "Untitled Analysis";
     }
     if (node.type === "source") {
       return node.title || node.subject || "Untitled Source";
     }
-    return node.subject || node.title || "Unknown Node";
+    if (node.type === "subject") {
+      return node.title || node.subject || "Untitled Subject";
+    }
+    return node.subject || node.title || "Unknown";
   }
 
-  function getNodePreview(node, maxLength = 100) {
-    if (node.type === "quote") {
-      return node.quote || "";
-    }
-    if (node.type === "analysis") {
-      return node.analysis || "";
-    }
-    if (node.type === "source") {
-      return node.content?.substring(0, maxLength) || node.contentText?.substring(0, maxLength) || "";
-    }
+  function getNodePreview(node, maxLength = 150) {
+    if (node.type === "quote") return node.quote || "";
+    if (node.type === "analysis") return node.analysis || "";
+    if (node.type === "source") return node.content?.substring(0, maxLength) || node.contentText?.substring(0, maxLength) || "";
     return "";
   }
 
+  function getNodeFullContent(node) {
+    if (node.type === "quote") return node.quote || "";
+    if (node.type === "analysis") return node.analysis || "";
+    if (node.type === "source") return node.content || node.contentText || "";
+    return "";
+  }
+
+  function getNodeType(node) {
+    return node.type || node.itemType || "unknown";
+  }
+
   function initializePositions(containerWidth, containerHeight) {
-    state.forcePositions.clear();
+    state.nodePositions.clear();
     
-    const allItems = [...state.nodes, ...state.quotes];
+    const allItems = getAllItems();
+    if (allItems.length === 0) return;
+    
     const centerX = containerWidth / 2;
     const centerY = containerHeight / 2;
     
     allItems.forEach((item, index) => {
-      if (!state.forcePositions.has(item.id)) {
+      if (!state.nodePositions.has(item.id)) {
         const angle = (index / allItems.length) * Math.PI * 2;
-        const radius = Math.min(containerWidth, containerHeight) * 0.3;
-        state.forcePositions.set(item.id, {
-          x: centerX + Math.cos(angle) * radius + (Math.random() - 0.5) * 50,
-          y: centerY + Math.sin(angle) * radius + (Math.random() - 0.5) * 50,
-          vx: 0,
-          vy: 0
+        const radius = Math.min(containerWidth, containerHeight) * 0.22;
+        state.nodePositions.set(item.id, {
+          x: centerX + Math.cos(angle) * radius + (Math.random() - 0.5) * 40,
+          y: centerY + Math.sin(angle) * radius + (Math.random() - 0.5) * 40
         });
       }
     });
+  }
+
+  function getAllItems() {
+    return [...state.nodes, ...state.quotes];
+  }
+
+  function findItemById(id) {
+    return getAllItems().find(item => item.id === id);
   }
 
   function getConnections() {
     const connections = [];
     const connectionSet = new Set();
 
-    state.nodes.filter(n => n.type === "analysis").forEach(analysis => {
-      if (analysis.quoteRefs) {
+    const items = getAllItems();
+    const analysisNodes = items.filter(n => n.type === "analysis");
+    const quoteNodes = items.filter(q => q.type === "quote");
+
+    analysisNodes.forEach(analysis => {
+      if (analysis.quoteRefs && Array.isArray(analysis.quoteRefs)) {
         analysis.quoteRefs.forEach(ref => {
           if (ref.quoteId) {
             const key = [ref.quoteId, analysis.id].sort().join("-");
             if (!connectionSet.has(key)) {
               connectionSet.add(key);
-              connections.push({
-                from: ref.quoteId,
-                to: analysis.id,
-                type: "quote-analysis"
-              });
+              connections.push({ from: ref.quoteId, to: analysis.id, type: "quote-analysis" });
             }
           }
         });
       }
     });
 
-    state.quotes.forEach(quote => {
-      if (quote.meta?.analysisNodeIds) {
+    quoteNodes.forEach(quote => {
+      if (quote.meta?.analysisNodeIds && Array.isArray(quote.meta.analysisNodeIds)) {
         quote.meta.analysisNodeIds.forEach(analysisId => {
           const key = [quote.id, analysisId].sort().join("-");
           if (!connectionSet.has(key)) {
             connectionSet.add(key);
-            connections.push({
-              from: quote.id,
-              to: analysisId,
-              type: "quote-analysis"
-            });
+            connections.push({ from: quote.id, to: analysisId, type: "quote-analysis" });
           }
         });
       }
@@ -152,80 +171,13 @@ export async function initMindmapTool(deps, context = {}) {
     return connections;
   }
 
-  function applyForces(containerWidth, containerHeight) {
-    const connections = getConnections();
-    const allIds = new Set([...state.nodes.map(n => n.id), ...state.quotes.map(q => q.id)]);
-    
-    allIds.forEach(id => {
-      if (!state.forcePositions.has(id)) return;
-      const pos = state.forcePositions.get(id);
-      
-      let fx = 0, fy = 0;
-
-      allIds.forEach(otherId => {
-        if (otherId === id) return;
-        const otherPos = state.forcePositions.get(otherId);
-        if (!otherPos) return;
-        
-        const dx = pos.x - otherPos.x;
-        const dy = pos.y - otherPos.y;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        
-        if (dist < config.connectionDistance) {
-          const force = config.repulsionStrength / (dist * dist);
-          fx += (dx / dist) * force;
-          fy += (dy / dist) * force;
-        }
-      });
-
-      connections.forEach(conn => {
-        let otherId = null;
-        if (conn.from === id) otherId = conn.to;
-        else if (conn.to === id) otherId = conn.from;
-        
-        if (otherId) {
-          const otherPos = state.forcePositions.get(otherId);
-          if (otherPos) {
-            const dx = otherPos.x - pos.x;
-            const dy = otherPos.y - pos.y;
-            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-            
-            if (dist > config.connectionDistance) {
-              const force = (dist - config.connectionDistance) * config.attractionStrength;
-              fx += (dx / dist) * force;
-              fy += (dy / dist) * force;
-            } else if (dist < config.connectionDistance * 0.5) {
-              const force = (config.connectionDistance * 0.5 - dist) * config.attractionStrength * 0.5;
-              fx -= (dx / dist) * force;
-              fy -= (dy / dist) * force;
-            }
-          }
-        }
-      });
-
-      const centerX = containerWidth / 2;
-      const centerY = containerHeight / 2;
-      fx += (centerX - pos.x) * config.centerPull;
-      fy += (centerY - pos.y) * config.centerPull;
-
-      pos.vx = (pos.vx + fx) * config.damping;
-      pos.vy = (pos.vy + fy) * config.damping;
-
-      const speed = Math.sqrt(pos.vx * pos.vx + pos.vy * pos.vy);
-      if (speed < config.minSpeed) {
-        pos.vx *= 0.9;
-        pos.vy *= 0.9;
-      }
-
-      pos.x += pos.vx;
-      pos.y += pos.vy;
-
-      const margin = 50;
-      if (pos.x < margin) { pos.x = margin; pos.vx *= -0.5; }
-      if (pos.x > containerWidth - margin) { pos.x = containerWidth - margin; pos.vx *= -0.5; }
-      if (pos.y < margin) { pos.y = margin; pos.vy *= -0.5; }
-      if (pos.y > containerHeight - margin) { pos.y = containerHeight - margin; pos.vy *= -0.5; }
-    });
+  function transformPoint(x, y) {
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    return {
+      x: centerX + (x - centerX) * state.zoom + state.panOffset.x,
+      y: centerY + (y - centerY) * state.zoom + state.panOffset.y
+    };
   }
 
   function render() {
@@ -240,211 +192,168 @@ export async function initMindmapTool(deps, context = {}) {
     
     ctx.clearRect(0, 0, width, height);
 
-    if (state.viewMode === "network") {
-      applyForces(width, height);
-    }
-
     const connections = getConnections();
+    const items = getAllItems();
+
     connections.forEach(conn => {
-      const fromPos = state.forcePositions.get(conn.from);
-      const toPos = state.forcePositions.get(conn.to);
+      const fromPos = state.nodePositions.get(conn.from);
+      const toPos = state.nodePositions.get(conn.to);
       
       if (fromPos && toPos) {
+        const fromTrans = transformPoint(fromPos.x, fromPos.y);
+        const toTrans = transformPoint(toPos.x, toPos.y);
         const isActive = state.selectedNodeId === conn.from || state.selectedNodeId === conn.to;
+        
         ctx.beginPath();
-        ctx.moveTo(fromPos.x, fromPos.y);
-        ctx.lineTo(toPos.x, toPos.y);
-        ctx.strokeStyle = isActive ? "rgba(44, 255, 179, 0.6)" : "rgba(44, 255, 179, 0.2)";
-        ctx.lineWidth = isActive ? 2 : 1;
+        ctx.moveTo(fromTrans.x, fromTrans.y);
+        ctx.lineTo(toTrans.x, toTrans.y);
+        ctx.strokeStyle = isActive ? "rgba(44, 255, 179, 0.9)" : "rgba(44, 255, 179, 0.35)";
+        ctx.lineWidth = isActive ? 3 : 2;
         ctx.stroke();
       }
     });
 
-    const allItems = [...state.nodes.map(n => ({ ...n, itemType: "node" })), ...state.quotes.map(q => ({ ...q, itemType: "quote" }))];
-    
-    allItems.forEach(item => {
-      const pos = state.forcePositions.get(item.id);
+    items.forEach(item => {
+      const pos = state.nodePositions.get(item.id);
       if (!pos) return;
       
+      const posTrans = transformPoint(pos.x, pos.y);
       const isSelected = state.selectedNodeId === item.id;
       const isHovered = state.hoveredNodeId === item.id;
+      const radius = (isHovered || isSelected ? config.nodeHoverRadius : config.nodeRadius) * state.zoom;
       const color = getNodeColor(item.type);
       
       ctx.beginPath();
-      ctx.arc(pos.x, pos.y, isSelected || isHovered ? config.nodeRadius * 1.5 : config.nodeRadius, 0, Math.PI * 2);
-      ctx.fillStyle = color;
+      ctx.arc(posTrans.x, posTrans.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(10, 30, 22, 0.9)";
       ctx.fill();
-      
-      if (isSelected) {
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
-        ctx.lineWidth = 2;
-        ctx.stroke();
-      }
+      ctx.strokeStyle = color;
+      ctx.lineWidth = isSelected ? 3 : 2;
+      ctx.stroke();
+
+      ctx.font = `${12 * state.zoom}px Inter, system-ui, sans-serif`;
+      ctx.fillStyle = "rgba(230, 255, 245, 0.8)";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      const title = getNodeDisplayTitle(item);
+      const maxChars = Math.max(8, Math.floor(18 / state.zoom));
+      const displayTitle = title.length > maxChars ? title.substring(0, maxChars - 2) + "..." : title;
+      ctx.fillText(displayTitle, posTrans.x, posTrans.y + config.labelOffset * state.zoom);
     });
 
-    renderNodeElements();
     updateStats();
+    
+    if (items.length > 0) {
+      if (emptyState) emptyState.style.display = "none";
+    } else {
+      if (emptyState) emptyState.style.display = "flex";
+    }
     
     requestAnimationFrame(render);
   }
 
-  function renderNodeElements() {
-    if (!nodePointsContainer || !nodeLabelsContainer) return;
-    
-    nodePointsContainer.innerHTML = "";
-    nodeLabelsContainer.innerHTML = "";
-    
-    const allItems = [...state.nodes, ...state.quotes];
-    
-    allItems.forEach(item => {
-      const pos = state.forcePositions.get(item.id);
-      if (!pos) return;
-      
-      const isSelected = state.selectedNodeId === item.id;
-      const isHovered = state.hoveredNodeId === item.id;
-      const color = getNodeColor(item.type);
-      const title = getNodeDisplayTitle(item);
-      
-      const point = document.createElement("div");
-      point.className = "node-point" + (isSelected ? " selected" : "") + (isHovered ? " hovered" : "");
-      point.style.left = pos.x + "px";
-      point.style.top = pos.y + "px";
-      point.style.background = color;
-      point.dataset.nodeId = item.id;
-      point.addEventListener("click", (e) => {
-        e.stopPropagation();
-        selectNode(item.id);
-      });
-      point.addEventListener("mouseenter", () => {
-        state.hoveredNodeId = item.id;
-      });
-      point.addEventListener("mouseleave", () => {
-        state.hoveredNodeId = null;
-      });
-      nodePointsContainer.appendChild(point);
-      
-      const label = document.createElement("div");
-      label.className = "node-label";
-      label.style.left = pos.x + "px";
-      label.style.top = pos.y + "px";
-      label.textContent = title;
-      nodeLabelsContainer.appendChild(label);
-    });
+  function getCanvasPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    };
   }
 
-  function selectNode(nodeId) {
+  function inverseTransform(x, y) {
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    return {
+      x: (x - centerX - state.panOffset.x) / state.zoom + centerX,
+      y: (y - centerY - state.panOffset.y) / state.zoom + centerY
+    };
+  }
+
+  function findNodeAtPosition(x, y) {
+    const items = getAllItems();
+    const clickRadius = 20 / state.zoom;
+    
+    const inv = inverseTransform(x, y);
+    
+    for (let i = items.length - 1; i >= 0; i--) {
+      const item = items[i];
+      const pos = state.nodePositions.get(item.id);
+      if (!pos) continue;
+      
+      const dx = inv.x - pos.x;
+      const dy = inv.y - pos.y;
+      if (dx * dx + dy * dy <= clickRadius * clickRadius) {
+        return item;
+      }
+    }
+    return null;
+  }
+
+  function openNodeSidebar(nodeId) {
     state.selectedNodeId = nodeId;
     
-    const allItems = [...state.nodes, ...state.quotes];
-    const selectedItem = allItems.find(item => item.id === nodeId);
+    const selectedItem = findItemById(nodeId);
+    if (!selectedItem) return;
     
-    if (!selectedItem || !nodeFloatingCard) return;
+    sidebarTitle.textContent = getNodeDisplayTitle(selectedItem);
+    sidebarType.innerHTML = `<span>${getNodeTypeIcon(selectedItem.type)}</span> ${selectedItem.type.charAt(0).toUpperCase() + selectedItem.type.slice(1)}`;
     
-    const card = nodeFloatingCard.querySelector(".node-card");
-    if (!card) return;
+    fullContent.textContent = getNodeFullContent(selectedItem);
     
-    const titleEl = card.querySelector(".node-card-title");
-    const typeEl = card.querySelector(".node-card-type");
-    const contentEl = card.querySelector(".node-card-content");
-    const connectionEl = card.querySelector(".connection-info");
-    
-    titleEl.textContent = getNodeDisplayTitle(selectedItem);
-    typeEl.innerHTML = `<span>${getNodeTypeIcon(selectedItem.type)}</span> ${selectedItem.type.charAt(0).toUpperCase() + selectedItem.type.slice(1)}`;
-    
-    const preview = getNodePreview(selectedItem);
-    contentEl.textContent = preview;
-    
-    const connections = getConnections();
-    const connectionCount = connections.filter(c => c.from === nodeId || c.to === nodeId).length;
-    connectionEl.innerHTML = `<span class="node-link-indicator">🔗 ${connectionCount} connection${connectionCount !== 1 ? "s" : ""}</span>`;
-    
-    const editBtn = card.querySelector(".edit-btn");
-    const deleteBtn = card.querySelector(".delete-btn");
-    
-    if (editBtn) {
-      editBtn.onclick = () => handleEditNode(selectedItem);
-    }
-    if (deleteBtn) {
-      deleteBtn.onclick = () => handleDeleteNode(selectedItem);
-    }
-    
-    const itemPos = state.forcePositions.get(nodeId);
-    if (itemPos && nodeFloatingCard) {
-      const container = nodeFloatingCard.parentElement;
-      const cardWidth = 320;
-      const cardHeight = 250;
-      
-      let cardX = itemPos.x + 20;
-      let cardY = itemPos.y;
-      
-      if (cardX + cardWidth > container.clientWidth - 20) {
-        cardX = itemPos.x - cardWidth - 20;
-      }
-      if (cardY + cardHeight > container.clientHeight - 20) {
-        cardY = container.clientHeight - cardHeight - 20;
-      }
-      if (cardY < 20) cardY = 20;
-      
-      nodeFloatingCard.style.left = cardX + "px";
-      nodeFloatingCard.style.top = cardY + "px";
-    }
-    
-    nodeFloatingCard.classList.add("visible");
+    if (nodeSidebar) nodeSidebar.classList.add("open");
   }
 
-  function deselectNode() {
+  function closeSidebar() {
+    if (nodeSidebar) nodeSidebar.classList.remove("open");
     state.selectedNodeId = null;
-    if (nodeFloatingCard) {
-      nodeFloatingCard.classList.remove("visible");
-    }
   }
 
-  function updateStats() {
-    const totalNodes = document.getElementById("totalNodes");
-    const totalQuotes = document.getElementById("totalQuotes");
-    const totalAnalyses = document.getElementById("totalAnalyses");
-    const totalConnections = document.getElementById("totalConnections");
+  async function handleDeleteNode() {
+    if (!state.selectedNodeId) return;
     
-    if (totalNodes) totalNodes.textContent = state.nodes.length + state.quotes.length;
-    if (totalQuotes) totalQuotes.textContent = state.quotes.length;
-    if (totalAnalyses) totalAnalyses.textContent = state.nodes.filter(n => n.type === "analysis").length;
+    const selectedItem = findItemById(state.selectedNodeId);
+    if (!selectedItem) return;
     
-    const connections = getConnections();
-    if (totalConnections) totalConnections.textContent = connections.length;
-  }
-
-  async function handleEditNode(node) {
-    console.log("Edit node:", node.id);
-    deselectNode();
-  }
-
-  async function handleDeleteNode(node) {
-    const confirmed = window.confirm(`Delete this ${node.type}? This action cannot be undone.`);
+    const confirmed = window.confirm(`Delete this ${selectedItem.type}? This action cannot be undone.`);
     if (!confirmed) return;
     
     try {
-      if (node.type === "quote" || node.itemType === "quote") {
-        await removeQuoteEverywhere(node.id);
+      if (selectedItem.type === "quote") {
+        await removeQuoteEverywhere(selectedItem.id);
       } else {
-        if (node.type === "analysis") {
-          for (const ref of node.quoteRefs || []) {
-            if (ref.quoteId) {
-              const quote = state.quotes.find(q => q.id === ref.quoteId);
-              if (quote?.meta?.analysisNodeIds) {
-                quote.meta.analysisNodeIds = quote.meta.analysisNodeIds.filter(id => id !== node.id);
-                await addQuote(quote);
-              }
+        if (selectedItem.type === "analysis") {
+          const allQuotes = state.quotes;
+          for (const quote of allQuotes) {
+            if (quote.meta?.analysisNodeIds?.includes(selectedItem.id)) {
+              quote.meta.analysisNodeIds = quote.meta.analysisNodeIds.filter(id => id !== selectedItem.id);
+              await addQuote(quote);
             }
           }
         }
-        await removeNodeEverywhere(node.id);
+        await removeNodeEverywhere(selectedItem.id);
       }
       
+      closeSidebar();
       await refreshData();
     } catch (error) {
       console.error("Failed to delete node:", error);
       alert("Failed to delete node: " + error.message);
     }
+  }
+
+  function updateStats() {
+    const items = getAllItems();
+    const totalNodes = document.getElementById("totalNodes");
+    const totalQuotes = document.getElementById("totalQuotes");
+    const totalAnalyses = document.getElementById("totalAnalyses");
+    const totalConnections = document.getElementById("totalConnections");
+    
+    if (totalNodes) totalNodes.textContent = items.length;
+    if (totalQuotes) totalQuotes.textContent = items.filter(i => i.type === "quote").length;
+    if (totalAnalyses) totalAnalyses.textContent = items.filter(i => i.type === "analysis").length;
+    
+    const connections = getConnections();
+    if (totalConnections) totalConnections.textContent = connections.length;
   }
 
   async function refreshData() {
@@ -458,67 +367,133 @@ export async function initMindmapTool(deps, context = {}) {
     }
   }
 
-  function handleCanvasClick(e) {
-    if (e.target === canvas || e.target.classList.contains("node-point")) {
-      if (state.selectedNodeId && !e.target.closest(".node-floating-card")) {
-        deselectNode();
-      }
-    }
-  }
-
   function setupEventListeners() {
-    const container = canvas?.parentElement;
-    if (container) {
-      container.addEventListener("click", handleCanvasClick);
-      
-      container.addEventListener("dblclick", (e) => {
-        if (e.target.classList.contains("node-point")) {
-          const nodeId = e.target.dataset.nodeId;
-          if (nodeId) {
-            const item = [...state.nodes, ...state.quotes].find(i => i.id === nodeId);
-            if (item) {
-              handleEditNode(item);
-            }
+    if (canvas) {
+      canvas.addEventListener("click", (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const pos = {
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top
+        };
+        const node = findNodeAtPosition(pos.x, pos.y);
+        if (node) {
+          openNodeSidebar(node.id);
+        } else {
+          closeSidebar();
+        }
+      });
+
+      canvas.addEventListener("mousemove", (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const pos = {
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top
+        };
+        const node = findNodeAtPosition(pos.x, pos.y);
+        
+        if (state.isPanning) {
+          state.panOffset.x += e.movementX;
+          state.panOffset.y += e.movementY;
+        } else if (state.draggingNodeId) {
+          const centerX = canvas.width / 2;
+          const centerY = canvas.height / 2;
+          const nodePos = state.nodePositions.get(state.draggingNodeId);
+          if (nodePos) {
+            const rawX = (pos.x - centerX - state.panOffset.x) / state.zoom + centerX;
+            const rawY = (pos.y - centerY - state.panOffset.y) / state.zoom + centerY;
+            nodePos.x = rawX;
+            nodePos.y = rawY;
           }
+        } else {
+          state.hoveredNodeId = node ? node.id : null;
+          canvas.style.cursor = node ? "pointer" : state.isPanning ? "grabbing" : "default";
+        }
+      });
+
+      canvas.addEventListener("mousedown", (e) => {
+        if (e.button === 1) {
+          state.isPanning = true;
+          canvas.style.cursor = "grabbing";
+          e.preventDefault();
+          return;
+        }
+        
+        const rect = canvas.getBoundingClientRect();
+        const pos = {
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top
+        };
+        const node = findNodeAtPosition(pos.x, pos.y);
+        if (node) {
+          state.draggingNodeId = node.id;
+          const nodePos = state.nodePositions.get(node.id);
+          if (nodePos) {
+            state.dragOffset = {
+              x: pos.x - nodePos.x,
+              y: pos.y - nodePos.y
+            };
+          }
+          e.preventDefault();
+        }
+      });
+
+      canvas.addEventListener("mouseup", () => {
+        state.draggingNodeId = null;
+        state.isPanning = false;
+        canvas.style.cursor = "default";
+      });
+
+      canvas.addEventListener("mouseleave", () => {
+        state.draggingNodeId = null;
+        state.isPanning = false;
+        state.hoveredNodeId = null;
+      });
+
+      canvas.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        
+        const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+        const newZoom = Math.min(config.maxZoom, Math.max(config.minZoom, state.zoom * zoomFactor));
+        
+        const worldX = (mouseX - canvas.width / 2 - state.panOffset.x) / state.zoom + canvas.width / 2;
+        const worldY = (mouseY - canvas.height / 2 - state.panOffset.y) / state.zoom + canvas.height / 2;
+        
+        state.panOffset.x = mouseX - canvas.width / 2 - (worldX - canvas.width / 2) * newZoom;
+        state.panOffset.y = mouseY - canvas.height / 2 - (worldY - canvas.height / 2) * newZoom;
+        state.zoom = newZoom;
+      }, { passive: false });
+    }
+
+    if (blueprintArea) {
+      blueprintArea.addEventListener("click", (e) => {
+        if (e.target === blueprintArea) {
+          closeSidebar();
         }
       });
     }
 
-    const networkViewBtn = document.getElementById("networkViewBtn");
-    const hierarchyViewBtn = document.getElementById("hierarchyViewBtn");
-    
-    if (networkViewBtn) {
-      networkViewBtn.addEventListener("click", () => {
-        state.viewMode = "network";
-        networkViewBtn.classList.add("active");
-        if (hierarchyViewBtn) hierarchyViewBtn.classList.remove("active");
-      });
-    }
-    
-    if (hierarchyViewBtn) {
-      hierarchyViewBtn.addEventListener("click", () => {
-        state.viewMode = "hierarchy";
-        hierarchyViewBtn.classList.add("active");
-        if (networkViewBtn) networkViewBtn.classList.remove("active");
-      });
+    if (sidebarClose) {
+      sidebarClose.addEventListener("click", closeSidebar);
     }
 
-    const exportMapBtn = document.getElementById("exportMapBtn");
-    if (exportMapBtn) {
-      exportMapBtn.addEventListener("click", () => {
-        const data = {
-          nodes: state.nodes,
-          quotes: state.quotes,
-          connections: getConnections()
-        };
-        
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `neuronet-mindmap-${new Date().toISOString().slice(0, 10)}.json`;
-        link.click();
-        URL.revokeObjectURL(url);
+    if (deleteNodeBtn) {
+      deleteNodeBtn.addEventListener("click", handleDeleteNode);
+    }
+
+    if (editNodeBtn) {
+      editNodeBtn.addEventListener("click", () => {
+        if (state.selectedNodeId) {
+          const selectedItem = findItemById(state.selectedNodeId);
+          if (selectedItem) {
+            closeSidebar();
+            window.dispatchEvent(new CustomEvent("neuronet-open-tool", {
+              detail: { tool: "analysis", nodeId: selectedItem.id }
+            }));
+          }
+        }
       });
     }
   }
@@ -529,13 +504,44 @@ export async function initMindmapTool(deps, context = {}) {
 
   function handleResize() {
     const container = canvas?.parentElement;
-    if (container && state.forcePositions.size === 0) {
-      initializePositions(container.clientWidth, container.clientHeight);
+    if (!container) return;
+    
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    
+    if (state.nodePositions.size === 0) {
+      initializePositions(width, height);
+    } else {
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      state.nodePositions.forEach(pos => {
+        minX = Math.min(minX, pos.x);
+        maxX = Math.max(maxX, pos.x);
+        minY = Math.min(minY, pos.y);
+        maxY = Math.max(maxY, pos.y);
+      });
+      
+      const contentWidth = maxX - minX;
+      const contentHeight = maxY - minY;
+      
+      if (contentWidth > width - 100 || contentHeight > height - 100) {
+        const scaleX = (width - 100) / contentWidth;
+        const scaleY = (height - 100) / contentHeight;
+        const scale = Math.min(scaleX, scaleY, 1);
+        
+        const centerX = width / 2;
+        const centerY = height / 2;
+        const oldCenterX = (minX + maxX) / 2;
+        const oldCenterY = (minY + maxY) / 2;
+        
+        state.nodePositions.forEach(pos => {
+          pos.x = centerX + (pos.x - oldCenterX) * scale;
+          pos.y = centerY + (pos.y - oldCenterY) * scale;
+        });
+      }
     }
   }
 
   window.addEventListener("resize", handleResize);
-  
   document.addEventListener("db-change", handleDBChange);
 
   await refreshData();
@@ -546,7 +552,6 @@ export async function initMindmapTool(deps, context = {}) {
   }
   
   setupEventListeners();
-  
   render();
 
   window.__neuronetMindmapCleanup = () => {

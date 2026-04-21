@@ -558,6 +558,7 @@ async function renderSubjectList() {
     <div class="subject-card" data-subject="${escapeHtml(subject)}">
       <span class="subject-name">${escapeHtml(subject)}</span>
       <div class="subject-actions">
+        <button class="icon-btn rename-subject-btn" data-subject="${escapeHtml(subject)}" title="Rename">✏</button>
         <button class="btn study-subject-btn" data-subject="${escapeHtml(subject)}">Study</button>
         <button class="icon-btn delete-btn delete-subject-btn" data-subject="${escapeHtml(subject)}" title="Delete">✕</button>
       </div>
@@ -579,6 +580,43 @@ async function renderSubjectList() {
         await updateGlobalStats();
         await renderSubjectList();
       }
+    });
+  });
+
+  subjectList.querySelectorAll(".rename-subject-btn").forEach(btn => {
+    btn.addEventListener("click", async (e) => {
+      const subject = e.target.dataset.subject;
+      const updated = window.prompt(`Rename subject "${subject}" to:`, subject);
+      const next = (updated || "").trim();
+      if (!next || next === subject) return;
+
+      const [allNodes, allQuotes] = await Promise.all([getAllNodes(), getAllQuotes()]);
+      const now = Date.now();
+
+      const related = allNodes.filter(node => {
+        if (node?.type === "subject" || node?.meta?.kind === "subject") {
+          return (node.subject || node.title) === subject;
+        }
+        return node.subject === subject;
+      });
+
+      for (const node of related) {
+        const copy = { ...node };
+        copy.subject = next;
+        if (copy.type === "subject" || copy.meta?.kind === "subject") {
+          copy.title = next;
+        }
+        copy.updatedAt = now;
+        await addNode(copy);
+      }
+
+      const relatedQuotes = allQuotes.filter(quote => quote.subject === subject);
+      for (const quote of relatedQuotes) {
+        await addQuote({ ...quote, subject: next, updatedAt: now });
+      }
+
+      await updateGlobalStats();
+      await renderSubjectList();
     });
   });
 }
@@ -655,17 +693,26 @@ async function renderPinnedToolsSidebar() {
 
   const pinnedTools = await getPinnedTools();
 
-  container.innerHTML = pinnedTools.map(pinned => {
+  container.innerHTML = pinnedTools.map((pinned, index) => {
     const def = toolDefinitions[pinned.toolId];
     if (!def) return "";
     const isActive = currentToolName === pinned.toolId ? "active" : "";
     return `
-      <div class="tool-btn-wrapper ${isActive}" data-tool="${pinned.toolId}">
+      <div class="tool-btn-wrapper entering ${isActive}" data-tool="${pinned.toolId}">
         <button class="tool-btn" data-tool="${pinned.toolId}">${def.icon} ${def.name}</button>
-        <button class="tool-pin-btn pinned" data-tool="${pinned.toolId}" title="Unpin">📌</button>
+        <div class="tool-actions-menu">
+          <button class="tool-action-btn pin" data-action="unpin" data-tool="${pinned.toolId}" title="Unpin">Unpin</button>
+        </div>
       </div>
     `;
   }).join("");
+
+  container.querySelectorAll(".tool-btn-wrapper").forEach((wrapper, i) => {
+    setTimeout(() => {
+      wrapper.classList.remove("entering");
+      wrapper.classList.add("entered");
+    }, 50 + i * 40);
+  });
 
   container.querySelectorAll(".tool-btn").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -674,19 +721,34 @@ async function renderPinnedToolsSidebar() {
       hideLaunchpad();
       loadTool(toolName, { subject });
     });
+  });
 
-    btn.addEventListener("contextmenu", (e) => {
+  container.querySelectorAll(".tool-btn-wrapper").forEach(wrapper => {
+    wrapper.addEventListener("contextmenu", (e) => {
       e.preventDefault();
-      const toolId = btn.dataset.tool;
-      showUnpinModal(toolId);
+      e.stopPropagation();
+      container.querySelectorAll(".tool-btn-wrapper.show-actions").forEach(el => {
+        if (el !== wrapper) el.classList.remove("show-actions");
+      });
+      wrapper.classList.toggle("show-actions");
     });
   });
 
-  container.querySelectorAll(".tool-pin-btn").forEach(btn => {
+  document.addEventListener("click", () => {
+    container.querySelectorAll(".tool-btn-wrapper.show-actions").forEach(el => {
+      el.classList.remove("show-actions");
+    });
+  });
+
+  container.querySelectorAll(".tool-action-btn").forEach(btn => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
+      const action = btn.dataset.action;
       const toolId = btn.dataset.tool;
-      showUnpinModal(toolId);
+      if (action === "unpin") {
+        showUnpinModal(toolId);
+      }
+      btn.closest(".tool-btn-wrapper").classList.remove("show-actions");
     });
   });
 }
@@ -726,9 +788,12 @@ async function renderToolCatalogue() {
 
   grid.innerHTML = Object.entries(toolDefinitions).map(([toolId, def]) => {
     const isPinned = pinnedIds.has(toolId);
+    const actionText = isPinned ? "Unpin" : "Pin";
     return `
-      <div class="tool-card" data-tool="${toolId}">
-        <button class="tool-card-pin ${isPinned ? 'pinned' : ''}" data-tool="${toolId}">${isPinned ? '📌' : '📍'}</button>
+      <div class="tool-card entering" data-tool="${toolId}">
+        <div class="tool-card-actions">
+          <button class="tool-card-action-btn" data-action="${isPinned ? 'unpin' : 'pin'}" data-tool="${toolId}">${actionText}</button>
+        </div>
         <div class="tool-card-icon">${def.icon}</div>
         <div class="tool-card-title">${def.name}</div>
         <div class="tool-card-desc">${def.desc}</div>
@@ -737,23 +802,45 @@ async function renderToolCatalogue() {
   }).join("");
 
   grid.querySelectorAll(".tool-card").forEach(card => {
+    requestAnimationFrame(() => {
+      card.classList.remove("entering");
+      card.classList.add("entered");
+    });
+  });
+
+  grid.querySelectorAll(".tool-card").forEach(card => {
     card.addEventListener("click", (e) => {
-      if (e.target.classList.contains("tool-card-pin")) return;
+      if (e.target.closest(".tool-card-actions")) return;
       const toolName = card.dataset.tool;
       hideLaunchpad();
       loadTool(toolName, {});
     });
+
+    card.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      grid.querySelectorAll(".tool-card.show-actions").forEach(el => {
+        if (el !== card) el.classList.remove("show-actions");
+      });
+      card.classList.toggle("show-actions");
+    });
   });
 
-  grid.querySelectorAll(".tool-card-pin").forEach(btn => {
+  document.addEventListener("click", () => {
+    grid.querySelectorAll(".tool-card.show-actions").forEach(el => {
+      el.classList.remove("show-actions");
+    });
+  });
+
+  grid.querySelectorAll(".tool-card-action-btn").forEach(btn => {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
+      const action = btn.dataset.action;
       const toolId = btn.dataset.tool;
-      const isPinned = btn.classList.contains("pinned");
 
-      if (isPinned) {
+      if (action === "unpin") {
         showUnpinModal(toolId);
-      } else {
+      } else if (action === "pin") {
         await pinTool(toolId);
         await renderPinnedToolsSidebar();
         await renderToolCatalogue();
@@ -769,14 +856,79 @@ document.addEventListener("DOMContentLoaded", async () => {
   initCanvasListeners();
   setProfileUI(null);
 
+  const loadingOverlay = document.getElementById("loadingOverlay");
+  const loadingMessage = document.getElementById("loadingMessage");
+  const loadingCheckmark = document.getElementById("loadingCheckmark");
+  const appElement = document.getElementById("app");
+
+  loadingOverlay.style.display = "flex";
+  loadingMessage.textContent = "Connecting to the server...";
+
+  const sidebarEl = document.getElementById("sidebar");
+  const launchpadEl = document.getElementById("globalLaunchpad");
+  if (sidebarEl) sidebarEl.classList.add("entering");
+  if (launchpadEl) launchpadEl.classList.add("entering");
+
   await initDB();
   DB_READY = true;
   console.log("IndexedDB ready", { DB_READY, OFFLINE_MODE, DEV_MODE });
 
-  const user = await fetchUser();
+  loadingMessage.textContent = "Authenticating with the cloud...";
+  let user;
+  try {
+    user = await fetchUser();
+  } finally {
+    loadingMessage.textContent = "Loading page content complete!";
+    loadingCheckmark.classList.add("show");
+  }
+
+  await new Promise(r => setTimeout(r, 800));
+
+  loadingOverlay.classList.add("fade-out");
+
+  await new Promise(r => setTimeout(r, 800));
+
   if (user) {
     await syncAfterLogin();
   }
+
+  loadingOverlay.classList.add("completed");
+  loadingOverlay.style.display = "none";
+
+  const canvas = document.getElementById("neuronet");
+  if (canvas) {
+    canvas.style.filter = "brightness(0.85) contrast(1.15)";
+  }
+
+  const sidebarElDone = document.getElementById("sidebar");
+  const launchpadElDone = document.getElementById("globalLaunchpad");
+  sidebarElDone?.classList.remove("entering");
+  sidebarElDone?.classList.add("entered");
+  launchpadElDone?.classList.remove("entering");
+  launchpadElDone?.classList.add("entered");
+
+  const toolCards = document.querySelectorAll(".tool-card.entering");
+  toolCards.forEach((card, i) => {
+    setTimeout(() => {
+      card.classList.remove("entering");
+      card.classList.add("entered");
+    }, 50 + i * 50);
+  });
+
+  const sidebarTools = document.querySelectorAll(".tool-btn-wrapper.entering");
+  sidebarTools.forEach((tool, i) => {
+    setTimeout(() => {
+      tool.classList.remove("entering");
+      tool.classList.add("entered");
+    }, 50 + i * 40);
+  });
+
+  window.addEventListener("neuronet-open-tool", (e) => {
+    const { tool, nodeId, subject } = e.detail || {};
+    if (tool) {
+      loadTool(tool, { nodeId, subject });
+    }
+  });
 
   const profileElem = document.getElementById("sidebarProfile");
   const dropdown = document.getElementById("dropdown");

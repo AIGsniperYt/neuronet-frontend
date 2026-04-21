@@ -38,7 +38,7 @@ body {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
-canvas { position: fixed; inset:0; z-index:-1; }
+canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast(1.15) blur(12px); transition: filter 1s ease; }
 
 /* Styles for linked analyses and quotes in flashcards */
 .linked-analyses,
@@ -75,6 +75,7 @@ canvas { position: fixed; inset:0; z-index:-1; }
   height: 100vh;
   position: relative;
   z-index: 1;
+  opacity: 1;
 }
 
 #sidebar {
@@ -85,6 +86,17 @@ canvas { position: fixed; inset:0; z-index:-1; }
   padding: 24px 16px;
   display: flex;
   flex-direction: column;
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.4s ease;
+}
+
+#sidebar.entering {
+  transform: translateX(-40px);
+  opacity: 0;
+}
+
+#sidebar.entered {
+  transform: translateX(0);
+  opacity: 1;
 }
 
 #sidebar h2 {
@@ -95,14 +107,6 @@ canvas { position: fixed; inset:0; z-index:-1; }
   letter-spacing: 1px;
   padding-left: 8px;
   cursor: pointer;
-  user-select: none;
-}
-
-#sidebar,
-#sidebar *,
-#userName,
-#toolButtonsContainer,
-#toolButtonsContainer * {
   user-select: none;
 }
 
@@ -117,6 +121,18 @@ canvas { position: fixed; inset:0; z-index:-1; }
   display: flex;
 }
 
+#sidebar,
+#sidebar *,
+#userName,
+#toolButtonsContainer,
+#toolButtonsContainer * {
+  user-select: none;
+}
+
+#sidebar h2:hover {
+  color: #5fffcf;
+}
+
 #toolContainer {
   width: 100%;
   height: 100%;
@@ -126,6 +142,17 @@ canvas { position: fixed; inset:0; z-index:-1; }
 .tool-btn-wrapper {
   position: relative;
   margin-bottom: 8px;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.tool-btn-wrapper.entering {
+  opacity: 0;
+  transform: translateX(-10px);
+}
+
+.tool-btn-wrapper.entered {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 .tool-btn-wrapper,
@@ -172,10 +199,54 @@ canvas { position: fixed; inset:0; z-index:-1; }
   color: rgba(255,255,255,0.4);
   cursor: pointer;
   font-size: 0.85rem;
-  transition: all 0.2s ease;
 }
 
 .tool-pin-btn:hover {
+  color: var(--accent);
+}
+
+.tool-actions-menu {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: rgba(10,30,22,0.95);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  padding: 0;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 100;
+}
+
+.tool-btn-wrapper.show-actions .tool-actions-menu {
+  opacity: 1;
+  width: auto;
+  padding: 6px;
+}
+
+.tool-action-btn {
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.tool-action-btn:hover {
+  background: rgba(255,107,107,0.15);
+  color: #ff6b6b;
+}
+
+.tool-action-btn.pin:hover {
+  background: rgba(44,255,179,0.15);
   color: var(--accent);
 }
 
@@ -272,6 +343,17 @@ canvas { position: fixed; inset:0; z-index:-1; }
   width: 100%;
   box-sizing: border-box;
   align-content: start;
+  transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.5s ease;
+}
+
+.launchpad.entering {
+  transform: translateY(-20px) scale(0.98);
+  opacity: 0;
+}
+
+.launchpad.entered {
+  transform: translateY(0) scale(1);
+  opacity: 1;
 }
 
 .launchpad > .panel {
@@ -462,8 +544,18 @@ canvas { position: fixed; inset:0; z-index:-1; }
   border-radius: 14px;
   padding: 20px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: transform 0.25s ease, opacity 0.4s ease, border-color 0.2s ease, background 0.2s ease;
   position: relative;
+}
+
+.tool-card.entering {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.tool-card.entered {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .tool-card:hover {
@@ -501,6 +593,50 @@ canvas { position: fixed; inset:0; z-index:-1; }
 
 .tool-card-pin:hover,
 .tool-card-pin.pinned {
+  color: var(--accent);
+}
+
+.tool-card {
+  overflow: visible;
+}
+
+.tool-card-actions {
+  position: absolute;
+  top: 12px;
+  right: -4px;
+  background: rgba(10,30,22,0.95);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  padding: 6px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  width: 0;
+  padding: 0;
+  overflow: hidden;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 10;
+}
+
+.tool-card.show-actions .tool-card-actions {
+  opacity: 1;
+  width: auto;
+  padding: 6px;
+}
+
+.tool-card-action-btn {
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.8rem;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.tool-card-action-btn:hover {
+  background: rgba(44,255,179,0.15);
   color: var(--accent);
 }
 
@@ -564,14 +700,142 @@ canvas { position: fixed; inset:0; z-index:-1; }
   #sidebar { width: 100%; padding: 16px; }
   #mainContent { padding: 20px; }
 }
+
+.shimmer-text {
+  background: linear-gradient(
+    90deg,
+    var(--text-main) 0%,
+    var(--accent) 50%,
+    var(--text-main) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 0.4s linear infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+#loadingOverlay {
+  position: fixed;
+  inset: 0;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  gap: 24px;
+  transition: opacity 0.8s ease, backdrop-filter 1s ease;
+  user-select: none;
+}
+
+#loadingOverlay.fade-out {
+  opacity: 0;
+  backdrop-filter: blur(0px);
+  pointer-events: none;
+  transition: opacity 0.8s ease;
+}
+
+#loadingOverlay.completed {
+  background: transparent;
+  backdrop-filter: blur(0px);
+}
+
+#loadingOverlay.completed h1,
+#loadingOverlay.completed #loadingMessage {
+  animation: none;
+  background: none;
+  -webkit-text-fill-color: var(--accent);
+  color: var(--accent);
+}
+
+#loadingOverlay h1 {
+  font-size: 3rem;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: var(--accent);
+  opacity: 0;
+  animation: fadeSlideIn 0.6s ease 0.2s forwards, shimmer 2s ease-in-out infinite;
+  background: linear-gradient(
+    90deg,
+    var(--text-main) 0%,
+    var(--accent) 35%,
+    var(--text-main) 65%,
+    var(--text-main) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+#loadingOverlay p {
+  font-size: 1.1rem;
+  color: var(--text-muted);
+  opacity: 0;
+  animation: fadeSlideIn 0.6s ease 0.4s forwards, shimmer 2s ease-in-out infinite;
+  background: linear-gradient(
+    90deg,
+    var(--text-main) 0%,
+    var(--accent) 35%,
+    var(--text-main) 65%,
+    var(--text-main) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+#loadingOverlay .checkmark {
+  width: 48px;
+  height: 48px;
+  border: 3px solid var(--accent);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  color: var(--accent);
+  opacity: 0;
+  transform: scale(0);
+}
+
+#loadingOverlay .checkmark.show {
+  opacity: 1;
+  transform: scale(1);
+  animation: popIn 0.4s ease;
+}
+
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes popIn {
+  0% { transform: scale(0); }
+  70% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
 </style>
 </head>
 <body>
 
 <canvas id="neuronet"></canvas>
 
+<div id="loadingOverlay">
+  <div class="checkmark" id="loadingCheckmark">&#10003;</div>
+  <h1 class="shimmer-text">NeuroNet</h1>
+  <p id="loadingMessage">Loading your workspace...</p>
+</div>
+
 <div id="app">
-  <aside id="sidebar">
+  <aside id="sidebar" class="entering">
     <h2 id="logo" style="cursor: pointer;">NeuroNet</h2>
     <div id="toolButtonsContainer"></div>
     
@@ -603,7 +867,7 @@ canvas { position: fixed; inset:0; z-index:-1; }
   <main id="mainContent">
     <div id="toolContainer"></div>
     <!-- Global Launchpad (outside toolContainer) -->
-    <div id="globalLaunchpad" class="launchpad" style="display: none;">
+    <div id="globalLaunchpad" class="launchpad entering" style="display: none;">
         <section class="panel global-stats" id="globalStats">
           <div class="stats-grid">
             <div class="stat-card">
