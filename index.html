@@ -38,7 +38,7 @@ body {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
-canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast(1.15) blur(8px); transition: filter 1s ease; }
+canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast(1.15); transition: filter 1s ease; }
 
 /* Styles for linked analyses and quotes in flashcards */
 .linked-analyses,
@@ -85,7 +85,7 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: shimmer 0.8s ease-in-out infinite;
+  animation: shimmer 1.8s ease-in-out infinite;
 }
 
 @keyframes shimmer {
@@ -102,8 +102,9 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
   align-items: center;
   justify-content: center;
   z-index: 9999;
-  gap: 24px;
+  gap: 20px;
   transition: opacity 0.8s ease, backdrop-filter 1s ease;
+  backdrop-filter: blur(8px);
 }
 
 #loadingOverlay.fade-out {
@@ -113,22 +114,28 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
 
 #loadingOverlay.completed {
   background: transparent;
+  backdrop-filter: blur(0px);
 }
 
 #loadingOverlay h1 {
-  font-size: 3rem;
+  font-size: 3.5rem;
   font-weight: 800;
-  letter-spacing: 2px;
-  color: var(--accent);
+  letter-spacing: 4px;
+  background: linear-gradient(90deg, var(--text-main) 0%, var(--accent) 35%, var(--text-main) 65%, var(--text-main) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
   opacity: 0;
-  animation: fadeSlideIn 0.6s ease 0.2s forwards, shimmer 0.8s ease-in-out infinite;
+  animation: fadeSlideIn 0.8s ease 0.3s forwards, shimmer 1.8s ease-in-out infinite;
 }
 
 #loadingOverlay p {
-  font-size: 1.1rem;
+  font-size: 1.05rem;
+  letter-spacing: 0.5px;
   color: var(--text-muted);
   opacity: 0;
-  animation: fadeSlideIn 0.6s ease 0.4s forwards, shimmer 0.8s ease-in-out infinite;
+  animation: fadeSlideIn 0.8s ease 0.5s forwards, shimmer 1.8s ease-in-out infinite;
 }
 
 #loadingOverlay .checkmark {
@@ -148,7 +155,7 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
 #loadingOverlay .checkmark.show {
   opacity: 1;
   transform: scale(1);
-  animation: popIn 0.4s ease;
+  animation: popIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 @keyframes fadeSlideIn {
@@ -157,9 +164,9 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
 }
 
 @keyframes popIn {
-  0% { transform: scale(0); }
-  70% { transform: scale(1.15); }
-  100% { transform: scale(1); }
+  0% { transform: scale(0); opacity: 0; }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); opacity: 1; }
 }
 
 #sidebar {
@@ -203,6 +210,7 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
   padding: 0;
   backdrop-filter: blur(4px);
   display: flex;
+  position: relative;
 }
 
 #sidebar,
@@ -226,12 +234,12 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
 .tool-btn-wrapper {
   position: relative;
   margin-bottom: 8px;
-  transition: opacity 0.3s ease, transform 0.3s ease;
+  transition: opacity 0.35s cubic-bezier(0.23, 1, 0.32, 1), transform 0.35s cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 .tool-btn-wrapper.entering {
   opacity: 0;
-  transform: translateX(-10px);
+  transform: translateX(-12px);
 }
 
 .tool-btn-wrapper.entered {
@@ -418,26 +426,78 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
 
 /* Launchpad styles */
 .launchpad {
-  display: flex;
+  position: absolute;
+  inset: 0;
+  display: none;
   flex-direction: column;
   gap: 16px;
   padding: 20px;
   overflow-y: auto;
   user-select: none;
-  width: 100%;
   box-sizing: border-box;
   align-content: start;
-  transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.5s ease;
 }
 
 .launchpad.entering {
-  transform: translateY(-20px) scale(0.98);
+  display: flex;
+  transform: translateY(30px) scale(0.96);
   opacity: 0;
+  pointer-events: none;
+  filter: blur(3px);
+  transition: all 0.4s cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 .launchpad.entered {
+  display: flex;
   transform: translateY(0) scale(1);
   opacity: 1;
+  pointer-events: auto;
+  filter: blur(0px);
+  transition: all 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.launchpad.zooming-in {
+  display: flex;
+  transform: translateY(15px) scale(1.15);
+  opacity: 0;
+  pointer-events: none;
+  filter: blur(6px);
+  transition: all 0.15s ease;
+}
+
+.launchpad.zooming-in {
+  transform: translateY(15px) scale(1.15);
+  opacity: 0;
+  pointer-events: none;
+  filter: blur(6px);
+}
+
+.launchpad.zooming-out {
+  transform: translateY(-15px) scale(0.85);
+  opacity: 0;
+  filter: blur(6px);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease, filter 0.25s ease;
+}
+
+.launchpad > .panel {
+  opacity: 0;
+  transform: translateY(20px);
+}
+
+.launchpad.entered > .panel {
+  opacity: 1;
+  transform: translateY(0);
+  transition: transform 0.5s cubic-bezier(0.23, 1, 0.32, 1), opacity 0.5s ease;
+}
+
+.launchpad.entered > .panel:nth-child(1) { transition-delay: 0.1s; }
+.launchpad.entered > .panel:nth-child(2) { transition-delay: 0.2s; }
+.launchpad.entered > .panel:nth-child(3) { transition-delay: 0.3s; }
+
+.launchpad.entering > .panel {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
 }
 
 .launchpad > .panel {
@@ -603,7 +663,25 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.08);
   border-radius: 14px;
-  padding: 14px 16px;
+  padding: 18px 20px;
+  min-height: 62px;
+  box-sizing: border-box;
+}
+
+.subject-card-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-main);
+  font-size: 1rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+  flex: 1;
+}
+
+.subject-card-btn:hover {
+  color: var(--accent);
 }
 
 .subject-name {
@@ -614,6 +692,31 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
 .subject-actions {
   display: flex;
   gap: 8px;
+  align-items: center;
+}
+
+.subject-actions[hidden] {
+  display: none !important;
+}
+
+.subject-actions button {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 6px 10px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.subject-actions button:hover {
+  background: rgba(255,255,255,0.1);
+  color: var(--text-main);
+}
+
+.subject-actions button[data-action="delete-subject"]:hover {
+  color: #ff6b6b;
 }
 
 .tool-cards-grid {
@@ -628,18 +731,18 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
   border-radius: 14px;
   padding: 20px;
   cursor: pointer;
-  transition: transform 0.25s ease, opacity 0.4s ease, border-color 0.2s ease, background 0.2s ease;
+  transition: transform 0.5s cubic-bezier(0.23, 1, 0.32, 1), opacity 0.6s ease, border-color 0.2s ease, background 0.2s ease;
   position: relative;
 }
 
 .tool-card.entering {
   opacity: 0;
-  transform: translateY(10px);
+  transform: translateY(24px) scale(0.96);
 }
 
 .tool-card.entered {
   opacity: 1;
-  transform: translateY(0);
+  transform: translateY(0) scale(1);
 }
 
 .tool-card:hover {
@@ -719,9 +822,17 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
   transition: all 0.2s ease;
 }
 
+.tool-card-action-btn[data-action="unpin"] {
+  color: #ff6b6b;
+}
+
 .tool-card-action-btn:hover {
   background: rgba(44,255,179,0.15);
   color: var(--accent);
+}
+
+.tool-card-action-btn[data-action="unpin"]:hover {
+  background: rgba(255,107,107,0.15);
 }
 
 /* Modal styles */
@@ -829,7 +940,7 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
   <main id="mainContent">
     <div id="toolContainer"></div>
     <!-- Global Launchpad (outside toolContainer) -->
-    <div id="globalLaunchpad" class="launchpad entering" style="display: none;">
+    <div id="globalLaunchpad" class="launchpad entering">
         <section class="panel global-stats" id="globalStats">
           <div class="stats-grid">
             <div class="stat-card">

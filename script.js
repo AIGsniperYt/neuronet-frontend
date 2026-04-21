@@ -1,4 +1,4 @@
-import { initDB, addNode, addNodes, getAllNodes, getNode, deleteNode, addQuote, addQuotes, getAllQuotes, getQuote, deleteQuote, clearNodes, clearQuotes, getQuotesForSubject, getAnalysisNodesForSubject, getQuotesReferencedByAnalysis, getAnalysesReferencingQuote, getPinnedTools, pinTool, unpinTool, isToolPinned, setPinnedToolsOrder, getSubjects, addSubject, deleteSubject } from "./db.js";
+import { initDB, addNode, addNodes, getAllNodes, getNode, deleteNode, addQuote, addQuotes, getAllQuotes, getQuote, deleteQuote, clearNodes, clearQuotes, getQuotesForSubject, getAnalysisNodesForSubject, getQuotesReferencedByAnalysis, getAnalysesReferencingQuote, getPinnedTools, pinTool, unpinTool, isToolPinned, setPinnedToolsOrder, getSubjects, addSubject, deleteSubject, renameSubject } from "./db.js";
 import { syncLocalWithCloud, syncToCloud, deleteCloudNode, deleteCloudQuote, fetchCloudNodes, fetchCloudQuotes } from "./sync.js";
 import { initAnalysisToolV2 } from "./tools/analysisTool.js";
 import { initMemoryTool } from "./tools/memoryTool.js";
@@ -15,6 +15,7 @@ const DEFAULT_PROFILE = {
 };
 
 let syncInProgress = false;
+let subjectEditMode = false;
 
 let currentToolName = "";
 let currentSubject = null;
@@ -79,10 +80,10 @@ const tools = {
 };
 
 const toolDefinitions = {
-  analysis: { name: "Analysis", file: "analysis.html", icon: "A", desc: "Create source-linked analysis nodes" },
-  memory: { name: "Memory", file: "memory.html", icon: "M", desc: "Flashcard study across subjects" },
-  mindmap: { name: "Mindmap", file: "mindmap.html", icon: "N", desc: "Visual database overview" },
-  tracker: { name: "Tracker", file: "tracker.html", icon: "T", desc: "Track study progress" }
+  analysis: { name: "Analysis", file: "analysis.html", icon: "A", desc: "Create source-linked analysis nodes and analyse a source text" },
+  memory: { name: "Memory", file: "memory.html", icon: "M", desc: "Flashcard study across subjects to memorise nodes you analyse" },
+  mindmap: { name: "Mindmap", file: "mindmap.html", icon: "N", desc: "Visual database overview for establishing connections" },
+  tracker: { name: "Tracker", file: "tracker.html", icon: "T", desc: "Track study progress with past paper data" }
 };
 
 // ========== CANVAS BACKGROUND ==========
@@ -366,6 +367,13 @@ async function loadTool(toolName, context = {}) {
     }
   }
 
+  const launchpad = document.getElementById("globalLaunchpad");
+  if (launchpad) {
+    launchpad.className = "launchpad";
+    launchpad.classList.add("zooming-in");
+    launchpad.style.transition = "transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.15s ease, filter 0.15s ease";
+  }
+
   currentToolName = toolName;
   currentSubject = context.subject || null;
   setActiveTool(toolName);
@@ -375,6 +383,10 @@ async function loadTool(toolName, context = {}) {
   toolContainer.innerHTML = await res.text();
 
   if (tool.init) setTimeout(() => tool.init(context), 0);
+
+  setTimeout(() => {
+    hideLaunchpad();
+  }, 150);
 }
 
 function escapeHtml(value) {
@@ -483,25 +495,39 @@ async function importDatabaseJson(file) {
 // ========== LAUNCHPAD FUNCTIONS ==========
 
 function showLaunchpad() {
-  const launchpad = document.getElementById("globalLaunchpad");
   const tc = document.getElementById("toolContainer");
-  if (launchpad) {
-    launchpad.style.display = "grid";
+  if (tc) tc.style.display = "none";
+  const launchpad = document.getElementById("globalLaunchpad");
+  if (!launchpad) {
+    setTimeout(() => showLaunchpad(), 100);
+    return;
   }
-  if (tc) {
-    tc.style.display = "none";
-  }
+  launchpad.className = "launchpad";
+  launchpad.style.display = "flex";
+  launchpad.style.transition = "none";
+  launchpad.classList.add("entering");
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      launchpad.style.transition = "all 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94)";
+      launchpad.classList.remove("entering");
+      launchpad.classList.add("entered");
+    });
+  });
 }
 
 function hideLaunchpad() {
-  const launchpad = document.getElementById("globalLaunchpad");
   const tc = document.getElementById("toolContainer");
-  if (launchpad) {
-    launchpad.style.display = "none";
-  }
-  if (tc) {
-    tc.style.display = "block";
-  }
+  if (tc) tc.style.display = "block";
+  const launchpad = document.getElementById("globalLaunchpad");
+  if (!launchpad) return;
+  launchpad.classList.remove("entered");
+  launchpad.classList.add("entering");
+  launchpad.style.transition = "all 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94)";
+  setTimeout(() => {
+    if (launchpad.classList.contains("entering")) {
+      launchpad.style.display = "none";
+    }
+  }, 350);
 }
 
 async function updateGlobalStats() {
@@ -555,66 +581,40 @@ async function renderSubjectList() {
   }
 
   subjectList.innerHTML = subjects.map(subject => `
-    <div class="subject-card" data-subject="${escapeHtml(subject)}">
-      <span class="subject-name">${escapeHtml(subject)}</span>
-      <div class="subject-actions">
-        <button class="icon-btn rename-subject-btn" data-subject="${escapeHtml(subject)}" title="Rename">✏</button>
-        <button class="btn study-subject-btn" data-subject="${escapeHtml(subject)}">Study</button>
-        <button class="icon-btn delete-btn delete-subject-btn" data-subject="${escapeHtml(subject)}" title="Delete">✕</button>
+    <article class="subject-card" data-subject="${escapeHtml(subject)}">
+      <button class="subject-card-btn" type="button" data-subject="${escapeHtml(subject)}">
+        ${escapeHtml(subject)}
+      </button>
+      <div class="subject-actions" ${subjectEditMode ? "" : "hidden"} data-subject="${escapeHtml(subject)}">
+        <button type="button" data-action="rename-subject" data-subject="${escapeHtml(subject)}">Rename</button>
+        <button type="button" data-action="delete-subject" data-subject="${escapeHtml(subject)}">Delete</button>
       </div>
-    </div>
+    </article>
   `).join("");
 
-  subjectList.querySelectorAll(".study-subject-btn").forEach(btn => {
+  subjectList.querySelectorAll(".subject-card-btn").forEach(btn => {
     btn.addEventListener("click", (e) => {
-      const subject = e.target.dataset.subject;
-      enterSubjectWorkspace(subject);
+      if (btn.dataset.subject) {
+        enterSubjectWorkspace(btn.dataset.subject);
+      }
     });
   });
 
-  subjectList.querySelectorAll(".delete-subject-btn").forEach(btn => {
+  subjectList.querySelectorAll("[data-action]").forEach(btn => {
     btn.addEventListener("click", async (e) => {
+      const action = e.target.dataset.action;
       const subject = e.target.dataset.subject;
-      if (confirm(`Delete subject "${subject}" and all its content?`)) {
+      if (!action || !subject) return;
+
+      if (action === "rename-subject") {
+        const updated = window.prompt(`Rename subject "${subject}" to:`, subject);
+        const next = (updated || "").trim();
+        if (!next || next === subject) return;
+        await renameSubject(subject, next);
+      } else if (action === "delete-subject") {
+        if (!confirm(`Delete subject "${subject}" and all its content?`)) return;
         await deleteSubject(subject);
-        await updateGlobalStats();
-        await renderSubjectList();
       }
-    });
-  });
-
-  subjectList.querySelectorAll(".rename-subject-btn").forEach(btn => {
-    btn.addEventListener("click", async (e) => {
-      const subject = e.target.dataset.subject;
-      const updated = window.prompt(`Rename subject "${subject}" to:`, subject);
-      const next = (updated || "").trim();
-      if (!next || next === subject) return;
-
-      const [allNodes, allQuotes] = await Promise.all([getAllNodes(), getAllQuotes()]);
-      const now = Date.now();
-
-      const related = allNodes.filter(node => {
-        if (node?.type === "subject" || node?.meta?.kind === "subject") {
-          return (node.subject || node.title) === subject;
-        }
-        return node.subject === subject;
-      });
-
-      for (const node of related) {
-        const copy = { ...node };
-        copy.subject = next;
-        if (copy.type === "subject" || copy.meta?.kind === "subject") {
-          copy.title = next;
-        }
-        copy.updatedAt = now;
-        await addNode(copy);
-      }
-
-      const relatedQuotes = allQuotes.filter(quote => quote.subject === subject);
-      for (const quote of relatedQuotes) {
-        await addQuote({ ...quote, subject: next, updatedAt: now });
-      }
-
       await updateGlobalStats();
       await renderSubjectList();
     });
@@ -639,6 +639,7 @@ async function initLaunchpad() {
 
   const addSubjectBtn = document.getElementById("addSubjectBtn");
   const newSubjectInput = document.getElementById("newSubjectName");
+  const toggleSubjectEdit = document.getElementById("toggleSubjectEdit");
 
   if (addSubjectBtn) {
     addSubjectBtn.addEventListener("click", addSubjectFromInput);
@@ -646,6 +647,18 @@ async function initLaunchpad() {
   if (newSubjectInput) {
     newSubjectInput.addEventListener("keypress", (e) => {
       if (e.key === "Enter") addSubjectFromInput();
+    });
+  }
+  const toggleBtn = document.getElementById("toggleSubjectEdit");
+  if (toggleBtn) {
+    toggleBtn.addEventListener("click", () => {
+      subjectEditMode = !subjectEditMode;
+      toggleBtn.textContent = subjectEditMode ? "Done" : "Edit";
+      
+      const actions = document.querySelectorAll(".subject-actions");
+      actions.forEach(el => {
+        el.hidden = !subjectEditMode;
+      });
     });
   }
 }
@@ -790,7 +803,7 @@ async function renderToolCatalogue() {
     const isPinned = pinnedIds.has(toolId);
     const actionText = isPinned ? "Unpin" : "Pin";
     return `
-      <div class="tool-card entering" data-tool="${toolId}">
+      <div class="tool-card" data-tool="${toolId}">
         <div class="tool-card-actions">
           <button class="tool-card-action-btn" data-action="${isPinned ? 'unpin' : 'pin'}" data-tool="${toolId}">${actionText}</button>
         </div>
@@ -801,11 +814,10 @@ async function renderToolCatalogue() {
     `;
   }).join("");
 
-  grid.querySelectorAll(".tool-card").forEach(card => {
-    requestAnimationFrame(() => {
-      card.classList.remove("entering");
-      card.classList.add("entered");
-    });
+  const cards = grid.querySelectorAll(".tool-card");
+  cards.forEach((card) => {
+    card.style.opacity = "1";
+    card.style.transform = "translateY(0) scale(1)";
   });
 
   grid.querySelectorAll(".tool-card").forEach(card => {
@@ -901,11 +913,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   const sidebarElDone = document.getElementById("sidebar");
-  const launchpadElDone = document.getElementById("globalLaunchpad");
   sidebarElDone?.classList.remove("entering");
   sidebarElDone?.classList.add("entered");
-  launchpadElDone?.classList.remove("entering");
-  launchpadElDone?.classList.add("entered");
+  if (launchpadEl) {
+    launchpadEl.classList.remove("entering");
+    launchpadEl.classList.add("entered");
+  }
 
   const toolCards = document.querySelectorAll(".tool-card.entering");
   toolCards.forEach((card, i) => {

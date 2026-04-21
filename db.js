@@ -588,3 +588,29 @@ export async function deleteSubject(subjectName) {
 
   return subjectName;
 }
+
+export async function renameSubject(oldName, newName) {
+  const allNodes = await getAllNodes();
+  const allQuotes = await getAllQuotes();
+  const now = Date.now();
+
+  const subjectNodes = allNodes.filter(n => n.subject === oldName);
+  const subjectQuotes = allQuotes.filter(q => q.subject === oldName);
+
+  for (const node of subjectNodes) {
+    const copy = { ...node };
+    copy.subject = newName;
+    if (copy.type === "subject" || copy.meta?.kind === "subject") {
+      copy.title = newName;
+    }
+    copy.updatedAt = now;
+    await deleteNode(node.id);
+    await addNode(copy);
+  }
+  for (const quote of subjectQuotes) {
+    await deleteQuote(quote.id);
+    await addQuote({ ...quote, subject: newName, updatedAt: now });
+  }
+
+  return newName;
+}
