@@ -5,9 +5,7 @@ import { initMemoryTool } from "./tools/memoryTool.js";
 import { initMindmapTool } from "./tools/mindmapTool.js";
 
 const BACKEND = "https://neuronet-backend.onrender.com";
-const DEV_MODE = false;
 let DB_READY = false;
-const OFFLINE_MODE = false;
 const DEFAULT_PROFILE = {
   name: "Offline Mode",
   email: "local@device",
@@ -378,11 +376,22 @@ async function loadTool(toolName, context = {}) {
   currentSubject = context.subject || null;
   setActiveTool(toolName);
 
+  // Hide content briefly until tool initializes to prevent flash
+  if (toolContainer) {
+    toolContainer.style.visibility = "hidden";
+    toolContainer.style.display = "block";
+  }
+
   const tool = tools[toolName];
   const res = await fetch(`./tools/${tool.file}`);
   toolContainer.innerHTML = await res.text();
 
-  if (tool.init) setTimeout(() => tool.init(context), 0);
+  if (tool.init) {
+    tool.init(context);
+  }
+
+  // Reveal after init completes
+  if (toolContainer) toolContainer.style.visibility = "";
 
   setTimeout(() => {
     hideLaunchpad();
@@ -582,9 +591,7 @@ async function renderSubjectList() {
 
   subjectList.innerHTML = subjects.map(subject => `
     <article class="subject-card" data-subject="${escapeHtml(subject)}">
-      <button class="subject-card-btn" type="button" data-subject="${escapeHtml(subject)}">
-        ${escapeHtml(subject)}
-      </button>
+      <span class="subject-name">${escapeHtml(subject)}</span>
       <div class="subject-actions" ${subjectEditMode ? "" : "hidden"} data-subject="${escapeHtml(subject)}">
         <button type="button" data-action="rename-subject" data-subject="${escapeHtml(subject)}">Rename</button>
         <button type="button" data-action="delete-subject" data-subject="${escapeHtml(subject)}">Delete</button>
@@ -592,10 +599,11 @@ async function renderSubjectList() {
     </article>
   `).join("");
 
-  subjectList.querySelectorAll(".subject-card-btn").forEach(btn => {
-    btn.addEventListener("click", (e) => {
-      if (btn.dataset.subject) {
-        enterSubjectWorkspace(btn.dataset.subject);
+  subjectList.querySelectorAll(".subject-card").forEach(card => {
+    card.addEventListener("click", (e) => {
+      if (e.target.closest(".subject-actions")) return;
+      if (card.dataset.subject) {
+        enterSubjectWorkspace(card.dataset.subject);
       }
     });
   });
@@ -630,6 +638,8 @@ async function addSubjectFromInput() {
   input.value = "";
   await renderSubjectList();
   await updateGlobalStats();
+  const addSubjectBtn = document.getElementById("addSubjectBtn");
+  if (addSubjectBtn) addSubjectBtn.disabled = true;
 }
 
 async function initLaunchpad() {
@@ -641,6 +651,14 @@ async function initLaunchpad() {
   const newSubjectInput = document.getElementById("newSubjectName");
   const toggleSubjectEdit = document.getElementById("toggleSubjectEdit");
 
+  async function updateSubjectCreateState() {
+    if (!newSubjectInput || !addSubjectBtn) return;
+    const subject = (newSubjectInput.value || "").trim();
+    const existingSubjects = await getSubjects();
+    const disabled = !subject || existingSubjects.includes(subject);
+    addSubjectBtn.disabled = disabled;
+  }
+
   if (addSubjectBtn) {
     addSubjectBtn.addEventListener("click", addSubjectFromInput);
   }
@@ -648,7 +666,13 @@ async function initLaunchpad() {
     newSubjectInput.addEventListener("keypress", (e) => {
       if (e.key === "Enter") addSubjectFromInput();
     });
+    newSubjectInput.addEventListener("input", updateSubjectCreateState);
+    await updateSubjectCreateState();
   }
+  async function refreshSubjectAddState() {
+    await updateSubjectCreateState();
+  }
+  window.refreshSubjectAddState = refreshSubjectAddState;
   const toggleBtn = document.getElementById("toggleSubjectEdit");
   if (toggleBtn) {
     toggleBtn.addEventListener("click", () => {
@@ -674,11 +698,18 @@ function returnToGlobalLaunchpad() {
   currentToolName = "";
   currentSubject = null;
   setActiveTool("");
+  // Notify tools to cleanup their internal state
+  if (typeof window.__neuronetOnReturnToGlobal === "function") {
+    window.__neuronetOnReturnToGlobal();
+  }
   showLaunchpad();
 }
 
 // Wire up back button handler
 window.__neuronetReturnToLaunchpad = returnToGlobalLaunchpad;
+
+// For tools to register cleanup when returning to global launchpad
+window.__neuronetOnReturnToGlobal = null;
 
 // ========== PINNED TOOLS SIDEBAR ==========
 
@@ -883,7 +914,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   await initDB();
   DB_READY = true;
-  console.log("IndexedDB ready", { DB_READY, OFFLINE_MODE, DEV_MODE });
 
   loadingMessage.textContent = "Authenticating with the cloud...";
   let user;
@@ -907,7 +937,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   loadingOverlay.classList.add("completed");
   loadingOverlay.style.display = "none";
 
-  const canvas = document.getElementById("neuronet");
   if (canvas) {
     canvas.style.filter = "brightness(0.85) contrast(1.15)";
   }

@@ -228,6 +228,8 @@ html, body, * {
   flex-direction: column;
   gap: 12px;
   height: 100%;
+  user-select: text !important;
+  -webkit-user-select: text !important;
 }
 
 .source-panel {
@@ -236,6 +238,13 @@ html, body, * {
   height: 100%;
   position: relative;
   padding: 16px !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+.study-column {
+  user-select: text !important;
+  -webkit-user-select: text !important;
 }
 
 
@@ -272,6 +281,8 @@ html, body, * {
   flex: 1;
   min-height: 0;
   gap: 6px;
+  user-select: text !important;
+  -webkit-user-select: text !important;
 }
 
 .source-view {
@@ -337,6 +348,8 @@ html, body, * {
   padding: 2px 6px 3px;
   margin: 0 1px;
   transition: background 0.25s ease, box-shadow 0.25s ease;
+  user-select: text !important;
+  -webkit-user-select: text !important;
 }
 
 .highlight-quote.active {
@@ -395,7 +408,8 @@ html, body, * {
   padding: 22px;
   line-height: 1.75;
   color: rgba(237, 255, 248, 0.92);
-  user-select: text;
+  user-select: text !important;
+  -webkit-user-select: text !important;
 }
 
 .reader-surface p {
@@ -570,6 +584,13 @@ button.analysis-quote-jump .quote-ref-origin,
   pointer-events: none;
 }
 
+button.analysis-quote-jump.active-quote,
+.analysis-quote-static.active-quote {
+  background: rgba(44, 255, 179, 0.08);
+  border-left: 2px solid rgba(44, 255, 179, 0.5);
+  margin-left: -2px;
+}
+
 .quote-ref-origin {
   text-align: right;
   font-size: 0.72rem;
@@ -618,8 +639,8 @@ button.analysis-quote-jump .quote-ref-origin,
 }
 </style>
 
-<div class="analysis-shell">
-  <section id="analysisLaunchpad" class="analysis-launch">
+<div class="analysis-shell" style="user-select: text !important; -webkit-user-select: text !important;">
+  <section id="analysisLaunchpad" class="analysis-launch" hidden>
     <div class="panel launch-top">
       <div>
         <p class="kicker">Primary Engine</p>
@@ -663,7 +684,7 @@ button.analysis-quote-jump .quote-ref-origin,
     </div>
 
     <div class="study-grid">
-      <main class="study-column main-surface">
+      <main class="study-column main-surface" style="user-select: text !important; -webkit-user-select: text !important;">
         <section class="panel source-panel">
           <div class="reader-wrap">
             <div id="readerWrapper" class="source-view">

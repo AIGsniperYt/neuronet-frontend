@@ -64,13 +64,6 @@ const {
     memoryStats = document.getElementById("memoryStats");
     statsContent = document.getElementById("statsContent");
     closeStatsBtn = document.getElementById("closeStatsBtn");
-    
-    console.log("DOM elements retrieved:", { 
-      flashcard: !!flashcard, 
-      flashcardContent: !!flashcardContent, 
-      flashcardBackContent: !!flashcardBackContent,
-      flashcardClassList: flashcard ? !!flashcard.classList : false
-    });
   }
 
   async function initialize() {

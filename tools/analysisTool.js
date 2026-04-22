@@ -19,8 +19,6 @@ export async function initAnalysisToolV2(deps, context = {}) {
 
   const { subject: contextSubject, nodeId: contextNodeId } = context;
 
-  function setAnalysisFocus(enabled) {}
-
   if (typeof window.__neuronetAnalysisCleanup === "function") {
     window.__neuronetAnalysisCleanup();
   }
@@ -47,24 +45,13 @@ export async function initAnalysisToolV2(deps, context = {}) {
   const sourceEditor = document.getElementById("sourceEditor");
   const newSourceBtn = document.getElementById("newSourceBtn");
   const analysisReader = document.getElementById("analysisReader");
-  const analysisForm = document.getElementById("analysisForm");
-  const analysisFloatCard = document.getElementById("analysisFloatCard");
+  const analysisShell = document.querySelector(".analysis-shell");
+  const resetAnalysisFormBtn = document.getElementById("resetAnalysisForm");
+  const closeAnalysisCardBtn = document.getElementById("closeAnalysisCard");
   const analysisNodeIdInput = document.getElementById("analysisNodeId");
   const analysisNotesInput = document.getElementById("analysisNotes");
   const analysisTagsInput = document.getElementById("analysisTags");
-  const resetAnalysisFormBtn = document.getElementById("resetAnalysisForm");
-  const analysisNodeList = document.getElementById("analysisNodeList");
-  const analysisCardKicker = document.getElementById("analysisCardKicker");
-  const closeAnalysisCardBtn = document.getElementById("closeAnalysisCard");
-  const analysisSubmitBtn = document.getElementById("analysisSubmitBtn");
-  const readerWrapper = document.getElementById("readerWrapper");
-  const editorWrapper = document.getElementById("editorWrapper");
-  const toggleSourceModeBtn = document.getElementById("toggleSourceModeBtn");
-  const cancelEditSourceBtn = document.getElementById("cancelEditSourceBtn");
-  const quoteSelectionBtn = document.getElementById("quoteSelectionBtn");
-  const currentHierarchy = document.getElementById("currentHierarchy");
 
-  // SAFETY CHECK: Verify critical elements exist
   if (!launchpadView || !studyView || !analysisForm || !analysisReader) {
     console.error("[ANALYSIS] Critical DOM elements missing. Analysis tool cannot initialize.", {
       launchpadView: !!launchpadView,
@@ -75,7 +62,16 @@ export async function initAnalysisToolV2(deps, context = {}) {
     return;
   }
 
-const allowedTags = new Set(["P","DIV","BR","STRONG","B","EM","I","U","UL","OL","LI","BLOCKQUOTE","H1","H2","H3","A"]);
+function enforceUserSelect() {
+    if (analysisReader) {
+      analysisReader.style.userSelect = "text";
+      analysisReader.style.webkitUserSelect = "text";
+    }
+  }
+  // Run once after init for the reader area
+  setTimeout(enforceUserSelect, 50);
+
+  const allowedTags = new Set(["P","DIV","BR","STRONG","B","EM","I","U","UL","OL","LI","BLOCKQUOTE","H1","H2","H3","A"]);
   const state = {
     nodes: [],
     quotes: [],           // NEW: separate quote nodes
@@ -330,8 +326,6 @@ function htmlToPlainText(html) {
     }
 
     const html = root.innerHTML || "<p><br></p>";
-    console.log("Sanitized HTML:", { input, html });
-    console.log("Sanitized Text:", { input, text: htmlToPlainText(html) });
     return {
       contentHtml: html,
       contentText: htmlToPlainText(html)
@@ -1247,8 +1241,8 @@ function htmlToPlainText(html) {
 
     subjectList.innerHTML = subjects
       .map((subject) => `
-        <article class="subject-card">
-          <button class="btn subject-open" type="button" data-action="open-subject" data-subject="${escapeHtml(subject)}">${escapeHtml(subject)}</button>
+        <article class="subject-card" data-subject="${escapeHtml(subject)}">
+          <span class="subject-name">${escapeHtml(subject)}</span>
           <div class="subject-actions" ${state.subjectEditMode ? "" : "hidden"}>
             <button class="btn" type="button" data-action="rename-subject" data-subject="${escapeHtml(subject)}">Rename</button>
             <button class="btn" type="button" data-action="delete-subject" data-subject="${escapeHtml(subject)}">Delete</button>
@@ -1256,6 +1250,21 @@ function htmlToPlainText(html) {
         </article>
       `)
       .join("");
+
+    // Make entire card clickable
+    subjectList.querySelectorAll(".subject-card").forEach(card => {
+      card.addEventListener("click", (e) => {
+        if (e.target.closest(".subject-actions")) return;
+        const subject = card.dataset.subject;
+        if (subject) {
+          state.selectedSubject = subject;
+          state.selectedSourceId = "";
+          resetSourceForm();
+          resetAnalysisForm();
+          renderState();
+        }
+      });
+    });
   }
 
   function renderSources() {
@@ -1294,6 +1303,9 @@ function htmlToPlainText(html) {
       currentHierarchy.textContent = hierarchyLabel || source.title || source.subject || "No hierarchy";
     }
     analysisReader.innerHTML = normalized.contentHtml || "<p><br></p>";
+    analysisReader.style.userSelect = "text";
+    analysisReader.style.webkitUserSelect = "text";
+    analysisReader.style.MozUserSelect = "text";
 
     const domText = analysisReader.textContent;
     const highlightRanges = buildHighlightRangesForSource(source, domText);
@@ -1315,17 +1327,21 @@ function htmlToPlainText(html) {
         const quotesHtml = (() => {
           if (node.quoteRefs?.length) {
             return node.quoteRefs
-              .map((ref) => {
+              .map((ref, refIdx) => {
                 const text = ref.quote || state.quotes.find((q) => q.id === ref.quoteId)?.quote || "";
                 if (!text) return "";
+                // Check if this quote is the exactly selected one
+                const refRangeKey = `${ref.start}-${ref.end}`;
+                const isExactQuote = state.focusedNodeId === node.id && state.focusedRangeKey === refRangeKey;
+                const quoteClass = isExactQuote ? "analysis-quote-jump active-quote" : "analysis-quote-jump";
                 const origin = quoteRefOriginLineHtml(ref);
                 const priority = clampPriority(ref.priority);
                 const priorityStars = `<div style="display:flex; gap:2px; margin: 0 0 6px 0;">${[1,2,3,4,5].map((value) => `<span style="color:${value <= priority ? getPriorityColor(value) : "rgba(230,255,245,0.16)"};">${value <= priority ? "★" : "☆"}</span>`).join("")}</div>`;
                 const jump = resolveRefJumpForRef(ref);
                 if (jump) {
-                  return `<button type="button" class="analysis-quote-jump" data-analysis-id="${escapeHtml(node.id)}" data-jump-source="${escapeHtml(jump.sourceId)}" data-jump-start="${jump.start}" data-jump-end="${jump.end}" title="Show this quote in the source">${priorityStars}<blockquote class="analysis-quote-preview">${formatQuoteForDisplay(text)}</blockquote>${origin}</button>`;
+                  return `<button type="button" class="${quoteClass}" data-analysis-id="${escapeHtml(node.id)}" data-jump-source="${escapeHtml(jump.sourceId)}" data-jump-start="${jump.start}" data-jump-end="${jump.end}" data-range-key="${refRangeKey}" title="Show this quote in the source">${priorityStars}<blockquote class="analysis-quote-preview">${formatQuoteForDisplay(text)}</blockquote>${origin}</button>`;
                 }
-                return `<div class="analysis-quote-static">${priorityStars}<blockquote class="analysis-quote-preview">${formatQuoteForDisplay(text)}</blockquote>${origin}</div>`;
+                return `<div class="analysis-quote-static${isExactQuote ? " active-quote" : ""}">${priorityStars}<blockquote class="analysis-quote-preview">${formatQuoteForDisplay(text)}</blockquote>${origin}</div>`;
               })
               .filter(Boolean)
               .join("");
@@ -1376,19 +1392,19 @@ function htmlToPlainText(html) {
     window.__neuronetCanFocus = () => Boolean(state.selectedSubject);
 
     if (inStudy) {
-      setAnalysisFocus(document.body.classList.contains("analysis-focus-mode"));
       setSourceViewMode(state.viewMode);
       renderSources();
       renderReaderAndNodes();
+      setTimeout(enforceUserSelect, 10);
     } else {
       state.selectedRange = null;
-      setAnalysisFocus(false);
       setSourceViewMode("reader");
     }
 
     renderStats();
     renderSubjects();
     state.wasInStudy = inStudy;
+    enforceUserSelect();
   }
 
   async function refreshData() {
@@ -1515,54 +1531,67 @@ function htmlToPlainText(html) {
   }
 
   subjectList.addEventListener("click", async (event) => {
+    // Check if clicking on action buttons (Rename/Delete)
     const button = event.target.closest("button[data-action]");
-    if (!button) return;
+    if (button) {
+      const subject = button.dataset.subject;
+      if (!subject) return;
 
-    const subject = button.dataset.subject;
-    if (!subject) return;
+      if (button.dataset.action === "rename-subject") {
+        await renameSubject(subject);
+        return;
+      }
 
-    if (button.dataset.action === "open-subject") {
-      state.selectedSubject = subject;
-      state.selectedSourceId = "";
-      resetSourceForm();
-      resetAnalysisForm();
-      renderState();
+      if (button.dataset.action === "delete-subject") {
+        await deleteSubject(subject);
+      }
       return;
     }
 
-    if (button.dataset.action === "rename-subject") {
-      await renameSubject(subject);
-      return;
-    }
-
-    if (button.dataset.action === "delete-subject") {
-      await deleteSubject(subject);
+    // Otherwise, clicking on card body opens subject
+    const card = event.target.closest(".subject-card");
+    if (card && !event.target.closest(".subject-actions")) {
+      const subject = card.dataset.subject;
+      if (subject) {
+        state.selectedSubject = subject;
+        state.selectedSourceId = "";
+        resetSourceForm();
+        resetAnalysisForm();
+        renderState();
+      }
     }
   });
 
-  // Back to launchpad button handler
+  // Back to launchpad button handler - goes to analysis tool launchpad, not global
   if (backToLaunchpad) {
-    backToLaunchpad.addEventListener("click", () => {
+    backToLaunchpad.addEventListener("click", async () => {
       state.selectedSubject = "";
       state.selectedSourceId = "";
+      state.viewMode = "reader";
+      state.wasInStudy = false;
       resetSourceForm();
       resetAnalysisForm();
-      // Return to global launchpad
-      if (typeof window.__neuronetReturnToLaunchpad === "function") {
-        window.__neuronetReturnToLaunchpad();
+      // Hide study view, show analysis tool launchpad
+      if (launchpadView && studyView) {
+        launchpadView.hidden = false;
+        studyView.hidden = true;
       }
+      // Don't call global launchpad - stay in analysis tool
     });
   } else {
     // Fallback: use event delegation on document
-    document.addEventListener("click", (e) => {
+    document.addEventListener("click", async (e) => {
       const btn = e.target.closest("#backToLaunchpad");
       if (btn) {
         state.selectedSubject = "";
         state.selectedSourceId = "";
+        state.viewMode = "reader";
+        state.wasInStudy = false;
         resetSourceForm();
         resetAnalysisForm();
-        if (typeof window.__neuronetReturnToLaunchpad === "function") {
-          window.__neuronetReturnToLaunchpad();
+        if (launchpadView && studyView) {
+          launchpadView.hidden = false;
+          studyView.hidden = true;
         }
       }
     }, { once: true });
@@ -2042,7 +2071,7 @@ function htmlToPlainText(html) {
     }
   });
 
-  // Click on highlighted text in reader to jump to corresponding analysis node
+  // Click on highlighted text in reader to jump to corresponding analysis node AND highlight EXACT quote
   analysisReader.addEventListener("click", (event) => {
     const highlight = event.target.closest(".highlight-quote");
     if (!highlight) {
@@ -2052,6 +2081,7 @@ function htmlToPlainText(html) {
 
     event.stopPropagation();
     const focusId = highlight.dataset.focusId;
+    const rangeKey = highlight.dataset.rangeKey || null;
     if (!focusId) return;
 
     let analysisNode = state.analysisNodes.find((n) => n.id === focusId);
@@ -2064,11 +2094,31 @@ function htmlToPlainText(html) {
     }
     if (!analysisNode) return;
 
+    // Find the exact quote ref that matches this highlight's position
+    let exactStart = 0, exactEnd = 0, foundExact = false;
+    if (rangeKey && analysisNode.quoteRefs) {
+      for (const ref of analysisNode.quoteRefs) {
+        const refKey = `${ref.start}-${ref.end}`;
+        if (refKey === rangeKey) {
+          exactStart = ref.start;
+          exactEnd = ref.end;
+          foundExact = true;
+          break;
+        }
+      }
+    }
+
+    // Fallback to main link if exact not found
+    if (!foundExact) {
+      exactStart = Number(analysisNode?.link?.start || 0);
+      exactEnd = Number(analysisNode?.link?.end || 0);
+    }
+
     state.focusedNodeId = analysisNode.id;
-    state.focusedRangeKey = highlight.dataset.rangeKey || null;
+    state.focusedRangeKey = rangeKey;
     state.selectedRange = {
-      start: Number(analysisNode?.link?.start || 0),
-      end: Number(analysisNode?.link?.end || 0),
+      start: exactStart,
+      end: exactEnd,
       quote: analysisNode.quote || ""
     };
 
@@ -2133,7 +2183,14 @@ function htmlToPlainText(html) {
   window.__neuronetAnalysisCleanup = () => {
     document.removeEventListener("db-change", handleDBChange);
     window.__neuronetCanFocus = () => false;
-    setAnalysisFocus(false);
+  };
+
+  // Register cleanup for returning to global launchpad
+  window.__neuronetOnReturnToGlobal = () => {
+    state.selectedSubject = "";
+    state.selectedSourceId = "";
+    state.viewMode = "reader";
+    state.wasInStudy = false;
   };
 
   resetSourceForm();

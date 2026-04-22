@@ -18,7 +18,17 @@
   --text-muted: rgba(230,255,245,0.65);
 }
 
-* { box-sizing:border-box; margin:0; padding:0; }
+* { box-sizing:border-box; margin:0; padding:0; user-select: none; }
+
+/* Allow selection in specific content areas only */
+.reader-surface,
+.reader-surface *,
+.reader-wrap,
+.source-editor,
+.analysis-reader {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
 html, body {
   height: 100%;
 }
@@ -219,10 +229,6 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
 #toolButtonsContainer,
 #toolButtonsContainer * {
   user-select: none;
-}
-
-#sidebar h2:hover {
-  color: #5fffcf;
 }
 
 #toolContainer {
@@ -465,13 +471,6 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
   transition: all 0.15s ease;
 }
 
-.launchpad.zooming-in {
-  transform: translateY(15px) scale(1.15);
-  opacity: 0;
-  pointer-events: none;
-  filter: blur(6px);
-}
-
 .launchpad.zooming-out {
   transform: translateY(-15px) scale(0.85);
   opacity: 0;
@@ -543,6 +542,19 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
 
 .btn.primary:hover {
   background: linear-gradient(130deg, rgba(44, 255, 179, 0.32), rgba(44, 255, 179, 0.18));
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+}
+
+.btn:disabled:hover {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .inline-input {
@@ -641,7 +653,27 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
   margin-bottom: 14px;
+}
+
+.kicker {
+  flex-shrink: 0;
+}
+
+.subject-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-left: auto;
+}
+
+.subject-controls .inline-input {
+  width: 160px;
+}
+
+.subject-controls .btn.primary {
+  padding: 6px 12px;
 }
 
 .subject-list,
@@ -666,6 +698,13 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
   padding: 18px 20px;
   min-height: 62px;
   box-sizing: border-box;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.subject-card:hover {
+  background: rgba(44, 255, 179, 0.08);
+  border-color: rgba(44, 255, 179, 0.25);
 }
 
 .subject-card-btn {
@@ -687,6 +726,8 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
 .subject-name {
   font-size: 1rem;
   font-weight: 600;
+  flex: 1;
+  color: var(--text-main);
 }
 
 .subject-actions {
@@ -723,6 +764,7 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 14px;
+  margin-top: 20px;
 }
 
 .tool-card {
@@ -733,6 +775,7 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
   cursor: pointer;
   transition: transform 0.5s cubic-bezier(0.23, 1, 0.32, 1), opacity 0.6s ease, border-color 0.2s ease, background 0.2s ease;
   position: relative;
+  overflow: visible;
 }
 
 .tool-card.entering {
@@ -781,10 +824,6 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
 .tool-card-pin:hover,
 .tool-card-pin.pinned {
   color: var(--accent);
-}
-
-.tool-card {
-  overflow: visible;
 }
 
 .tool-card-actions {
@@ -964,12 +1003,12 @@ canvas { position: fixed; inset:0; z-index:-1; filter: brightness(0.85) contrast
 
         <section class="panel subjects-section">
           <div class="section-header">
-            <h3 class="kicker">Subjects</h3>
-            <button id="toggleSubjectEdit" class="btn" type="button">Edit</button>
-          </div>
-          <div class="subject-create-row">
-            <input id="newSubjectName" class="inline-input" type="text" placeholder="New subject name" maxlength="80" />
-            <button id="addSubjectBtn" class="btn primary" type="button">+ Add</button>
+            <span class="kicker">Subjects</span>
+            <span class="subject-controls">
+              <input id="newSubjectName" class="inline-input" type="text" placeholder="New subject name" maxlength="80" />
+              <button id="addSubjectBtn" class="btn primary" type="button" disabled>+</button>
+              <button id="toggleSubjectEdit" class="btn" type="button">Edit</button>
+            </span>
           </div>
           <div id="subjectList" class="subject-list"></div>
         </section>

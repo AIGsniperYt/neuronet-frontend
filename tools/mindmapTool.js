@@ -17,19 +17,37 @@ export async function initMindmapTool(deps, context = {}) {
     window.__neuronetMindmapCleanup();
   }
 
-  const state = {
-    nodes: [],
-    quotes: [],
-    currentSubject: contextSubject || null,
-    selectedNodeId: null,
+const state = {
     hoveredNodeId: null,
     nodePositions: new Map(),
+    velocities: new Map(),
+    graph: { nodes: new Map(), edges: [] },
     draggingNodeId: null,
     dragOffset: { x: 0, y: 0 },
+    lockedNodes: new Set(),
     zoom: 1,
     panOffset: { x: 0, y: 0 },
     isPanning: false,
-    panStartPos: { x: 0, y: 0 }
+    panStartPos: { x: 0, y: 0 },
+    simulationRunning: true
+  };
+
+  const physicsConfig = {
+    repulsion: 80,
+    repulsionRange: 180,
+    attraction: 0.002,
+    damping: 0.94,
+    minVelocity: 0.02,
+    maxVelocity: 2,
+    maxGlobalSpread: 450,
+    radialStrength: 0.02
+  };
+
+  const ringConfig = {
+    subject: 0,
+    source: 80,
+    quote: 180,
+    analysis: 280
   };
 
   const canvas = document.getElementById("mindmapCanvas");
@@ -51,6 +69,7 @@ export async function initMindmapTool(deps, context = {}) {
     minZoom: 0.25,
     maxZoom: 3,
     colors: {
+      subject: "#ff6b6b",
       source: "#4da6ff",
       quote: "#ff9b39",
       analysis: "#2cffb3"
@@ -59,6 +78,7 @@ export async function initMindmapTool(deps, context = {}) {
 
   function getNodeTypeIcon(type) {
     switch (type) {
+      case "subject": return "📚";
       case "source": return "📄";
       case "quote": return "💬";
       case "analysis": return "💡";
@@ -105,25 +125,285 @@ export async function initMindmapTool(deps, context = {}) {
     return node.type || node.itemType || "unknown";
   }
 
-  function initializePositions(containerWidth, containerHeight) {
-    state.nodePositions.clear();
-    
-    const allItems = getAllItems();
-    if (allItems.length === 0) return;
-    
-    const centerX = containerWidth / 2;
-    const centerY = containerHeight / 2;
-    
-    allItems.forEach((item, index) => {
-      if (!state.nodePositions.has(item.id)) {
-        const angle = (index / allItems.length) * Math.PI * 2;
-        const radius = Math.min(containerWidth, containerHeight) * 0.22;
-        state.nodePositions.set(item.id, {
-          x: centerX + Math.cos(angle) * radius + (Math.random() - 0.5) * 40,
-          y: centerY + Math.sin(angle) * radius + (Math.random() - 0.5) * 40
-        });
+  function buildGraph() {
+    const graph = { nodes: new Map(), edges: [] };
+    const items = getAllItems();
+    const subjectNodes = items.filter(n => n.type === "subject");
+    const sources = items.filter(n => n.type === "source");
+    const quotes = items.filter(n => n.type === "quote");
+    const analyses = items.filter(n => n.type === "analysis");
+
+    items.forEach(item => {
+      graph.nodes.set(item.id, {
+        id: item.id,
+        type: item.type,
+        data: item,
+        connections: new Set(),
+        weight: 1
+      });
+    });
+
+    const addEdge = (from, to, type, strength = 1) => {
+      if (!from || !to || from === to) return;
+      if (!graph.nodes.has(from) || !graph.nodes.has(to)) return;
+      const key = [from, to].sort().join("-");
+      if (graph.edges.some(e => [e.from, e.to].sort().join("-") === key)) return;
+      graph.edges.push({ from, to, type, strength });
+      graph.nodes.get(from)?.connections.add(to);
+      graph.nodes.get(to)?.connections.add(from);
+    };
+
+    sources.forEach(source => {
+      if (source.subject) {
+        const subjectNode = subjectNodes.find(s => s.subject === source.subject);
+        if (subjectNode) {
+          addEdge(subjectNode.id, source.id, "subject-source", 3);
+        }
       }
     });
+
+    quotes.forEach(quote => {
+      if (quote.link?.sourceId) {
+        addEdge(quote.link.sourceId, quote.id, "source-quote", 2.5);
+      }
+    });
+
+    analyses.forEach(analysis => {
+      (analysis.quoteRefs || []).forEach(ref => {
+        if (ref.quoteId) {
+          addEdge(ref.quoteId, analysis.id, "quote-analysis", 2);
+        }
+      });
+    });
+
+    graph.nodes.forEach(node => {
+      let weight = 1;
+      weight += node.connections.size * 0.5;
+      if (node.data?.priority) weight += node.data.priority * 0.8;
+      if (node.data?.meta?.confidence) weight += node.data.meta.confidence * 0.5;
+      node.weight = weight;
+    });
+
+    state.graph = graph;
+    return graph;
+  }
+
+  function getAnchorPosition(node, centerX, centerY) {
+    const type = node.type;
+    const baseRadius = ringConfig[type] || 200;
+    const variance = baseRadius * 0.4;
+    const hash = node.id.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+    const angle = (hash % 360) * (Math.PI / 180);
+    const radius = baseRadius + ((hash % 100) / 100 - 0.5) * variance;
+
+    return {
+      x: centerX + Math.cos(angle) * radius,
+      y: centerY + Math.sin(angle) * radius
+    };
+  }
+
+  function computeForces() {
+    const forces = new Map();
+    const positions = state.nodePositions;
+    const graph = state.graph;
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+
+    graph.nodes.forEach((node, id) => {
+      forces.set(id, { x: 0, y: 0 });
+    });
+
+    graph.nodes.forEach((nodeA, idA) => {
+      graph.nodes.forEach((nodeB, idB) => {
+        if (idA === idB) return;
+        const posA = positions.get(idA);
+        const posB = positions.get(idB);
+        if (!posA || !posB) return;
+
+        const dx = posA.x - posB.x;
+        const dy = posA.y - posB.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) + 0.01;
+
+        if (dist > physicsConfig.repulsionRange) return;
+
+        const repulsion = physicsConfig.repulsion / (dist * dist);
+        const fx = (dx / dist) * repulsion;
+        const fy = (dy / dist) * repulsion;
+
+        forces.get(idA).x += fx;
+        forces.get(idA).y += fy;
+      });
+    });
+
+    graph.edges.forEach(edge => {
+      const posFrom = positions.get(edge.from);
+      const posTo = positions.get(edge.to);
+      if (!posFrom || !posTo) return;
+
+      const dx = posTo.x - posFrom.x;
+      const dy = posTo.y - posFrom.y;
+
+      const dist = Math.sqrt(dx*dx + dy*dy) + 0.01;
+      const desired = 100;
+      const spring = (dist - desired) * 0.001;
+
+      forces.get(edge.from).x += (dx / dist) * spring;
+      forces.get(edge.from).y += (dy / dist) * spring;
+      forces.get(edge.to).x -= (dx / dist) * spring;
+      forces.get(edge.to).y -= (dy / dist) * spring;
+    });
+
+    graph.nodes.forEach((node, id) => {
+      const pos = positions.get(id);
+      if (!pos) return;
+
+      // Light centering preference for subject (not hard lock)
+      if (node.type === "subject") {
+        const dx = centerX - pos.x;
+        const dy = centerY - pos.y;
+        forces.get(id).x += dx * 0.005;
+        forces.get(id).y += dy * 0.005;
+        return;
+      }
+
+      // Inverse repulsion - pushes nodes apart to prevent collapsing
+      graph.nodes.forEach((otherNode, otherId) => {
+        if (id === otherId) return;
+        const otherPos = positions.get(otherId);
+        if (!otherPos) return;
+
+        const dx = pos.x - otherPos.x;
+        const dy = pos.y - otherPos.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) + 1;
+        if (dist < 200) {
+          const repulsion = 120 / (dist * dist);
+          forces.get(id).x += (dx / dist) * repulsion;
+          forces.get(id).y += (dy / dist) * repulsion;
+        }
+      });
+
+      // Radial constraint - pushes nodes OUTWARD if too close, inward if too far
+      const dx = pos.x - centerX;
+      const dy = pos.y - centerY;
+      const radialDist = Math.sqrt(dx * dx + dy * dy) || 0.01;
+      const level = getHierarchyLevel(node);
+      const targetRadius = 140 * level;
+      
+      // If node is inside its target ring, push outward. If outside, push back.
+      if (radialDist < targetRadius) {
+        const pushOut = (targetRadius - radialDist) * 0.015;
+        forces.get(id).x += (dx / radialDist) * pushOut;
+        forces.get(id).y += (dy / radialDist) * pushOut;
+      } else {
+        const pushIn = (radialDist - targetRadius) * 0.008;
+        forces.get(id).x -= (dx / radialDist) * pushIn;
+        forces.get(id).y -= (dy / radialDist) * pushIn;
+      }
+    });
+
+    return forces;
+  }
+
+  function updatePositionsWithPhysics(forces) {
+    const positions = state.nodePositions;
+    const velocities = state.velocities;
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+
+    state.graph.nodes.forEach((node, id) => {
+      const pos = positions.get(id);
+      if (!pos) return;
+
+      if (state.lockedNodes.has(id)) {
+        velocities.set(id, { x: 0, y: 0 });
+        return;
+      }
+
+      const vel = velocities.get(id) || { x: 0, y: 0 };
+      const force = forces.get(id) || { x: 0, y: 0 };
+
+      const confidence = node.data?.meta?.confidence ?? 0.7;
+      const nodeDamping = physicsConfig.damping + (confidence * 0.05);
+
+      vel.x = vel.x * nodeDamping + force.x;
+      vel.y = vel.y * nodeDamping + force.y;
+
+      const speed = Math.sqrt(vel.x * vel.x + vel.y * vel.y);
+      if (speed > physicsConfig.maxVelocity) {
+        vel.x = (vel.x / speed) * physicsConfig.maxVelocity;
+        vel.y = (vel.y / speed) * physicsConfig.maxVelocity;
+      }
+
+      pos.x += vel.x;
+      pos.y += vel.y;
+
+      if (Math.abs(vel.x) < physicsConfig.minVelocity) vel.x = 0;
+      if (Math.abs(vel.y) < physicsConfig.minVelocity) vel.y = 0;
+
+      minX = Math.min(minX, pos.x);
+      maxX = Math.max(maxX, pos.x);
+      minY = Math.min(minY, pos.y);
+      maxY = Math.max(maxY, pos.y);
+
+      velocities.set(id, vel);
+    });
+
+    const spreadX = maxX - minX;
+    const spreadY = maxY - minY;
+    const maxSpread = physicsConfig.maxGlobalSpread;
+
+    if (spreadX > maxSpread || spreadY > maxSpread) {
+      const scale = maxSpread / Math.max(spreadX, spreadY);
+      const centerOfMassX = (minX + maxX) / 2;
+      const centerOfMassY = (minY + maxY) / 2;
+
+      state.graph.nodes.forEach((node, id) => {
+        const pos = positions.get(id);
+        if (!pos) return;
+        pos.x = centerOfMassX + (pos.x - centerOfMassX) * scale;
+        pos.y = centerOfMassY + (pos.y - centerOfMassY) * scale;
+      });
+    }
+  }
+
+  function getHierarchyLevel(node) {
+    if (node.type === "subject") return 0;
+    if (node.type === "source") return 1;
+    if (node.type === "quote") return 2;
+    if (node.type === "analysis") return 3;
+    return 4;
+  }
+
+  function layoutRadial(containerWidth, containerHeight) {
+    const centerX = containerWidth / 2;
+    const centerY = containerHeight / 2;
+    const graph = state.graph;
+
+    const levels = new Map();
+    graph.nodes.forEach((node, id) => {
+      const level = getHierarchyLevel(node);
+      if (!levels.has(level)) levels.set(level, []);
+      levels.get(level).push([id, node]);
+    });
+
+    const baseRadius = 140;
+    levels.forEach((nodes, level) => {
+      const radius = baseRadius * level;
+      nodes.forEach(([id, node], i) => {
+        const angle = (i / nodes.length) * Math.PI * 2;
+        const x = centerX + Math.cos(angle) * radius;
+        const y = centerY + Math.sin(angle) * radius;
+        state.nodePositions.set(id, { x, y });
+        state.velocities.set(id, { x: 0, y: 0 });
+      });
+    });
+  }
+
+  function initializePositions(containerWidth, containerHeight) {
+    buildGraph();
+    layoutRadial(containerWidth, containerHeight);
   }
 
   function getAllItems() {
@@ -132,43 +412,6 @@ export async function initMindmapTool(deps, context = {}) {
 
   function findItemById(id) {
     return getAllItems().find(item => item.id === id);
-  }
-
-  function getConnections() {
-    const connections = [];
-    const connectionSet = new Set();
-
-    const items = getAllItems();
-    const analysisNodes = items.filter(n => n.type === "analysis");
-    const quoteNodes = items.filter(q => q.type === "quote");
-
-    analysisNodes.forEach(analysis => {
-      if (analysis.quoteRefs && Array.isArray(analysis.quoteRefs)) {
-        analysis.quoteRefs.forEach(ref => {
-          if (ref.quoteId) {
-            const key = [ref.quoteId, analysis.id].sort().join("-");
-            if (!connectionSet.has(key)) {
-              connectionSet.add(key);
-              connections.push({ from: ref.quoteId, to: analysis.id, type: "quote-analysis" });
-            }
-          }
-        });
-      }
-    });
-
-    quoteNodes.forEach(quote => {
-      if (quote.meta?.analysisNodeIds && Array.isArray(quote.meta.analysisNodeIds)) {
-        quote.meta.analysisNodeIds.forEach(analysisId => {
-          const key = [quote.id, analysisId].sort().join("-");
-          if (!connectionSet.has(key)) {
-            connectionSet.add(key);
-            connections.push({ from: quote.id, to: analysisId, type: "quote-analysis" });
-          }
-        });
-      }
-    });
-
-    return connections;
   }
 
   function transformPoint(x, y) {
@@ -180,30 +423,47 @@ export async function initMindmapTool(deps, context = {}) {
     };
   }
 
+  let frameCount = 0;
+  function tick() {
+    frameCount++;
+    if (state.simulationRunning && !state.draggingNodeId) {
+      if (state.graph.nodes.size === 0) {
+        buildGraph();
+      }
+      // Only run physics every 2 frames (half rate)
+      if (frameCount % 2 === 0) {
+        const forces = computeForces();
+        updatePositionsWithPhysics(forces);
+      }
+    }
+    render();
+    requestAnimationFrame(tick);
+  }
+
   function render() {
     if (!ctx || !canvas) return;
-    
+
     const container = canvas.parentElement;
     const width = container.clientWidth;
     const height = container.clientHeight;
-    
+
     canvas.width = width;
     canvas.height = height;
-    
+
     ctx.clearRect(0, 0, width, height);
 
-    const connections = getConnections();
     const items = getAllItems();
+    const edges = state.graph.edges;
 
-    connections.forEach(conn => {
-      const fromPos = state.nodePositions.get(conn.from);
-      const toPos = state.nodePositions.get(conn.to);
-      
+    edges.forEach(edge => {
+      const fromPos = state.nodePositions.get(edge.from);
+      const toPos = state.nodePositions.get(edge.to);
+
       if (fromPos && toPos) {
         const fromTrans = transformPoint(fromPos.x, fromPos.y);
         const toTrans = transformPoint(toPos.x, toPos.y);
-        const isActive = state.selectedNodeId === conn.from || state.selectedNodeId === conn.to;
-        
+        const isActive = state.selectedNodeId === edge.from || state.selectedNodeId === edge.to;
+
         ctx.beginPath();
         ctx.moveTo(fromTrans.x, fromTrans.y);
         ctx.lineTo(toTrans.x, toTrans.y);
@@ -216,13 +476,13 @@ export async function initMindmapTool(deps, context = {}) {
     items.forEach(item => {
       const pos = state.nodePositions.get(item.id);
       if (!pos) return;
-      
+
       const posTrans = transformPoint(pos.x, pos.y);
       const isSelected = state.selectedNodeId === item.id;
       const isHovered = state.hoveredNodeId === item.id;
       const radius = (isHovered || isSelected ? config.nodeHoverRadius : config.nodeRadius) * state.zoom;
       const color = getNodeColor(item.type);
-      
+
       ctx.beginPath();
       ctx.arc(posTrans.x, posTrans.y, radius, 0, Math.PI * 2);
       ctx.fillStyle = "rgba(10, 30, 22, 0.9)";
@@ -242,14 +502,12 @@ export async function initMindmapTool(deps, context = {}) {
     });
 
     updateStats();
-    
+
     if (items.length > 0) {
       if (emptyState) emptyState.style.display = "none";
     } else {
       if (emptyState) emptyState.style.display = "flex";
     }
-    
-    requestAnimationFrame(render);
   }
 
   function getCanvasPos(e) {
@@ -344,15 +602,20 @@ export async function initMindmapTool(deps, context = {}) {
   function updateStats() {
     const items = getAllItems();
     const totalNodes = document.getElementById("totalNodes");
+    const totalSubjects = document.getElementById("totalSubjects");
+    const totalSources = document.getElementById("totalSources");
     const totalQuotes = document.getElementById("totalQuotes");
     const totalAnalyses = document.getElementById("totalAnalyses");
     const totalConnections = document.getElementById("totalConnections");
-    
+
     if (totalNodes) totalNodes.textContent = items.length;
+    if (totalSubjects) totalSubjects.textContent = items.filter(i => i.type === "subject").length;
+    if (totalSources) totalSources.textContent = items.filter(i => i.type === "source").length;
     if (totalQuotes) totalQuotes.textContent = items.filter(i => i.type === "quote").length;
     if (totalAnalyses) totalAnalyses.textContent = items.filter(i => i.type === "analysis").length;
-    
-    const connections = getConnections();
+
+    buildGraph();
+    const connections = state.graph.edges;
     if (totalConnections) totalConnections.textContent = connections.length;
   }
 
@@ -360,11 +623,18 @@ export async function initMindmapTool(deps, context = {}) {
     const [nodes, quotes] = await Promise.all([getAllNodes(), getAllQuotes()]);
     state.nodes = nodes;
     state.quotes = quotes;
-    
-    const container = canvas?.parentElement;
-    if (container) {
-      initializePositions(container.clientWidth, container.clientHeight);
+
+    buildGraph();
+
+    const currentIds = new Set(state.graph.nodes.keys());
+    for (const id of state.nodePositions.keys()) {
+      if (!currentIds.has(id)) {
+        state.nodePositions.delete(id);
+        state.velocities.delete(id);
+      }
     }
+
+    layoutRadial(canvas?.parentElement?.clientWidth || 800, canvas?.parentElement?.clientHeight || 600);
   }
 
   function setupEventListeners() {
@@ -426,6 +696,7 @@ export async function initMindmapTool(deps, context = {}) {
         const node = findNodeAtPosition(pos.x, pos.y);
         if (node) {
           state.draggingNodeId = node.id;
+          state.lockedNodes.add(node.id);
           const nodePos = state.nodePositions.get(node.id);
           if (nodePos) {
             state.dragOffset = {
@@ -438,8 +709,13 @@ export async function initMindmapTool(deps, context = {}) {
       });
 
       canvas.addEventListener("mouseup", () => {
+        const dragged = state.draggingNodeId;
         state.draggingNodeId = null;
         state.isPanning = false;
+        // Keep locked for 2 seconds after release
+        if (dragged) {
+          setTimeout(() => state.lockedNodes.delete(dragged), 2000);
+        }
         canvas.style.cursor = "default";
       });
 
@@ -552,9 +828,10 @@ export async function initMindmapTool(deps, context = {}) {
   }
   
   setupEventListeners();
-  render();
+  tick();
 
   window.__neuronetMindmapCleanup = () => {
+    state.simulationRunning = false;
     document.removeEventListener("db-change", handleDBChange);
     window.removeEventListener("resize", handleResize);
   };
