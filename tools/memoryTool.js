@@ -8,6 +8,7 @@ const {
   getAnalysesReferencingQuote,
   getNode,
   getNodeTimestamp,
+  getSubjects,
   escapeHtml
 } = deps;
 
@@ -17,7 +18,7 @@ const {
     window.__neuronetMemoryCleanup();
   }
 
-  const state = {
+const state = {
     currentSubject: contextSubject || "",
     currentMode: "quote-learning",
     flashcards: [],
@@ -34,7 +35,9 @@ const {
       currentAnalysis: null,
       quoteOptions: [],
       selectedOption: null,
-      correctOption: null
+      correctOption: null,
+      answered: false,
+      wasCorrect: null
     }
   };
 
@@ -72,6 +75,8 @@ const {
       await refreshSubjectList();
       await loadFlashcards();
       renderUI();
+      attachEventListeners();
+      attachKeyboardShortcuts();
       document.addEventListener("db-change", handleDBChange);
     } catch (error) {
       console.error("Failed to initialize memory tool:", error);
@@ -81,27 +86,172 @@ const {
     }
   }
 
+  function attachEventListeners() {
+    if (modeSelect) {
+      modeSelect.addEventListener("click", async () => {
+        const modes = ["quote-learning", "analysis-learning", "evidence-matching"];
+        const currentIndex = modes.indexOf(state.currentMode);
+        state.currentMode = modes[(currentIndex + 1) % modes.length];
+        await loadFlashcards();
+        renderUI();
+      });
+    }
+
+    if (newSessionBtn) {
+      newSessionBtn.addEventListener("click", async () => {
+        state.currentIndex = 0;
+        state.isFlipped = false;
+        state.showAnalysis = false;
+        await loadFlashcards();
+        renderUI();
+      });
+    }
+
+    if (statsBtn) {
+      statsBtn.addEventListener("click", () => {
+        renderStats();
+        if (memoryStats) memoryStats.style.display = "block";
+      });
+    }
+
+    if (flipBtn) {
+      flipBtn.addEventListener("click", () => flipCard());
+    }
+
+    if (prevBtn) {
+      prevBtn.addEventListener("click", () => navigatePrevious());
+    }
+
+    if (nextBtn) {
+      nextBtn.addEventListener("click", () => navigateNext());
+    }
+
+    if (showAnalysisBtn) {
+      showAnalysisBtn.addEventListener("click", () => {
+        state.showAnalysis = !state.showAnalysis;
+        renderUI();
+      });
+    }
+
+    if (closeStatsBtn) {
+      closeStatsBtn.addEventListener("click", () => {
+        if (memoryStats) memoryStats.style.display = "none";
+      });
+    }
+
+    if (flashcard) {
+      flashcard.addEventListener("click", (e) => {
+        if (e.target.closest(".memory-btn")) return;
+        flipCard();
+      });
+    }
+  }
+
+  function attachKeyboardShortcuts() {
+    document.addEventListener("keydown", handleKeyDown);
+  }
+
+  function handleKeyDown(e) {
+    if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+    
+    if (state.currentMode === "evidence-matching") {
+      if (!state.evidenceMatching.answered) {
+        if (e.key >= "1" && e.key <= "4") {
+          e.preventDefault();
+          const index = parseInt(e.key) - 1;
+          if (index < state.evidenceMatching.quoteOptions.length) {
+            selectQuoteOption(index);
+          }
+          return;
+        }
+      }
+      if (e.key === "Enter" || e.key === " " || e.key === "ArrowRight" || e.key === "ArrowDown") {
+        e.preventDefault();
+        navigateNext();
+        return;
+      }
+    }
+    
+    switch (e.key) {
+      case " ":
+        e.preventDefault();
+        flipCard();
+        break;
+      case "ArrowLeft":
+      case "ArrowUp":
+        e.preventDefault();
+        navigatePrevious();
+        break;
+      case "ArrowRight":
+      case "ArrowDown":
+        e.preventDefault();
+        navigateNext();
+        break;
+    }
+  }
+
+  function flipCard() {
+    state.isFlipped = !state.isFlipped;
+    renderUI();
+  }
+
+  function navigatePrevious() {
+    if (state.currentIndex > 0) {
+      state.currentIndex--;
+      state.isFlipped = false;
+      renderUI();
+    }
+  }
+
+  function navigateNext() {
+    if (state.currentMode === "evidence-matching") {
+      if (state.evidenceMatching.selectedOption !== null && !state.evidenceMatching.answered) {
+        checkEvidenceMatchingAnswer();
+        renderUI();
+        return;
+      }
+      if (state.evidenceMatching.answered) {
+        moveToNextEvidenceQuestion();
+        return;
+      }
+    }
+
+    if (state.currentIndex < state.flashcards.length - 1) {
+      state.currentIndex++;
+      state.isFlipped = false;
+      renderUI();
+    }
+  }
+
+  async function moveToNextEvidenceQuestion() {
+    const analyses = await getAnalysisNodesForSubject(state.currentSubject);
+    if (!analyses || analyses.length === 0) return;
+    const currentIdx = analyses.findIndex(a => a.id === state.evidenceMatching.currentAnalysis?.id);
+    const nextIdx = (currentIdx + 1) % analyses.length;
+    await loadEvidenceMatchingForAnalysis(analyses[nextIdx].id);
+    renderUI();
+  }
+
   function handleDBChange(event) {
     loadFlashcards().then(renderUI);
   }
 
-  async function refreshSubjectList() {
-    const subjects = await getAllSubjects();
+async function refreshSubjectList() {
+    const subjects = await getSubjects();
     if (subjects.length > 0 && !state.currentSubject) {
       state.currentSubject = subjects[0];
     }
+    if (!state.currentSubject) {
+      return;
+    }
   }
 
-  async function getAllSubjects() {
-    const nodes = await getAllNodes();
-    const subjects = new Set();
-    nodes.forEach(node => {
-      if (node.subject) subjects.add(node.subject);
-    });
-    return Array.from(subjects);
-  }
-
-async function loadFlashcards() {
+  async function loadFlashcards() {
+    if (!state.currentSubject) {
+      state.flashcards = [];
+      return;
+    }
+    
     state.flashcards = [];
     state.currentIndex = 0;
     state.isFlipped = false;
@@ -114,9 +264,8 @@ async function loadFlashcards() {
         await loadEvidenceMatchingFlashcards();
     }
     
-    // Apply custom flashcard ordering algorithm
     state.flashcards = applyCustomFlashcardOrder(state.flashcards);
-}
+  }
 
 // Placeholder function for custom flashcard algorithm (e.g., spaced-repetition, custom ordering)
 // Replace this function with your own implementation to customize flashcard order
@@ -135,9 +284,11 @@ function applyCustomFlashcardOrder(flashcards) {
 }
 
   async function loadQuoteLearningFlashcards() {
+    if (!state.currentSubject) {
+      return;
+    }
     const quotes = await getQuotesForSubject(state.currentSubject);
     state.flashcards = await Promise.all(quotes.map(async (quote) => {
-      // Get analyses that reference this quote
       const analyses = await getAnalysesReferencingQuote(quote.id);
       return {
         id: quote.id,
@@ -150,7 +301,7 @@ function applyCustomFlashcardOrder(flashcards) {
           content: quote.quote,
           isQuote: true,
           quoteData: quote,
-          analyses: analyses // Store linked analyses for display
+          analyses: analyses
         }
       };
     }));
@@ -163,9 +314,11 @@ function applyCustomFlashcardOrder(flashcards) {
   }
 
   async function loadAnalysisLearningFlashcards() {
+    if (!state.currentSubject) {
+      return;
+    }
     const analyses = await getAnalysisNodesForSubject(state.currentSubject);
     state.flashcards = await Promise.all(analyses.map(async (analysis) => {
-      // Get quotes referenced by this analysis
       const quotes = await getQuotesReferencedByAnalysis(analysis.id);
       return {
         id: analysis.id,
@@ -173,7 +326,7 @@ function applyCustomFlashcardOrder(flashcards) {
         front: {
           content: analysis.title || "What is the analysis?",
           isQuestion: true,
-          quotes: quotes // Store linked quotes for display
+          quotes: quotes
         },
         back: {
           content: analysis.analysis,
@@ -185,6 +338,10 @@ function applyCustomFlashcardOrder(flashcards) {
   }
 
   async function loadEvidenceMatchingFlashcards() {
+    if (!state.currentSubject) {
+      state.flashcards = [];
+      return;
+    }
     const analyses = await getAnalysisNodesForSubject(state.currentSubject);
     if (analyses.length === 0) {
       state.flashcards = [];
@@ -194,6 +351,9 @@ function applyCustomFlashcardOrder(flashcards) {
   }
 
   async function loadEvidenceMatchingForAnalysis(analysisId) {
+    if (!state.currentSubject || !analysisId) {
+      return;
+    }
     const analysis = await getNode(analysisId);
     if (!analysis) return;
 
@@ -210,7 +370,9 @@ function applyCustomFlashcardOrder(flashcards) {
       currentAnalysis: analysis,
       quoteOptions: allOptions,
       selectedOption: null,
-      correctOption: referencedQuotes.map(q => q.id)
+      correctOption: referencedQuotes.map(q => q.id),
+      answered: false,
+      wasCorrect: null
     };
 
     state.flashcards = [{
@@ -252,12 +414,18 @@ function applyCustomFlashcardOrder(flashcards) {
       state.currentMode === "evidence-matching" ? "block" : "none";
     if (memoryStats) memoryStats.style.display = "none";
 
+    if (!state.currentSubject) {
+      if (flashcardContent) flashcardContent.textContent = "Select a subject to start studying.";
+      if (flashcardBackContent) flashcardBackContent.textContent = "Use the sidebar to enter a subject.";
+      return;
+    }
+
     if (state.flashcards.length > 0 && state.currentIndex < state.flashcards.length) {
       const flashcardData = state.flashcards[state.currentIndex];
       updateFlashcardDisplay(flashcardData, flashcard);
     } else {
-      if (flashcardContent) flashcardContent.textContent = "No flashcards available for this subject.";
-      if (flashcardBackContent) flashcardBackContent.textContent = "Add some content first in the Analysis tool.";
+      if (flashcardContent) flashcardContent.textContent = "No flashcards available.";
+      if (flashcardBackContent) flashcardBackContent.textContent = "Add content in the Analysis tool.";
     }
 
     if (state.currentMode === "evidence-matching") {
@@ -276,11 +444,21 @@ function applyCustomFlashcardOrder(flashcards) {
        flashcardContent.innerHTML = `<div class="cue">${escapeHtml(front.content || "")}</div>`;
      } else if (front.isQuestion) {
        flashcardContent.innerHTML = `<div class="question">${escapeHtml(front.content || "")}</div>`;
+       if (front.quotes && front.quotes.length > 0) {
+         flashcardContent.innerHTML += `<div class="linked-quotes">`;
+         flashcardContent.innerHTML += `<div class="linked-quotes-title">Which quote relates to this?</div>`;
+         front.quotes.forEach(quote => {
+           flashcardContent.innerHTML += `<div class="linked-quote-item">${escapeHtml(quote.quote)}</div>`;
+           if (quote.section) {
+             flashcardContent.innerHTML += `<div class="linked-quote-source">${escapeHtml(quote.section)}</div>`;
+           }
+         });
+         flashcardContent.innerHTML += `</div>`;
+       }
      } else if (front.isAnalysis) {
        flashcardContent.innerHTML = `<div class="analysis-preview">${formatAnalysisForDisplay(front.content || "")}</div>`;
      } else if (front.isQuote) {
        flashcardContent.innerHTML = `<div class="quote">${escapeHtml(front.content || "")}</div>`;
-       // Show quote source if available
        if (flashcardData.front?.quoteData) {
          flashcardContent.innerHTML += `<div class="quote-meta">From: ${escapeHtml(flashcardData.front.quoteData.section || "unknown source")}</div>`;
        }
@@ -344,14 +522,23 @@ function applyCustomFlashcardOrder(flashcards) {
 
   function renderEvidenceMatchingUI() {
     if (!evidencePrompt || !quoteOptions || !evidenceFeedback) return;
+    if (!state.evidenceMatching.currentAnalysis) return;
 
     evidencePrompt.innerHTML = `<div class="analysis">${formatAnalysisForDisplay(state.evidenceMatching.currentAnalysis.analysis)}</div>`;
 
     quoteOptions.innerHTML = "";
     state.evidenceMatching.quoteOptions.forEach((quote, index) => {
       const isSelected = state.evidenceMatching.selectedOption === index;
+      const isAnswered = state.evidenceMatching.answered;
+      const isCorrect = state.evidenceMatching.correctOption?.includes(quote.id);
+      
+      let className = "quote-option";
+      if (isSelected) className += " selected";
+      if (isAnswered && isCorrect) className += " correct";
+      if (isAnswered && isSelected && !isCorrect) className += " incorrect";
+      
       const optionDiv = document.createElement("div");
-      optionDiv.className = `quote-option ${isSelected ? "selected" : ""}`;
+      optionDiv.className = className;
       optionDiv.innerHTML = `
         <div class="quote-text">${escapeHtml(quote.quote)}</div>
         ${quote.section ? `<div class="quote-source">${escapeHtml(quote.section)}</div>` : ""}
@@ -360,23 +547,38 @@ function applyCustomFlashcardOrder(flashcards) {
       quoteOptions.appendChild(optionDiv);
     });
 
-    evidenceFeedback.textContent = "";
-    evidenceFeedback.className = "";
+    if (!state.evidenceMatching.answered) {
+      evidenceFeedback.textContent = "";
+      evidenceFeedback.className = "";
+    }
   }
 
   function selectQuoteOption(index) {
+    if (state.evidenceMatching.answered) return;
     state.evidenceMatching.selectedOption = index;
     renderEvidenceMatchingUI();
   }
 
   function checkEvidenceMatchingAnswer() {
-    if (state.evidenceMatching.selectedOption === null) return false;
+    if (state.evidenceMatching.selectedOption === null || state.evidenceMatching.answered) return false;
 
     const selectedQuoteId = state.evidenceMatching.quoteOptions[state.evidenceMatching.selectedOption].id;
     const isCorrect = state.evidenceMatching.correctOption?.includes(selectedQuoteId) || false;
+    state.evidenceMatching.answered = true;
+    state.evidenceMatching.wasCorrect = isCorrect;
 
-    evidenceFeedback.textContent = isCorrect ? "Correct!" : "Incorrect. Try again.";
-    evidenceFeedback.className = isCorrect ? "feedback-correct" : "feedback-incorrect";
+    if (evidenceFeedback) {
+      if (isCorrect) {
+        evidenceFeedback.textContent = "Correct! Press Next for another.";
+        evidenceFeedback.className = "feedback-correct";
+      } else {
+        const correctQuote = state.evidenceMatching.quoteOptions.find(
+          q => state.evidenceMatching.correctOption.includes(q.id)
+        );
+        evidenceFeedback.innerHTML = `Incorrect. The correct answer was:<br>"${escapeHtml(correctQuote?.quote || "")}"<br><br>Press Next for another.`;
+        evidenceFeedback.className = "feedback-incorrect";
+      }
+    }
 
     state.stats.totalStudied++;
     if (isCorrect) {
@@ -392,78 +594,14 @@ function applyCustomFlashcardOrder(flashcards) {
     return isCorrect;
   }
 
-  // Event listeners
-  if (modeSelect) {
-    modeSelect.addEventListener("click", () => {
-      const modes = ["quote-learning", "analysis-learning", "evidence-matching"];
-      const currentIndex = modes.indexOf(state.currentMode);
-      state.currentMode = modes[(currentIndex + 1) % modes.length];
-      loadFlashcards();
-    });
-  }
-
-  if (newSessionBtn) {
-    newSessionBtn.addEventListener("click", () => {
-      state.currentIndex = 0;
-      state.isFlipped = false;
-      state.showAnalysis = false;
-      loadFlashcards();
-    });
-  }
-
-  if (statsBtn) {
-    statsBtn.addEventListener("click", () => {
-      renderStats();
-      memoryStats.style.display = "block";
-    });
-  }
-
-  if (flipBtn) {
-    flipBtn.addEventListener("click", () => {
-      state.isFlipped = !state.isFlipped;
-      renderUI();
-    });
-  }
-
-  if (prevBtn) {
-    prevBtn.addEventListener("click", () => {
-      if (state.currentIndex > 0) {
-        state.currentIndex--;
-        state.isFlipped = false;
-        renderUI();
-      }
-    });
-  }
-
-    if (nextBtn) {
-      nextBtn.addEventListener("click", () => {
-        // Handle evidence matching mode: next button checks answer
-        if (state.currentMode === "evidence-matching" && state.evidenceMatching.selectedOption !== null) {
-          const wasCorrect = checkEvidenceMatchingAnswer();
-          renderUI(); // Show feedback immediately
-          return;
-        }
-
-        // For all other modes, or if no option selected in evidence matching, move to next flashcard
-        if (state.currentIndex < state.flashcards.length - 1) {
-          state.currentIndex++;
-          state.isFlipped = false;
-          renderUI();
-        }
-      });
-    }
-
-  if (showAnalysisBtn) {
-    showAnalysisBtn.addEventListener("click", () => {
-      state.showAnalysis = !state.showAnalysis;
-      renderUI();
-    });
-  }
-
-  if (closeStatsBtn) {
-    closeStatsBtn.addEventListener("click", () => {
-      memoryStats.style.display = "none";
-    });
+  async function moveToNextEvidenceQuestion() {
+    const analyses = await getAnalysisNodesForSubject(state.currentSubject);
+    if (!analyses || analyses.length === 0) return;
+    
+    const currentIdx = analyses.findIndex(a => a.id === state.evidenceMatching.currentAnalysis?.id);
+    const nextIdx = (currentIdx + 1) % analyses.length;
+    await loadEvidenceMatchingForAnalysis(analyses[nextIdx].id);
+    renderUI();
   }
 
   function renderStats() {
@@ -496,6 +634,7 @@ function applyCustomFlashcardOrder(flashcards) {
 
   window.__neuronetMemoryCleanup = () => {
     document.removeEventListener("db-change", handleDBChange);
+    document.removeEventListener("keydown", handleKeyDown);
   };
 
   await initialize();

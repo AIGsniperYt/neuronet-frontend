@@ -52,6 +52,7 @@ const tools = {
       getAnalysesReferencingQuote,
       getNode,
       getNodeTimestamp,
+      getSubjects,
       escapeHtml
     }, context)
   },
@@ -83,210 +84,6 @@ const toolDefinitions = {
   mindmap: { name: "Mindmap", file: "mindmap.html", icon: "N", desc: "Visual database overview for establishing connections" },
   tracker: { name: "Tracker", file: "tracker.html", icon: "T", desc: "Track study progress with past paper data" }
 };
-
-// ========== CANVAS BACKGROUND ==========
-let canvas, ctx;
-let nodes = [],
-  nodeCount = 92,
-  maxDist = 150,
-  separationStrength = 0.02,
-  edgeRepulsionStrength = 0.01,
-  edgeBuffer = 50;
-const cellSize = maxDist;
-let grid = {},
-  gridWidth,
-  gridHeight;
-
-function resetGrid() {
-  grid = {};
-  gridWidth = Math.ceil(canvas.width / cellSize);
-  gridHeight = Math.ceil(canvas.height / cellSize);
-}
-
-function getCellIndex(x, y) {
-  return `${Math.floor(x / cellSize)},${Math.floor(y / cellSize)}`;
-}
-
-class Node {
-  constructor() {
-    this.x = Math.random() * canvas.width;
-    this.y = Math.random() * canvas.height;
-    this.vx = (Math.random() - 0.5) * 1.2;
-    this.vy = (Math.random() - 0.5) * 1.2;
-    this.maxConnections = Math.floor(Math.random() * 3) + 3;
-    this.radius = 2 + Math.random() * 2;
-  }
-
-  update() {
-    let moveX = 0,
-      moveY = 0;
-    const cellX = Math.floor(this.x / cellSize),
-      cellY = Math.floor(this.y / cellSize);
-    let nearbyNodes = [];
-
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dy = -1; dy <= 1; dy++) {
-        const key = `${cellX + dx},${cellY + dy}`;
-        if (grid[key]) nearbyNodes.push(...grid[key]);
-      }
-    }
-
-    for (let other of nearbyNodes) {
-      if (other === this) continue;
-      let dx = other.x - this.x,
-        dy = other.y - this.y,
-        dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist > 0.01 && dist < maxDist) {
-        let force = separationStrength * (1 / dist) * (1 - dist / maxDist);
-        moveX -= dx * force;
-        moveY -= dy * force;
-      }
-    }
-
-    if (this.x < edgeBuffer)
-      moveX += edgeRepulsionStrength * (1 - this.x / edgeBuffer);
-    if (this.x > canvas.width - edgeBuffer)
-      moveX -= edgeRepulsionStrength * ((this.x - (canvas.width - edgeBuffer)) / edgeBuffer);
-    if (this.y < edgeBuffer)
-      moveY += edgeRepulsionStrength * (1 - this.y / edgeBuffer);
-    if (this.y > canvas.height - edgeBuffer)
-      moveY -= edgeRepulsionStrength * ((this.y - (canvas.height - edgeBuffer)) / edgeBuffer);
-
-    const mouseForceRadius = 50,
-      mouseRepelStrength = 0.5;
-    if (mouse.x !== undefined && mouse.y !== undefined) {
-      let dx = this.x - mouse.x,
-        dy = this.y - mouse.y,
-        dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < mouseForceRadius && dist > 0.01) {
-        let force = mouseRepelStrength * (1 - dist / mouseForceRadius);
-        moveX += (dx / dist) * force;
-        moveY += (dy / dist) * force;
-      }
-    }
-
-    const randomDrift = 0.02;
-    this.vx += moveX + (Math.random() - 0.5) * randomDrift;
-    this.vy += moveY + (Math.random() - 0.5) * randomDrift;
-
-    const maxSpeed = 0.6;
-    let speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
-    if (speed > maxSpeed) {
-      this.vx = (this.vx / speed) * maxSpeed;
-      this.vy = (this.vy / speed) * maxSpeed;
-    }
-
-    this.x += this.vx;
-    this.y += this.vy;
-
-    if (this.x < 0) { this.x = 0; this.vx *= -1; }
-    if (this.x > canvas.width) { this.x = canvas.width; this.vx *= -1; }
-    if (this.y < 0) { this.y = 0; this.vy *= -1; }
-    if (this.y > canvas.height) { this.y = canvas.height; this.vy *= -1; }
-  }
-
-  draw() {
-    ctx.beginPath();
-    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-    ctx.fillStyle = "#9fffd6";
-    ctx.fill();
-  }
-}
-
-function buildGrid() {
-  resetGrid();
-  for (const node of nodes) {
-    const key = getCellIndex(node.x, node.y);
-    if (!grid[key]) grid[key] = [];
-    grid[key].push(node);
-  }
-}
-
-function connectNodes() {
-  buildGrid();
-  for (let i = 0; i < nodes.length; i++) {
-    const a = nodes[i];
-    const cellX = Math.floor(a.x / cellSize),
-      cellY = Math.floor(a.y / cellSize);
-    let candidates = [];
-
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dy = -1; dy <= 1; dy++) {
-        const key = `${cellX + dx},${cellY + dy}`;
-        if (grid[key]) candidates.push(...grid[key]);
-      }
-    }
-
-    candidates = candidates
-      .filter((n) => n !== a)
-      .map((b) => {
-        const dx = b.x - a.x,
-          dy = b.y - a.y,
-          dist = Math.sqrt(dx * dx + dy * dy);
-        return { node: b, dist };
-      });
-
-    let neighbors = candidates.filter((c) => c.dist < maxDist);
-    let farNeighbors = candidates.filter(
-      (c) => c.dist >= maxDist && c.dist < maxDist * 2
-    );
-
-    neighbors.sort((n1, n2) => n1.dist - n2.dist);
-    farNeighbors.sort((n1, n2) => n1.dist - n2.dist);
-
-    neighbors = neighbors.slice(0, a.maxConnections);
-    if (farNeighbors.length > 0) neighbors.push(farNeighbors[0]);
-
-    for (let { node: b, dist } of neighbors) {
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.strokeStyle = `rgba(31,209,138,${0.5 * (1 - dist / maxDist)})`;
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-  }
-}
-
-function animate() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  nodes.forEach((n) => { n.update(); n.draw(); });
-  connectNodes();
-  requestAnimationFrame(animate);
-}
-
-function initCanvas() {
-  canvas = document.getElementById("neuronet");
-  if (!canvas) return;
-  ctx = canvas.getContext("2d");
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-  nodes = [];
-  resetGrid();
-  for (let i = 0; i < nodeCount; i++) nodes.push(new Node());
-  animate();
-}
-
-window.addEventListener("resize", () => {
-  initCanvas();
-});
-
-const mouse = {};
-function initCanvasListeners() {
-  const c = document.getElementById("neuronet");
-  if (!c) {
-    setTimeout(initCanvasListeners, 100);
-    return;
-  }
-  c.addEventListener("mousemove", (e) => {
-    mouse.x = e.clientX;
-    mouse.y = e.clientY;
-  });
-  c.addEventListener("mouseleave", () => {
-    delete mouse.x;
-    delete mouse.y;
-  });
-}
 
 // ========== AUTH & API ==========
 function setProfileUI(user) {
@@ -365,37 +162,19 @@ async function loadTool(toolName, context = {}) {
     }
   }
 
-  const launchpad = document.getElementById("globalLaunchpad");
-  if (launchpad) {
-    launchpad.className = "launchpad";
-    launchpad.classList.add("zooming-in");
-    launchpad.style.transition = "transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.15s ease, filter 0.15s ease";
-  }
-
   currentToolName = toolName;
   currentSubject = context.subject || null;
   setActiveTool(toolName);
 
-  // Hide content briefly until tool initializes to prevent flash
-  if (toolContainer) {
-    toolContainer.style.visibility = "hidden";
-    toolContainer.style.display = "block";
-  }
-
   const tool = tools[toolName];
-  const res = await fetch(`./tools/${tool.file}`);
-  toolContainer.innerHTML = await res.text();
-
-  if (tool.init) {
-    tool.init(context);
-  }
-
-  // Reveal after init completes
-  if (toolContainer) toolContainer.style.visibility = "";
-
-  setTimeout(() => {
+  toolContainer.innerHTML = "";
+  
+  // Fetch and load tool
+  fetch(`./tools/${tool.file}`).then(r => r.text()).then(html => {
+    toolContainer.innerHTML = html;
+    if (tool.init) tool.init(context);
     hideLaunchpad();
-  }, 150);
+  });
 }
 
 function escapeHtml(value) {
@@ -505,38 +284,60 @@ async function importDatabaseJson(file) {
 
 function showLaunchpad() {
   const tc = document.getElementById("toolContainer");
-  if (tc) tc.style.display = "none";
   const launchpad = document.getElementById("globalLaunchpad");
-  if (!launchpad) {
-    setTimeout(() => showLaunchpad(), 100);
-    return;
+  if (!launchpad) return;
+  
+  // Animate tool container out if it exists
+  if (tc) {
+    tc.classList.add("exiting");
+    setTimeout(() => {
+      tc.style.display = "none";
+      tc.classList.remove("exiting");
+    }, 350);
   }
-  launchpad.className = "launchpad";
+  
+  // Animate launchpad in
   launchpad.style.display = "flex";
-  launchpad.style.transition = "none";
   launchpad.classList.add("entering");
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      launchpad.style.transition = "all 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94)";
-      launchpad.classList.remove("entering");
-      launchpad.classList.add("entered");
-    });
-  });
+  void launchpad.offsetWidth; // force reflow
+  launchpad.classList.remove("entering");
+  launchpad.classList.add("entered");
 }
 
 function hideLaunchpad() {
   const tc = document.getElementById("toolContainer");
-  if (tc) tc.style.display = "block";
   const launchpad = document.getElementById("globalLaunchpad");
   if (!launchpad) return;
+  
+  // Animate launchpad out
+  launchpad.classList.add("exiting");
   launchpad.classList.remove("entered");
-  launchpad.classList.add("entering");
-  launchpad.style.transition = "all 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94)";
   setTimeout(() => {
-    if (launchpad.classList.contains("entering")) {
-      launchpad.style.display = "none";
-    }
+    launchpad.style.display = "none";
+    launchpad.classList.remove("exiting");
   }, 350);
+  
+  // Show tool container
+  if (tc) {
+    tc.style.display = "block";
+    tc.classList.add("entering");
+    void tc.offsetWidth;
+    tc.classList.remove("entering");
+    tc.classList.add("entered");
+  }
+}
+
+function openTool(toolName, context = {}) {
+  currentToolName = toolName;
+  currentSubject = context.subject || null;
+  setActiveTool(toolName);
+  const tool = tools[toolName];
+  toolContainer.innerHTML = "";
+  fetch(`./tools/${tool.file}`).then(r => r.text()).then(html => {
+    toolContainer.innerHTML = html;
+    if (tool.init) tool.init(context);
+    hideLaunchpad();
+  });
 }
 
 async function updateGlobalStats() {
@@ -895,8 +696,6 @@ async function renderToolCatalogue() {
 // ========== EVENT LISTENERS ==========
 document.addEventListener("DOMContentLoaded", async () => {
   toolContainer = document.getElementById("toolContainer");
-  initCanvas();
-  initCanvasListeners();
   setProfileUI(null);
 
   const loadingOverlay = document.getElementById("loadingOverlay");

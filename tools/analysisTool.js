@@ -33,6 +33,9 @@ export async function initAnalysisToolV2(deps, context = {}) {
   const backToLaunchpad = document.getElementById("backToLaunchpad");
   const studySubjectTitle = document.getElementById("studySubjectTitle");
   const sourceSelect = document.getElementById("sourceSelect");
+  const layer1Select = document.getElementById("layer1Select");
+  const layer2Select = document.getElementById("layer2Select");
+  const layer3Select = document.getElementById("layer3Select");
   const deleteSourceBtn = document.getElementById("deleteSourceBtn");
   const saveSourceBtn = document.getElementById("saveSourceBtn");
   const sourceForm = document.getElementById("sourceForm");
@@ -234,35 +237,131 @@ function htmlToPlainText(html) {
       if (!trimmed) {
         emptyCount++;
       } else {
-        // If we had empty lines, add one newline to represent the gap
+        // If we had empty lines, add newlines to represent the gaps
         if (emptyCount > 0) {
-          result.push("<br>");
+          for (let i = 0; i < emptyCount; i++) {
+            result.push("<br>");
+          }
           emptyCount = 0;
         }
         result.push(`${escapeHtml(line)}`);
       }
     }
 
-    // Handle trailing empty lines - add one gap
+    // Handle trailing empty lines - add gaps
     if (emptyCount > 0) {
-      result.push("<br>");
+      for (let i = 0; i < emptyCount; i++) {
+        result.push("<br>");
+      }
     }
 
-    return result.join("");
+    // If we only have one line with no newlines, still need to add <br> for single newline breaks
+    if (result.length === 0) {
+      return escapeHtml(text || "");
+    }
+    if (result.length === 1 && !text.includes("\n")) {
+      return escapeHtml(text);
+    }
+    
+    // Join lines with <br> between them
+    return result.join("<br>");
   }
 
-  function formatQuoteForDisplay(quoteText) {
-    // Convert the plain text quote to HTML with proper line break formatting
-    // Split on common whitespace patterns that indicate line breaks in source
-    const lines = (quoteText || "").split(/\n+/).map(line => line.trim()).filter(line => line);
+  function formatQuoteForDisplay(textOrRef, fallbackText = "") {
+    let sourceId = null;
+    let startPos = null;
+    let endPos = null;
+    let plainQuoteText = "";
     
-    if (lines.length <= 1) {
-      // Single line or minimal whitespace - just escape and return
-      return escapeHtml(quoteText || "");
+    if (typeof textOrRef === "object" && textOrRef !== null) {
+      sourceId = textOrRef.sourceId || null;
+      startPos = Number(textOrRef.start);
+      endPos = Number(textOrRef.end);
+      plainQuoteText = textOrRef.quote || "";
+    } else {
+      plainQuoteText = textOrRef || fallbackText || "";
     }
     
-    // Multi-line quote - join with <br> tags for proper formatting
-    return lines.map(line => escapeHtml(line)).join("<br>");
+    // Try source extraction
+    if (sourceId && !isNaN(startPos) && !isNaN(endPos)) {
+      const source = getSourceById(sourceId);
+      if (source && source.contentHtml) {
+        const formatted = getFormattedFromSource(source, startPos, endPos);
+        if (formatted) return formatted;
+      }
+    }
+    
+    return plainTextToHtml(plainQuoteText);
+  }
+  
+  function getFormattedFromSource(source, start, end) {
+    const html = source.contentHtml;
+    if (!html) return null;
+    
+    const temp = document.createElement("div");
+    temp.innerHTML = html;
+    const fullText = temp.textContent || "";
+    
+    const safeStart = Math.max(0, Math.min(start, fullText.length));
+    const safeEnd = Math.max(safeStart, Math.min(end, fullText.length));
+    
+    if (safeEnd <= safeStart) return null;
+    
+    let pos = 0;
+    const parts = [];
+    let lastBlockTag = null;
+    const walker = document.createTreeWalker(temp, NodeFilter.SHOW_TEXT, null, false);
+    let node = walker.nextNode();
+    
+    while (node) {
+      const text = node.nodeValue || "";
+      const nodeStart = pos;
+      const nodeEnd = pos + text.length;
+      
+      if (nodeEnd > safeStart && nodeStart < safeEnd) {
+        const sliceStart = Math.max(0, safeStart - nodeStart);
+        const sliceEnd = Math.min(text.length, safeEnd - nodeStart);
+        
+        if (sliceStart < sliceEnd) {
+          const slice = text.slice(sliceStart, sliceEnd);
+          
+          // Walk UP to find block and formatting
+          let parent = node.parentElement;
+          let blockTag = null;
+          let hasBold = false;
+          let hasItalic = false;
+          
+          while (parent) {
+            const tag = parent.tagName?.toUpperCase();
+            if (!blockTag && ["DIV", "P", "BLOCKQUOTE", "LI", "H1", "H2", "H3"].includes(tag)) {
+              blockTag = tag;
+            }
+            if (tag === "B" || tag === "STRONG") hasBold = true;
+            if (tag === "I" || tag === "EM") hasItalic = true;
+            if (tag === "BODY") break;
+            parent = parent.parentElement;
+          }
+          
+          // Add line break when entering new block
+          if (parts.length > 0 && blockTag && blockTag !== lastBlockTag) {
+            parts.push("<br>");
+          }
+          
+          let formatted = escapeHtml(slice);
+          if (hasBold) formatted = `<strong>${formatted}</strong>`;
+          if (hasItalic) formatted = `<em>${formatted}</em>`;
+          
+          parts.push(formatted);
+          lastBlockTag = blockTag;
+        }
+      }
+      
+      pos = nodeEnd;
+      node = walker.nextNode();
+      if (pos >= safeEnd) break;
+    }
+    
+    return parts.length > 0 ? parts.join("") : null;
   }
 
   function sanitizeRichHtml(input, isPlainText = false) {
@@ -362,7 +461,24 @@ function htmlToPlainText(html) {
     }
 
     // Show/hide save and cancel buttons based on edit mode
-    if (saveSourceBtn) {
+function selectSource(sourceId) {
+    state.selectedSourceId = sourceId;
+    state.focusedNodeId = null;
+    state.focusedRangeKey = null;
+
+    if (sourceSelect) sourceSelect.value = sourceId;
+
+    if (state.viewMode === "editor") {
+      const source = getSourceById(sourceId);
+      if (source) {
+        hydrateSourceForm(source);
+      }
+    } else {
+      renderReaderAndNodes();
+    }
+  }
+
+  if (saveSourceBtn) {
       saveSourceBtn.classList.toggle("visible", isEditor);
     }
     if (cancelEditSourceBtn) {
@@ -754,8 +870,11 @@ function htmlToPlainText(html) {
   function renderModalQuoteRefsListHtml(refs, previewLen = 100) {
     return (refs || [])
       .map((ref, idx) => {
-        const q = ref.quote || "";
-        const truncated = `${escapeHtml(q.substring(0, previewLen))}${q.length > previewLen ? "..." : ""}`;
+        // Use formatQuoteForDisplay to properly render HTML formatting
+        const displayHtml = formatQuoteForDisplay(ref, ref.quote || "");
+        // Get plain text for the truncated version and Remove button
+        const plainText = ref.quote || "";
+        const truncated = plainText.substring(0, previewLen) + (plainText.length > previewLen ? "..." : "");
         const origin = quoteRefOriginLineHtml(ref);
         const priority = clampPriority(ref.priority);
         const stars = [1, 2, 3, 4, 5]
@@ -898,6 +1017,11 @@ function htmlToPlainText(html) {
     pre.setEnd(range.startContainer, range.startOffset);
 
     const rawStart = pre.toString().length;
+    
+    // Extract HTML content from the range to preserve formatting (bold, italics, etc.)
+    const quoteContainer = document.createElement("div");
+    quoteContainer.appendChild(range.cloneContents());
+    const rawQuoteHtml = quoteContainer.innerHTML;
     const rawQuote = range.toString();
     if (!rawQuote.trim()) return null;
 
@@ -911,6 +1035,7 @@ function htmlToPlainText(html) {
       start: Math.min(start, sourceText.length),
       end: Math.min(end, sourceText.length),
       quote,
+      quoteHtml: rawQuoteHtml,
       range
     };
   }
@@ -1271,7 +1396,10 @@ function htmlToPlainText(html) {
     const sources = getSourcesForSelectedSubject();
 
     if (!sources.length) {
-      sourceSelect.innerHTML = `<option value="">No sources yet</option>`;
+      layer1Select.innerHTML = `<option value="">No sources</option>`;
+      layer2Select.style.display = "none";
+      layer3Select.style.display = "none";
+      sourceSelect.style.display = "none";
       analysisReader.innerHTML = "";
       analysisNodeList.innerHTML = `<div class="empty-note">No analysis nodes yet.</div>`;
       state.selectedSourceId = "";
@@ -1280,15 +1408,108 @@ function htmlToPlainText(html) {
       return;
     }
 
-    if (!getSourceById(state.selectedSourceId) || getSourceById(state.selectedSourceId)?.subject !== state.selectedSubject) {
-      state.selectedSourceId = sources[0].id;
+    // Build layer data
+    const layerData = {};
+    
+    sources.forEach(source => {
+      const path = source?.meta?.hierarchyPath || [source.subject, ...(source.section ? source.section.split(" > ") : [])].filter(Boolean);
+      const cleanPath = path.map(s => (s || "").trim());
+      
+      const l1 = cleanPath[1] || "__other__";
+      const l2 = cleanPath[2] || "";
+      
+      if (!layerData[l1]) layerData[l1] = {};
+      if (l2) {
+        layerData[l1][l2] = source;
+      } else {
+        // Direct child under layer 1
+        layerData[l1]["__direct__"] = source;
+      }
+    });
+
+    state.layerData = layerData;
+    
+    // Render Layer 1
+    const l1Options = Object.keys(layerData).sort((a, b) => {
+      if (a === "__other__") return 1;
+      if (b === "__other__") return -1;
+      return a.localeCompare(b);
+    });
+    
+    layer1Select.innerHTML = l1Options.map(k => {
+      const label = k === "__other__" ? "(Other)" : k;
+      return `<option value="${escapeHtml(k)}">${escapeHtml(label)}</option>`;
+    }).join("");
+
+    // Auto-load first valid source
+    const firstL1 = l1Options[0];
+    const firstL2 = layerData[firstL1] ? Object.keys(layerData[firstL1])[0] : null;
+    const targetSource = firstL2 ? layerData[firstL1][firstL2] : layerData[firstL1]["__direct__"];
+    
+    if (targetSource) {
+      state.selectedSourceId = targetSource.id;
+      renderReaderAndNodes();
     }
-
-    sourceSelect.innerHTML = sources
-      .map((source) => `<option value="${escapeHtml(source.id)}" ${source.id === state.selectedSourceId ? "selected" : ""}>${escapeHtml(source.title || "Untitled source")}</option>`)
-      .join("");
-
+    
+    // Hide extra dropdowns if only layer 1
+    if (l1Options.length === 1 && !firstL2) {
+      layer1Select.style.display = "inline-block";
+      layer2Select.style.display = "none";
+      layer3Select.style.display = "none";
+    } else {
+      layer1Select.style.display = "inline-block";
+      triggerLayer1Change();
+    }
+    
     deleteSourceBtn.disabled = !state.selectedSourceId;
+  }
+  
+  function triggerLayer1Change() {
+    const selectedL1 = layer1Select.value;
+    const layerInfo = state.layerData[selectedL1] || {};
+    const l2Options = Object.keys(layerInfo).filter(k => k !== "__direct__").sort();
+    
+    if (l2Options.length > 0) {
+      layer2Select.style.display = "inline-block";
+      layer2Select.innerHTML = l2Options.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join("");
+      
+      const selectedL2 = layer2Select.value;
+      const targetSource = layerInfo[selectedL2];
+      
+      if (targetSource) {
+        state.selectedSourceId = targetSource.id;
+        renderReaderAndNodes();
+      }
+    } else {
+      layer2Select.style.display = "none";
+      // Direct child
+      const targetSource = layerInfo["__direct__"];
+      if (targetSource) {
+        state.selectedSourceId = targetSource.id;
+        renderReaderAndNodes();
+      }
+    }
+  }
+
+  if (layer1Select) {
+    layer1Select.addEventListener("change", triggerLayer1Change);
+  }
+  
+  if (layer2Select) {
+    layer2Select.addEventListener("change", () => {
+      const selectedL1 = layer1Select.value;
+      const selectedL2 = layer2Select.value;
+      const targetSource = state.layerData[selectedL1]?.[selectedL2];
+      
+      if (targetSource) {
+        state.selectedSourceId = targetSource.id;
+        renderReaderAndNodes();
+      }
+    });
+  }
+
+  if (layer3Select) {
+    layer3Select.style.display = "none";
   }
 
   function renderReaderAndNodes() {
@@ -1328,6 +1549,7 @@ function htmlToPlainText(html) {
           if (node.quoteRefs?.length) {
             return node.quoteRefs
               .map((ref, refIdx) => {
+                // Get the text - either from ref directly or by looking up the quote in DB
                 const text = ref.quote || state.quotes.find((q) => q.id === ref.quoteId)?.quote || "";
                 if (!text) return "";
                 // Check if this quote is the exactly selected one
@@ -1339,9 +1561,9 @@ function htmlToPlainText(html) {
                 const priorityStars = `<div style="display:flex; gap:2px; margin: 0 0 6px 0;">${[1,2,3,4,5].map((value) => `<span style="color:${value <= priority ? getPriorityColor(value) : "rgba(230,255,245,0.16)"};">${value <= priority ? "★" : "☆"}</span>`).join("")}</div>`;
                 const jump = resolveRefJumpForRef(ref);
                 if (jump) {
-                  return `<button type="button" class="${quoteClass}" data-analysis-id="${escapeHtml(node.id)}" data-jump-source="${escapeHtml(jump.sourceId)}" data-jump-start="${jump.start}" data-jump-end="${jump.end}" data-range-key="${refRangeKey}" title="Show this quote in the source">${priorityStars}<blockquote class="analysis-quote-preview">${formatQuoteForDisplay(text)}</blockquote>${origin}</button>`;
+                  return `<button type="button" class="${quoteClass}" data-analysis-id="${escapeHtml(node.id)}" data-jump-source="${escapeHtml(jump.sourceId)}" data-jump-start="${jump.start}" data-jump-end="${jump.end}" data-range-key="${refRangeKey}" title="Show this quote in the source">${priorityStars}<blockquote class="analysis-quote-preview">${formatQuoteForDisplay(ref, text)}</blockquote>${origin}</button>`;
                 }
-                return `<div class="analysis-quote-static${isExactQuote ? " active-quote" : ""}">${priorityStars}<blockquote class="analysis-quote-preview">${formatQuoteForDisplay(text)}</blockquote>${origin}</div>`;
+                return `<div class="analysis-quote-static${isExactQuote ? " active-quote" : ""}">${priorityStars}<blockquote class="analysis-quote-preview">${formatQuoteForDisplay(ref, text)}</blockquote>${origin}</div>`;
               })
               .filter(Boolean)
               .join("");
@@ -1354,10 +1576,10 @@ function htmlToPlainText(html) {
               const norm = normalizeSource(legacySrc);
               const off = resolveLegacyLinkedOffsets(node, legacySrc, norm.contentText || "");
               if (off) {
-                return `<button type="button" class="analysis-quote-jump" data-analysis-id="${escapeHtml(node.id)}" data-jump-source="${escapeHtml(legacySrc.id)}" data-jump-start="${off.start}" data-jump-end="${off.end}" title="Show this quote in the source"><blockquote class="analysis-quote-preview">${formatQuoteForDisplay(node.quote)}</blockquote>${origin}</button>`;
+                return `<button type="button" class="analysis-quote-jump" data-analysis-id="${escapeHtml(node.id)}" data-jump-source="${escapeHtml(legacySrc.id)}" data-jump-start="${off.start}" data-jump-end="${off.end}" title="Show this quote in the source"><blockquote class="analysis-quote-preview">${formatQuoteForDisplay(node.quote || "")}</blockquote>${origin}</button>`;
               }
             }
-            return `<div class="analysis-quote-static"><blockquote class="analysis-quote-preview">${formatQuoteForDisplay(node.quote)}</blockquote>${origin}</div>`;
+            return `<div class="analysis-quote-static"><blockquote class="analysis-quote-preview">${formatQuoteForDisplay(node.quote || "")}</blockquote>${origin}</div>`;
           }
           return "";
         })();
@@ -1606,7 +1828,6 @@ function htmlToPlainText(html) {
       state.focusedNodeId = null;
       state.focusedRangeKey = null;
 
-      // If in editor mode, load the source for editing
       if (state.viewMode === "editor") {
         const source = getSourceById(selectedId);
         if (source) {
@@ -1616,6 +1837,95 @@ function htmlToPlainText(html) {
         renderReaderAndNodes();
       }
     });
+  }
+  
+  // Layer cascade event listeners
+  if (layer1Select) {
+    layer1Select.addEventListener("change", () => {
+      const selectedL1 = layer1Select.value;
+      const { layer1Data, layer2Data, sources } = state.layerData || {};
+      if (!layer1Data) return;
+      
+      const sourcesInL1 = layer1Data[selectedL1] || [];
+      const hasL2 = sourcesInL1.some(s => s.l2);
+      
+      if (hasL2) {
+        layer2Select.style.display = "inline-block";
+        const l2Options = [...new Set(sourcesInL1.map(s => s.l2).filter(Boolean))].sort();
+        layer2Select.innerHTML = l2Options.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join("");
+        
+        const selectedL2 = layer2Select.value;
+        if (selectedL2) {
+          const hasL3 = layer2Data[selectedL1]?.[selectedL2]?.some(s => s.l3);
+          if (hasL3) {
+            layer3Select.style.display = "inline-block";
+            const l3Options = [...new Set(layer2Data[selectedL1]?.[selectedL2]?.map(s => s.l3).filter(Boolean))].sort();
+            layer3Select.innerHTML = l3Options.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join("");
+          } else {
+            layer3Select.style.display = "none";
+          }
+        }
+        
+        // Update sources
+        const sourcesInL2 = layer2Data[selectedL1]?.[selectedL2] || [];
+        renderLayerSources(sourcesInL2.map(s => s.source));
+      } else {
+        layer2Select.style.display = "none";
+        layer3Select.style.display = "none";
+        renderLayerSources(sourcesInL1.map(s => s.source));
+      }
+    });
+  }
+  
+  if (layer2Select) {
+    layer2Select.addEventListener("change", () => {
+      const { layer1Data, layer2Data } = state.layerData || {};
+      if (!layer1Data) return;
+      
+      const selectedL1 = layer1Select.value;
+      const selectedL2 = layer2Select.value;
+      
+      const hasL3 = layer2Data[selectedL1]?.[selectedL2]?.some(s => s.l3);
+      if (hasL3) {
+        layer3Select.style.display = "inline-block";
+        const l3Options = [...new Set(layer2Data[selectedL1]?.[selectedL2]?.map(s => s.l3).filter(Boolean))].sort();
+        layer3Select.innerHTML = l3Options.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join("");
+      } else {
+        layer3Select.style.display = "none";
+      }
+      
+      const sourcesInL2 = layer2Data[selectedL1]?.[selectedL2] || [];
+      renderLayerSources(sourcesInL2.map(s => s.source));
+    });
+  }
+  
+  if (layer3Select) {
+    layer3Select.addEventListener("change", () => {
+      const { layer2Data } = state.layerData || {};
+      const selectedL1 = layer1Select.value;
+      const selectedL2 = layer2Select.value;
+      const selectedL3 = layer3Select.value;
+      
+      const sourcesInL3 = layer2Data[selectedL1]?.[selectedL2]?.filter(s => s.l3 === selectedL3) || [];
+      renderLayerSources(sourcesInL3.map(s => s.source));
+    });
+  }
+  
+  function renderLayerSources(sourceList) {
+    if (!sourceList?.length) {
+      sourceSelect.innerHTML = `<option value="">No sources</option>`;
+      return;
+    }
+    
+    if (!getSourceById(state.selectedSourceId)) {
+      state.selectedSourceId = sourceList[0].id;
+    }
+    
+    sourceSelect.innerHTML = sourceList
+      .map(s => `<option value="${escapeHtml(s.id)}" ${s.id === state.selectedSourceId ? "selected" : ""}>${escapeHtml(s.title || "Untitled")}</option>`)
+      .join("");
+    
+    selectSource(state.selectedSourceId);
   }
 
   // Add click handler for the new "+ Add Analysis Node" button
@@ -1713,11 +2023,21 @@ function htmlToPlainText(html) {
     });
   }
 
-  if (newSourceBtn) {
-    newSourceBtn.addEventListener("click", () => {
-      resetSourceForm();
-      setSourceViewMode("editor");
-    });
+  function selectSource(sourceId) {
+    state.selectedSourceId = sourceId;
+    state.focusedNodeId = null;
+    state.focusedRangeKey = null;
+
+    if (sourceSelect) sourceSelect.value = sourceId;
+
+    if (state.viewMode === "editor") {
+      const source = getSourceById(sourceId);
+      if (source) {
+        hydrateSourceForm(source);
+      }
+    } else {
+      renderReaderAndNodes();
+    }
   }
 
   if (saveSourceBtn) {
@@ -1766,6 +2086,8 @@ function htmlToPlainText(html) {
     quoteSelectionBtn.addEventListener("click", () => {
       if (state.selectedRange?.quote) {
         const quoteText = state.selectedRange.quote;
+        // Try to get HTML formatting from the selection if available (preserves bold/italics)
+        const quoteHtml = state.selectedRange.quoteHtml || null;
         if (!state.selectedQuoteRef) {
           state.selectedQuoteRef = [];
         }
@@ -1774,6 +2096,7 @@ function htmlToPlainText(html) {
           quoteId: crypto.randomUUID(),
           section: getSourceById(state.selectedSourceId)?.section || "",
           quote: quoteText,
+          quoteHtml: quoteHtml,  // Store HTML formatting if available
           sourceId: state.selectedSourceId,
           start: state.selectedRange.start,
           end: state.selectedRange.end,

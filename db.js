@@ -361,16 +361,15 @@ export function clearQuotes() {
  * Get all analysis nodes for a subject
  */
 export function getAnalysisNodesForSubject(subject) {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     if (!db) {
       reject(new Error("IndexedDB is not initialized"));
       return;
     }
 
-    const allAnalyses = getAllNodes().then(nodes => 
-      nodes.filter(n => n.type === "analysis" && n.subject === subject)
-    );
-    resolve(allAnalyses);
+    const nodes = await getAllNodes();
+    const analyses = nodes.filter(n => n.type === "analysis" && n.subject === subject);
+    resolve(analyses);
   });
 }
 
@@ -552,10 +551,13 @@ export async function setPinnedToolsOrder(toolIds) {
 // ========== SUBJECTS ==========
 
 export async function getSubjects() {
-  const allNodes = await getAllNodes();
+  const [allNodes, allQuotes] = await Promise.all([getAllNodes(), getAllQuotes()]);
   const subjects = new Set();
   allNodes.forEach(node => {
     if (node.subject) subjects.add(node.subject);
+  });
+  allQuotes.forEach(quote => {
+    if (quote.subject) subjects.add(quote.subject);
   });
   return Array.from(subjects).sort();
 }

@@ -6,6 +6,7 @@
   width: 100%;
   overflow: hidden;
   padding: 12px;
+  min-height: 0;
 }
 
 /* Hide scrollbars globally */
@@ -20,13 +21,13 @@ html, body, * {
   -ms-overflow-style: none;
 }
 
-.panel {
+.analysis-shell .panel {
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: linear-gradient(160deg, rgba(14, 34, 26, 0.88), rgba(9, 26, 19, 0.82));
   border-radius: 12px;
   padding: 14px;
   box-shadow: 0 22px 38px rgba(0, 0, 0, 0.22);
-  backdrop-filter: blur(6px);
+  backdrop-filter: blur(var(--glass-blur));
   transition: all 0.3s ease;
 }
 
@@ -114,11 +115,13 @@ html, body, * {
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.05);
   color: #e6fff5;
-  padding: 8px 12px;
+  padding: 8px 14px;
   cursor: pointer;
   font: inherit;
   font-size: 0.85rem;
   transition: all 0.2s ease;
+  min-width: 60px;
+  text-align: center;
 }
 
 .btn:hover {
@@ -150,6 +153,9 @@ html, body, * {
 .analysis-list {
   display: grid;
   gap: 10px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .stats-row {
@@ -202,16 +208,36 @@ html, body, * {
 .study-top {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 16px;
   flex-wrap: wrap;
 }
 
-.study-head-controls {
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.layer-dropdown-group {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+}
+
+.button-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.layer-select {
+  min-width: 80px;
+}
+
+.source-select {
+  min-width: 120px;
 }
 
 .study-grid {
@@ -219,7 +245,7 @@ html, body, * {
   grid-template-columns: 1fr 1fr;
   gap: 12px;
   position: relative;
-  height: 100%;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -227,7 +253,8 @@ html, body, * {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   user-select: text !important;
   -webkit-user-select: text !important;
 }
@@ -235,11 +262,13 @@ html, body, * {
 .source-panel {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   position: relative;
   padding: 16px !important;
   user-select: text !important;
   -webkit-user-select: text !important;
+  overflow: hidden;
 }
 
 .study-column {
@@ -297,9 +326,10 @@ html, body, * {
 }
 
 .reader-surface {
-  min-height: 56vh;
-  max-height: calc(100vh - 280px);
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  max-height: 100%;
 }
 
 .floating-card {
@@ -313,7 +343,7 @@ html, body, * {
   border: 1px solid rgba(44, 255, 179, 0.25);
   box-shadow: 0 35px 60px rgba(0, 0, 0, 0.3), inset 0 0 1px rgba(44, 255, 179, 0.1);
   z-index: 30;
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(var(--glass-blur));
   display: none;
 }
 
@@ -375,14 +405,25 @@ html, body, * {
   flex-direction: column;
   gap: 12px;
   height: 100%;
+  min-height: 0;
   padding: 0 !important;
 }
 
-.side-panel > .panel {
+.analysis-shell .side-panel > .panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 8px !important;
+  overflow: hidden;
+}
+
+.analysis-shell .side-panel > .panel {
   display: flex;
   flex-direction: column;
   height: 100%;
   padding: 8px !important;
+  min-height: 0;
 }
 
 .reader-mode-label {
@@ -544,7 +585,6 @@ html, body, * {
 
 .analysis-item blockquote.analysis-quote-preview {
   margin: 0 0 8px 0;
-  font-style: italic;
 }
 
 .analysis-item blockquote.analysis-quote-preview:last-of-type {
@@ -671,14 +711,21 @@ button.analysis-quote-jump.active-quote,
           <h2 id="studySubjectTitle">Subject</h2>
           <div id="currentHierarchy" class="reader-meta"></div>
         </div>
-        <div class="study-head-controls">
-          <select id="sourceSelect" class="inline-select source-select-compact"></select>
-          <button id="newSourceBtn" class="btn" type="button">+ New</button>
-          <button id="saveSourceBtn" class="btn primary save-source-edit-only" type="button">Save</button>
-          <button id="cancelEditSourceBtn" class="btn cancel-source-edit-only" type="button">Cancel</button>
-          <button id="deleteSourceBtn" class="btn" type="button" title="Delete this source">Delete</button>
-          <button id="toggleSourceModeBtn" class="btn" type="button">Edit Source</button>
-          <button id="backToLaunchpad" class="btn" type="button">Back</button>
+        <div class="header-controls">
+          <div class="layer-dropdown-group">
+            <select id="layer1Select" class="inline-select layer-select"></select>
+            <select id="layer2Select" class="inline-select layer-select" style="display: none;"></select>
+            <select id="layer3Select" class="inline-select layer-select" style="display: none;"></select>
+            <select id="sourceSelect" class="inline-select source-select" style="display: none;"></select>
+          </div>
+          <div class="button-group">
+            <button id="newSourceBtn" class="btn" type="button">+ New</button>
+            <button id="saveSourceBtn" class="btn primary save-source-edit-only" type="button">Save</button>
+            <button id="cancelEditSourceBtn" class="btn cancel-source-edit-only" type="button">Cancel</button>
+            <button id="deleteSourceBtn" class="btn" type="button" title="Delete this source">Delete</button>
+            <button id="toggleSourceModeBtn" class="btn" type="button">Edit Source</button>
+            <button id="backToLaunchpad" class="btn" type="button">Back</button>
+          </div>
         </div>
       </div>
     </div>
