@@ -31,6 +31,7 @@ const tools = {
       addCue,
       getQuote,
       getCue,
+      getCuesForQuote,
       deleteQuote,
       deleteCue,
       removeCueEverywhere,

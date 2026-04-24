@@ -2,10 +2,12 @@ export async function initAnalysisToolV2(deps, context = {}) {
   const {
     getAllNodes,
     getAllQuotes,
+    getAllCues,
     addNode,
     addQuote,
     getQuote,
     deleteQuote,
+    deleteCue,
     backupLocalNodesToCloud,
     removeNodeEverywhere,
     removeQuoteEverywhere,
@@ -14,7 +16,10 @@ export async function initAnalysisToolV2(deps, context = {}) {
     parseTags,
     escapeHtml,
     getNodeTimestamp,
-    isSourceNode
+    isSourceNode,
+    addCue,
+    getCuesForQuote,
+    removeCueEverywhere
   } = deps;
 
   const { subject: contextSubject, nodeId: contextNodeId } = context;
@@ -54,6 +59,12 @@ export async function initAnalysisToolV2(deps, context = {}) {
   const analysisNodeIdInput = document.getElementById("analysisNodeId");
   const analysisNotesInput = document.getElementById("analysisNotes");
   const analysisTagsInput = document.getElementById("analysisTags");
+  const analysisCleanupModal = document.getElementById("analysisCleanupModal");
+  const analysisCleanupMessage = document.getElementById("analysisCleanupMessage");
+  const analysisCleanupSummary = document.getElementById("analysisCleanupSummary");
+  const analysisCleanupClose = document.getElementById("analysisCleanupClose");
+  const analysisCleanupKeepBtn = document.getElementById("analysisCleanupKeepBtn");
+  const analysisCleanupDeleteBtn = document.getElementById("analysisCleanupDeleteBtn");
 
   if (!launchpadView || !studyView || !analysisForm || !analysisReader) {
     console.error("[ANALYSIS] Critical DOM elements missing. Analysis tool cannot initialize.", {
@@ -78,6 +89,7 @@ function enforceUserSelect() {
   const state = {
     nodes: [],
     quotes: [],           // NEW: separate quote nodes
+    cues: [],             // NEW: cue nodes for memory
     subjectNodes: [],
     sources: [],
     analysisNodes: [],
@@ -92,7 +104,9 @@ function enforceUserSelect() {
     focusedNodeId: null,
     /** When set, only this "start-end" highlight is active for the focused analysis (multi-quote UX). */
     focusedRangeKey: null,
-    selectedQuoteRef: null // NEW: for quote picker in analysis form
+    selectedQuoteRef: null, // NEW: for quote picker in analysis form
+    cueEditMode: false,     // NEW: for editing cue nodes
+    analysisSessionCreatedQuoteIds: []
   };
 
   // Handle context subject from global launchpad
@@ -143,6 +157,28 @@ function enforceUserSelect() {
 
   function getSelectedQuoteRefs() {
     return Array.isArray(state.selectedQuoteRef) ? state.selectedQuoteRef : [];
+  }
+
+  function resetAnalysisSessionCreatedQuotes() {
+    state.analysisSessionCreatedQuoteIds = [];
+  }
+
+  function markQuoteCreatedForAnalysisSession(quoteId) {
+    if (!quoteId) return;
+    if (!Array.isArray(state.analysisSessionCreatedQuoteIds)) {
+      state.analysisSessionCreatedQuoteIds = [];
+    }
+    if (!state.analysisSessionCreatedQuoteIds.includes(quoteId)) {
+      state.analysisSessionCreatedQuoteIds.push(quoteId);
+    }
+  }
+
+  function getAnalysisSessionCreatedQuoteIds() {
+    return Array.isArray(state.analysisSessionCreatedQuoteIds) ? state.analysisSessionCreatedQuoteIds : [];
+  }
+
+  function isCreatingAnalysisDraft() {
+    return !state.analysisEditMode && !analysisNodeIdInput?.value;
   }
 
 function htmlToPlainText(html) {
@@ -879,11 +915,20 @@ function selectSource(sourceId) {
             return `<button type="button" class="icon-btn" title="Set priority ${value}" aria-label="Set priority ${value}" onclick="setQuotePriorityForAnalysis(${idx}, ${value})" style="margin: 0; color: ${color};">${active ? "★" : "☆"}</button>`;
           })
           .join("");
+        
+        // Check if cue already exists for this quote
+        const quoteId = ref.quoteId || ref.id;
+        const hasCue = state.cues && state.cues.some(c => c.quoteId === quoteId);
+        const cueBtnLabel = hasCue ? "Edit Cue" : "Add Cue";
+        
         return `
             <div class="quote-ref-form-row" style="background: rgba(44, 255, 179, 0.08); padding: 8px; border-radius: 6px; font-size: 0.85rem;">
               <div style="display: flex; justify-content: space-between; align-items: start; gap: 8px;">
                 <span style="flex: 1; line-height: 1.3; font-style: italic;">"${truncated}"</span>
-                <button type="button" data-idx="${idx}" class="btn" style="padding: 4px 8px; font-size: 0.75rem;" onclick="removeQuoteRefFromAnalysis(${idx})">Remove</button>
+                <div style="display: flex; gap: 4px;">
+                  <button type="button" class="btn cue-btn" data-quote-id="${quoteId || ''}" style="padding: 4px 8px; font-size: 0.75rem; ${hasCue ? 'background: rgba(44, 255, 179, 0.2);' : ''}">${cueBtnLabel}</button>
+                  <button type="button" data-idx="${idx}" class="btn" style="padding: 4px 8px; font-size: 0.75rem;" onclick="removeQuoteRefFromAnalysis(${idx})">Remove</button>
+                </div>
               </div>
               <div style="display: flex; align-items: center; gap: 4px; margin-top: 8px;">
                 <span style="font-size: 0.75rem; color: rgba(230,255,245,0.7);">Priority</span>
@@ -1049,6 +1094,7 @@ function selectSource(sourceId) {
       // Update quote references display when showing the card
       if (quoteRefsList && state.selectedQuoteRef && state.selectedQuoteRef.length > 0) {
         quoteRefsList.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
+        attachQuoteRefEventListeners();
       } else if (quoteRefsList) {
         quoteRefsList.innerHTML = "";
       }
@@ -1072,12 +1118,336 @@ function selectSource(sourceId) {
     hideQuoteButton();
     const list = document.getElementById("quoteRefsList");
     if (list) list.innerHTML = "";
+    resetAnalysisSessionCreatedQuotes();
   }
 
   /** Full close: clear draft and hide the panel (only explicit dismiss, e.g. ✕). */
   function dismissAnalysisModal() {
+    hideCueCard();
     clearAnalysisDraft();
     hideAnalysisCard();
+  }
+
+  async function confirmDiscardAnalysisDraft() {
+    const attachedQuoteIds = getSelectedQuoteRefs().map((ref) => ref.quoteId).filter(Boolean);
+    if (!attachedQuoteIds.length) return "keep";
+
+    const createdIds = new Set(getAnalysisSessionCreatedQuoteIds());
+    const summary = getQuoteCleanupSummary(
+      attachedQuoteIds.filter((quoteId) => createdIds.has(quoteId))
+    );
+
+    const choice = await showAnalysisCleanupDialog({
+      title: "Discard this analysis draft?",
+      message: "This draft already created quote nodes so you could attach cues immediately. Decide whether to keep those quotes or remove the private ones created for this unfinished analysis.",
+      summary: `${attachedQuoteIds.length} linked quote node(s) are attached to this draft.<br>${summary.deletableQuoteIds.length} private quote node(s)${summary.deletableCueCount ? ` and ${summary.deletableCueCount} cue node(s)` : ""} would be removed by the danger action.`,
+      keepLabel: "Discard draft, keep quotes",
+      deleteLabel: "Discard draft and delete private quotes"
+    });
+
+    return choice;
+  }
+
+  async function maybeDismissAnalysisModal() {
+    if (!isCreatingAnalysisDraft() || !getSelectedQuoteRefs().length) {
+      dismissAnalysisModal();
+      return true;
+    }
+
+    const choice = await confirmDiscardAnalysisDraft();
+    if (!choice) return false;
+
+    if (choice === "delete") {
+      const createdIds = new Set(getAnalysisSessionCreatedQuoteIds());
+      const selectedIds = getSelectedQuoteRefs()
+        .map((ref) => ref.quoteId)
+        .filter((quoteId) => createdIds.has(quoteId));
+      const deletableQuoteIds = getQuoteCleanupSummary(selectedIds).deletableQuoteIds;
+      for (const quoteId of deletableQuoteIds) {
+        await removeQuoteAndLinkedCuesEverywhere(quoteId);
+      }
+      await refreshData();
+    }
+
+    dismissAnalysisModal();
+    return true;
+  }
+
+  async function confirmDeleteAnalysisNode(node) {
+    const attachedQuoteIds = (node?.quoteRefs || []).map((ref) => ref.quoteId).filter(Boolean);
+    if (!attachedQuoteIds.length) return "keep";
+
+    const summary = getQuoteCleanupSummary(attachedQuoteIds, [node.id]);
+    return showAnalysisCleanupDialog({
+      title: "Delete this analysis node?",
+      message: "This analysis has linked quotes. You can delete the node and keep every quote, or remove the node together with quote nodes that are only used here.",
+      summary: `${attachedQuoteIds.length} linked quote node(s) are attached to this analysis.<br>${summary.deletableQuoteIds.length} quote node(s)${summary.deletableCueCount ? ` and ${summary.deletableCueCount} cue node(s)` : ""} would also be removed by the danger action because nothing else references them.`,
+      keepLabel: "Delete node, keep quotes",
+      deleteLabel: "Delete node and private quotes"
+    });
+  }
+
+  // ========== CUE NODE FUNCTIONS ==========
+
+  function showCueCard() {
+    const card = document.getElementById("cueFloatCard");
+    const analysisCard = document.getElementById("analysisFloatCard");
+    if (card) {
+      // Position to the left of analysis card if it's open, otherwise use default position
+      if (analysisCard && analysisCard.style.display !== "none") {
+        card.style.right = "410px"; // 380px width + 30px gap
+      } else {
+        card.style.right = "14px"; // default position
+      }
+      card.style.display = "block";
+    }
+  }
+
+  function hideCueCard() {
+    const card = document.getElementById("cueFloatCard");
+    if (card) card.style.display = "none";
+    clearCueDraft();
+  }
+
+  function clearCueDraft() {
+    state.cueEditMode = false;
+    const cueForm = document.getElementById("cueForm");
+    if (cueForm) cueForm.reset();
+    const cueNodeId = document.getElementById("cueNodeId");
+    const cueQuoteId = document.getElementById("cueQuoteId");
+    const cueAnalysisId = document.getElementById("cueAnalysisId");
+    const cueText = document.getElementById("cueText");
+    const cueQuotePreview = document.getElementById("cueQuotePreview");
+    const deleteCueBtn = document.getElementById("deleteCueBtn");
+    const kicker = document.getElementById("cueCardKicker");
+    if (cueNodeId) cueNodeId.value = "";
+    if (cueQuoteId) cueQuoteId.value = "";
+    if (cueAnalysisId) cueAnalysisId.value = "";
+    if (cueText) cueText.value = "";
+    if (cueQuotePreview) cueQuotePreview.innerHTML = "";
+    if (deleteCueBtn) deleteCueBtn.style.display = "none";
+    if (kicker) kicker.textContent = "Create Cue Node";
+  }
+
+  async function openCueModalForQuote(quoteId, analysisId = null) {
+    clearCueDraft();
+    
+    const quote = state.quotes.find(q => q.id === quoteId) || await getQuote(quoteId);
+    if (!quote) {
+      console.error("Quote not found:", quoteId);
+      return;
+    }
+
+    // Check if cue already exists
+    const existingCues = await getCuesForQuote(quoteId);
+    const existingCue = existingCues.length > 0 ? existingCues[0] : null;
+
+    const cueNodeId = document.getElementById("cueNodeId");
+    const cueQuoteId = document.getElementById("cueQuoteId");
+    const cueAnalysisId = document.getElementById("cueAnalysisId");
+    const cueText = document.getElementById("cueText");
+    const cueQuotePreview = document.getElementById("cueQuotePreview");
+    const deleteCueBtn = document.getElementById("deleteCueBtn");
+    const kicker = document.getElementById("cueCardKicker");
+
+    if (existingCue) {
+      // Edit mode
+      state.cueEditMode = true;
+      state.editingCueCreatedAt = existingCue.createdAt; // Store for update
+      if (cueNodeId) cueNodeId.value = existingCue.id;
+      if (cueText) cueText.value = existingCue.cue || "";
+      if (deleteCueBtn) deleteCueBtn.style.display = "inline-block";
+      if (kicker) kicker.textContent = "Edit Cue Node";
+    } else {
+      // Create mode
+      state.cueEditMode = false;
+      if (deleteCueBtn) deleteCueBtn.style.display = "none";
+      if (kicker) kicker.textContent = "Create Cue Node";
+    }
+
+    if (cueQuoteId) cueQuoteId.value = quoteId;
+    if (cueAnalysisId) cueAnalysisId.value = analysisId || "";
+    
+    // Show quote preview
+    const truncatedQuote = quote.quote ? (quote.quote.substring(0, 150) + (quote.quote.length > 150 ? "..." : "")) : "";
+    if (cueQuotePreview) cueQuotePreview.innerHTML = `"${escapeHtml(truncatedQuote)}"`;
+
+    showCueCard();
+  }
+
+  async function handleCueSubmit(e) {
+    e.preventDefault();
+    
+    const cueNodeId = document.getElementById("cueNodeId");
+    const cueQuoteId = document.getElementById("cueQuoteId");
+    const cueAnalysisId = document.getElementById("cueAnalysisId");
+    const cueText = document.getElementById("cueText");
+
+    const quoteId = cueQuoteId?.value;
+    const analysisId = cueAnalysisId?.value || null;
+    const cueContent = cueText?.value?.trim();
+
+    if (!quoteId) {
+      alert("No quote selected for cue");
+      return;
+    }
+
+    if (!cueContent) {
+      alert("Please enter a cue");
+      return;
+    }
+
+    const quote = state.quotes.find(q => q.id === quoteId);
+    if (!quote) {
+      alert("Quote not found");
+      return;
+    }
+
+    const now = Date.now();
+    const cueData = {
+      id: cueNodeId?.value || crypto.randomUUID(),
+      type: "cue",
+      subject: quote.subject,
+      quoteId: quoteId,
+      analysisId: analysisId,
+      cue: cueContent,
+      meta: {
+        tags: []
+      },
+      createdAt: state.cueEditMode ? (state.editingCueCreatedAt || now) : now,
+      updatedAt: now
+    };
+
+    try {
+      await addCue(cueData);
+      
+      // Refresh cues
+      state.cues = await getAllCues();
+      
+      hideCueCard();
+      
+      // Refresh the analysis form if open
+      if (state.analysisEditMode && state.selectedQuoteRef) {
+        const quoteRefsList = document.getElementById("quoteRefsList");
+        if (quoteRefsList) {
+          quoteRefsList.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
+          attachQuoteRefEventListeners();
+        }
+      }
+    } catch (error) {
+      console.error("Failed to save cue:", error);
+      alert("Failed to save cue: " + error.message);
+    }
+  }
+
+  async function handleDeleteCue() {
+    const cueNodeId = document.getElementById("cueNodeId");
+    const cueId = cueNodeId?.value;
+
+    if (!cueId) return;
+
+    const confirmed = window.confirm("Delete this cue? This action cannot be undone.");
+    if (!confirmed) return;
+
+    try {
+      const { deleteCue } = deps;
+      if (deleteCue) {
+        await deleteCue(cueId);
+        
+        // Refresh cues
+        state.cues = await getAllCues();
+        
+        hideCueCard();
+        
+        // Refresh the analysis form if open
+        if (state.analysisEditMode && state.selectedQuoteRef) {
+          const quoteRefsList = document.getElementById("quoteRefsList");
+          if (quoteRefsList) {
+            quoteRefsList.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
+            attachQuoteRefEventListeners();
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Failed to delete cue:", error);
+      alert("Failed to delete cue: " + error.message);
+    }
+  }
+
+  function attachQuoteRefEventListeners() {
+    // Attach click handlers for cue buttons in quote refs list
+    document.querySelectorAll(".cue-btn").forEach(btn => {
+      btn.onclick = async (e) => {
+        e.stopPropagation();
+        const quoteId = btn.dataset.quoteId;
+        if (quoteId) {
+          await openCueModalForQuote(quoteId);
+        }
+      };
+    });
+  }
+
+  // Right-click context menu for cues on quotes
+  let cueContextMenu = null;
+
+  function showCueContextMenu(e, quoteId) {
+    e.preventDefault();
+    hideCueContextMenu();
+
+    cueContextMenu = document.createElement("div");
+    cueContextMenu.id = "cueContextMenu";
+    cueContextMenu.style.cssText = `
+      position: fixed;
+      left: ${e.clientX}px;
+      top: ${e.clientY}px;
+      background: rgba(16, 43, 32, 0.95);
+      border: 1px solid rgba(44, 255, 179, 0.3);
+      border-radius: 6px;
+      padding: 4px 0;
+      z-index: 10000;
+      min-width: 150px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    `;
+
+    const hasCue = state.cues && state.cues.some(c => c.quoteId === quoteId);
+    const menuText = hasCue ? "Edit Cue" : "Add Cue";
+
+    cueContextMenu.innerHTML = `
+      <button class="context-menu-item" style="
+        display: block;
+        width: 100%;
+        padding: 8px 16px;
+        background: none;
+        border: none;
+        color: #e6fff5;
+        text-align: left;
+        cursor: pointer;
+        font-size: 0.85rem;
+      " data-action="add-cue" data-quote-id="${quoteId}">${menuText}</button>
+    `;
+
+    cueContextMenu.querySelector("[data-action='add-cue']").onclick = async () => {
+      await openCueModalForQuote(quoteId);
+      hideCueContextMenu();
+    };
+
+    document.body.appendChild(cueContextMenu);
+
+    // Close menu on click outside
+    const closeMenuHandler = (evt) => {
+      if (!cueContextMenu?.contains(evt.target)) {
+        hideCueContextMenu();
+        document.removeEventListener("click", closeMenuHandler);
+      }
+    };
+    setTimeout(() => document.addEventListener("click", closeMenuHandler), 0);
+  }
+
+  function hideCueContextMenu() {
+    if (cueContextMenu) {
+      cueContextMenu.remove();
+      cueContextMenu = null;
+    }
   }
 
   function resetAnalysisForm() {
@@ -1105,6 +1475,99 @@ function selectSource(sourceId) {
   }
 
   // ========== NEW: QUOTE AND ANALYSIS LINKING FUNCTIONS ==========
+
+  function findExistingQuoteForSelection({ sourceId, start, end, quote }) {
+    return state.quotes.find((item) =>
+      item.link?.sourceId === sourceId &&
+      Number(item.link?.start) === Number(start) &&
+      Number(item.link?.end) === Number(end) &&
+      item.quote === quote
+    ) || null;
+  }
+
+  function getOtherAnalysisIdsForQuote(quoteId, excludedAnalysisIds = []) {
+    const excluded = new Set((excludedAnalysisIds || []).filter(Boolean));
+    const quoteNode = state.quotes.find((quote) => quote.id === quoteId);
+    const fromMeta = Array.isArray(quoteNode?.meta?.analysisNodeIds)
+      ? quoteNode.meta.analysisNodeIds.filter((id) => !excluded.has(id))
+      : [];
+    const fromNodes = getAnalysesForQuote(quoteId)
+      .map((analysis) => analysis.id)
+      .filter((id) => !excluded.has(id));
+    return Array.from(new Set([...fromMeta, ...fromNodes]));
+  }
+
+  function canDeleteQuoteAsPrivateDependency(quoteId, excludedAnalysisIds = []) {
+    if (!quoteId) return false;
+    return getOtherAnalysisIdsForQuote(quoteId, excludedAnalysisIds).length === 0;
+  }
+
+  async function removeQuoteAndLinkedCuesEverywhere(quoteId) {
+    if (!quoteId) return;
+    const linkedCues = await getCuesForQuote(quoteId);
+    for (const cue of linkedCues || []) {
+      if (removeCueEverywhere) {
+        await removeCueEverywhere(cue.id);
+      } else if (deleteCue) {
+        await deleteCue(cue.id);
+      }
+    }
+    await removeQuoteEverywhere(quoteId);
+  }
+
+  function getQuoteCleanupSummary(quoteIds, excludedAnalysisIds = []) {
+    const attachedQuoteIds = Array.from(new Set((quoteIds || []).filter(Boolean)));
+    const deletableQuoteIds = attachedQuoteIds.filter((quoteId) =>
+      canDeleteQuoteAsPrivateDependency(quoteId, excludedAnalysisIds)
+    );
+    const attachedCueCount = (state.cues || []).filter((cue) => attachedQuoteIds.includes(cue.quoteId)).length;
+    const deletableCueCount = (state.cues || []).filter((cue) => deletableQuoteIds.includes(cue.quoteId)).length;
+    return {
+      attachedQuoteIds,
+      deletableQuoteIds,
+      attachedCueCount,
+      deletableCueCount
+    };
+  }
+
+  let resolveAnalysisCleanupChoice = null;
+
+  function hideAnalysisCleanupDialog(choice = null) {
+    if (analysisCleanupModal) {
+      analysisCleanupModal.classList.remove("open");
+      analysisCleanupModal.setAttribute("aria-hidden", "true");
+    }
+    if (resolveAnalysisCleanupChoice) {
+      const resolve = resolveAnalysisCleanupChoice;
+      resolveAnalysisCleanupChoice = null;
+      resolve(choice);
+    }
+  }
+
+  function showAnalysisCleanupDialog({
+    title,
+    message,
+    summary,
+    keepLabel,
+    deleteLabel
+  }) {
+    if (!analysisCleanupModal || !analysisCleanupMessage || !analysisCleanupSummary || !analysisCleanupKeepBtn || !analysisCleanupDeleteBtn) {
+      return Promise.resolve(null);
+    }
+
+    const titleEl = document.getElementById("analysisCleanupTitle");
+    if (titleEl) titleEl.textContent = title || "Linked quotes need a decision";
+    analysisCleanupMessage.textContent = message || "";
+    analysisCleanupSummary.innerHTML = summary || "";
+    analysisCleanupKeepBtn.textContent = keepLabel || "Keep quotes";
+    analysisCleanupDeleteBtn.textContent = deleteLabel || "Delete private quotes";
+    analysisCleanupModal.classList.add("open");
+    analysisCleanupModal.setAttribute("aria-hidden", "false");
+
+    return new Promise((resolve) => {
+      resolveAnalysisCleanupChoice = resolve;
+    });
+  }
 
   /**
    * Create a new quote node from selected text
@@ -1234,11 +1697,8 @@ function selectSource(sourceId) {
     for (const quoteId of previousIds) {
       if (nextIds.has(quoteId)) continue;
       await unlinkAnalysisFromQuote(analysisId, quoteId);
-      const quoteNode = state.quotes.find((quote) => quote.id === quoteId) || await getQuote(quoteId);
-      const remainingAnalysisIds = (quoteNode?.meta?.analysisNodeIds || []).filter((id) => id !== analysisId);
-      if (!quoteNode) continue;
-      if (!remainingAnalysisIds.length) {
-        await removeQuoteEverywhere(quoteId);
+      if (canDeleteQuoteAsPrivateDependency(quoteId, [analysisId])) {
+        await removeQuoteAndLinkedCuesEverywhere(quoteId);
       }
     }
 
@@ -1285,15 +1745,13 @@ function selectSource(sourceId) {
     await refreshData();
   }
 
-  async function deleteAnalysisNodeWithIntegrity(node) {
+  async function deleteAnalysisNodeWithIntegrity(node, options = {}) {
+    const removeDetachedQuotes = options.removeDetachedQuotes !== false;
     for (const ref of node?.quoteRefs || []) {
       if (!ref.quoteId) continue;
       await unlinkAnalysisFromQuote(node.id, ref.quoteId);
-      const quoteNode = state.quotes.find((quote) => quote.id === ref.quoteId) || await getQuote(ref.quoteId);
-      if (!quoteNode) continue;
-      const remainingAnalysisIds = quoteNode.meta?.analysisNodeIds || [];
-      if (!remainingAnalysisIds.length) {
-        await removeQuoteEverywhere(ref.quoteId);
+      if (removeDetachedQuotes && canDeleteQuoteAsPrivateDependency(ref.quoteId, [node.id])) {
+        await removeQuoteAndLinkedCuesEverywhere(ref.quoteId);
       }
     }
 
@@ -1529,7 +1987,23 @@ function selectSource(sourceId) {
 
     const analysesForSource = state.analysisNodes.filter(
       (node) => node.subject === state.selectedSubject && analysisTouchesSource(node, source.id)
-    );
+    ).sort((a, b) => {
+      // Sort by the position of the first quote in the source
+      const getFirstQuoteStart = (node) => {
+        if (!node.quoteRefs?.length) return Infinity;
+        for (const ref of node.quoteRefs) {
+          if (ref.sourceId === source.id && ref.start != null) {
+            return Number(ref.start);
+          }
+          const quote = state.quotes.find((q) => q.id === ref.quoteId);
+          if (quote?.link?.sourceId === source.id && quote?.link?.start != null) {
+            return Number(quote.link.start);
+          }
+        }
+        return Infinity;
+      };
+      return getFirstQuoteStart(a) - getFirstQuoteStart(b);
+    });
 
     if (!analysesForSource.length) {
       analysisNodeList.innerHTML = `<div class="empty-note">No analysis nodes reference this source yet.</div>`;
@@ -1626,9 +2100,10 @@ function selectSource(sourceId) {
   }
 
   async function refreshData() {
-    const [nodes, quotes] = await Promise.all([getAllNodes(), getAllQuotes()]);
+    const [nodes, quotes, cues] = await Promise.all([getAllNodes(), getAllQuotes(), getAllCues()]);
     state.nodes = nodes;
     state.quotes = quotes;
+    state.cues = cues;
     state.subjectNodes = state.nodes.filter((node) => node?.type === "subject" || node?.meta?.kind === "subject");
     state.sources = state.nodes.filter((node) => isSourceNode(node) && node?.type === "source");
     state.analysisNodes = state.nodes.filter((node) => node?.type === "analysis");
@@ -1704,7 +2179,7 @@ function selectSource(sourceId) {
     }
 
     for (const quote of state.quotes.filter((item) => item.subject === subjectName)) {
-      await removeQuoteEverywhere(quote.id);
+      await removeQuoteAndLinkedCuesEverywhere(quote.id);
     }
 
     if (state.selectedSubject === subjectName) {
@@ -1947,7 +2422,7 @@ function selectSource(sourceId) {
         await deleteAnalysisNodeWithIntegrity(node);
       }
       for (const quote of state.quotes.filter((item) => item.link?.sourceId === source.id)) {
-        await removeQuoteEverywhere(quote.id);
+        await removeQuoteAndLinkedCuesEverywhere(quote.id);
       }
       await removeNodeEverywhere(source.id);
 
@@ -2172,37 +2647,39 @@ function selectSource(sourceId) {
   }
 
   if (quoteSelectionBtn) {
-    quoteSelectionBtn.addEventListener("click", () => {
+    quoteSelectionBtn.addEventListener("click", async () => {
       if (state.selectedRange?.quote) {
-        const quoteText = state.selectedRange.quote;
-        // Try to get HTML formatting from the selection if available (preserves bold/italics)
-        const quoteHtml = state.selectedRange.quoteHtml || null;
+        const selection = {
+          sourceId: state.selectedSourceId,
+          start: state.selectedRange.start,
+          end: state.selectedRange.end,
+          quote: state.selectedRange.quote
+        };
+        const existingQuote = findExistingQuoteForSelection(selection);
+        const quoteNode = existingQuote || await createQuoteNode(
+          selection.quote,
+          selection.sourceId,
+          selection.start,
+          selection.end
+        );
+
+        if (!existingQuote) {
+          markQuoteCreatedForAnalysisSession(quoteNode.id);
+          state.quotes = [...state.quotes.filter((quote) => quote.id !== quoteNode.id), quoteNode];
+        }
+
         if (!state.selectedQuoteRef) {
           state.selectedQuoteRef = [];
         }
 
-        const quoteRef = {
-          quoteId: crypto.randomUUID(),
-          section: getSourceById(state.selectedSourceId)?.section || "",
-          quote: quoteText,
-          quoteHtml: quoteHtml,  // Store HTML formatting if available
-          sourceId: state.selectedSourceId,
-          start: state.selectedRange.start,
-          end: state.selectedRange.end,
-          priority: 3
-        };
-
-        if (!state.selectedQuoteRef.some(ref =>
-          ref.quote === quoteText &&
-          ref.sourceId === quoteRef.sourceId &&
-          Number(ref.start) === Number(quoteRef.start) &&
-          Number(ref.end) === Number(quoteRef.end)
-        )) {
+        const quoteRef = buildQuoteRefFromQuoteNode(quoteNode);
+        if (!state.selectedQuoteRef.some((ref) => ref.quoteId === quoteRef.quoteId)) {
           state.selectedQuoteRef.push(quoteRef);
         }
 
         if (quoteRefsList) {
           quoteRefsList.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
+          attachQuoteRefEventListeners();
         }
 
         showAnalysisCard();
@@ -2233,16 +2710,67 @@ function selectSource(sourceId) {
   }
 
   if (resetAnalysisFormBtn) {
-    resetAnalysisFormBtn.addEventListener("click", () => {
-      clearAnalysisDraft();
-      showAnalysisCard();
+    resetAnalysisFormBtn.addEventListener("click", async () => {
+      await maybeDismissAnalysisModal();
     });
   }
 
   if (closeAnalysisCardBtn) {
-    closeAnalysisCardBtn.addEventListener("click", () => {
-      dismissAnalysisModal();
+    closeAnalysisCardBtn.addEventListener("click", async () => {
+      await maybeDismissAnalysisModal();
     });
+  }
+
+  if (analysisCleanupKeepBtn) {
+    analysisCleanupKeepBtn.addEventListener("click", () => {
+      hideAnalysisCleanupDialog("keep");
+    });
+  }
+
+  if (analysisCleanupDeleteBtn) {
+    analysisCleanupDeleteBtn.addEventListener("click", () => {
+      hideAnalysisCleanupDialog("delete");
+    });
+  }
+
+  if (analysisCleanupClose) {
+    analysisCleanupClose.addEventListener("click", () => {
+      hideAnalysisCleanupDialog(null);
+    });
+  }
+
+  if (analysisCleanupModal) {
+    analysisCleanupModal.addEventListener("click", (event) => {
+      if (event.target === analysisCleanupModal) {
+        hideAnalysisCleanupDialog(null);
+      }
+    });
+  }
+
+  // Cue form event listeners
+  const cueForm = document.getElementById("cueForm");
+  const closeCueCardBtn = document.getElementById("closeCueCard");
+  const resetCueFormBtn = document.getElementById("resetCueForm");
+  const deleteCueBtn = document.getElementById("deleteCueBtn");
+
+  if (cueForm) {
+    cueForm.addEventListener("submit", handleCueSubmit);
+  }
+
+  if (closeCueCardBtn) {
+    closeCueCardBtn.addEventListener("click", () => {
+      hideCueCard();
+    });
+  }
+
+  if (resetCueFormBtn) {
+    resetCueFormBtn.addEventListener("click", () => {
+      hideCueCard();
+    });
+  }
+
+  if (deleteCueBtn) {
+    deleteCueBtn.addEventListener("click", handleDeleteCue);
   }
 
   // NEW: Add click listener for "+ Add Quote Reference" button
@@ -2291,18 +2819,26 @@ function selectSource(sourceId) {
     // Render quote refs in form
     if (quoteRefsList) {
       quoteRefsList.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
+      attachQuoteRefEventListeners();
     }
   };
 
   // NEW: Function to remove quote reference
-  window.removeQuoteRefFromAnalysis = function(idx) {
+  window.removeQuoteRefFromAnalysis = async function(idx) {
     if (state.selectedQuoteRef && state.selectedQuoteRef[idx]) {
-      state.selectedQuoteRef.splice(idx, 1);
+      const [removedRef] = state.selectedQuoteRef.splice(idx, 1);
+      const createdIds = new Set(getAnalysisSessionCreatedQuoteIds());
+      if (createdIds.has(removedRef?.quoteId) && canDeleteQuoteAsPrivateDependency(removedRef.quoteId)) {
+        await removeQuoteAndLinkedCuesEverywhere(removedRef.quoteId);
+        state.analysisSessionCreatedQuoteIds = getAnalysisSessionCreatedQuoteIds().filter((id) => id !== removedRef.quoteId);
+        await refreshData();
+      }
       
       if (quoteRefsList) {
         quoteRefsList.innerHTML = state.selectedQuoteRef.length
           ? renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100)
           : "";
+        attachQuoteRefEventListeners();
       }
     }
   };
@@ -2312,6 +2848,7 @@ function selectSource(sourceId) {
     state.selectedQuoteRef[idx].priority = clampPriority(priority);
     if (quoteRefsList) {
       quoteRefsList.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
+      attachQuoteRefEventListeners();
     }
   };
 
@@ -2432,9 +2969,11 @@ function selectSource(sourceId) {
         // Render the existing quote references in the form
         if (quoteRefsList) {
           quoteRefsList.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
+          attachQuoteRefEventListeners();
         }
         
         state.analysisEditMode = true;
+        resetAnalysisSessionCreatedQuotes();
         showAnalysisCard();
         analysisNotesInput.focus();
         
@@ -2469,10 +3008,12 @@ function selectSource(sourceId) {
       }
 
       if (action === "delete-node") {
-        const confirmed = window.confirm("Delete this analysis node?");
-        if (!confirmed) return;
+        const choice = await confirmDeleteAnalysisNode(node);
+        if (!choice) return;
         const wasEditingThis = analysisNodeIdInput?.value === node.id;
-        await deleteAnalysisNodeWithIntegrity(node);
+        await deleteAnalysisNodeWithIntegrity(node, {
+          removeDetachedQuotes: choice === "delete"
+        });
         state.focusedNodeId = null;
         state.focusedRangeKey = null;
         if (wasEditingThis) dismissAnalysisModal();
@@ -2595,6 +3136,41 @@ function selectSource(sourceId) {
           behavior: "smooth"
         });
       }
+    }
+  });
+
+  // Right-click context menu on quote highlights to add cue
+  analysisReader.addEventListener("contextmenu", (event) => {
+    const highlight = event.target.closest(".highlight-quote");
+    if (!highlight) return;
+    
+    const focusId = highlight.dataset.focusId;
+    if (!focusId) return;
+    
+    // Find the quote id - it could be the focusId directly, or we need to look it up
+    let quoteId = null;
+    
+    // First check if focusId is directly a quote
+    if (state.quotes.some(q => q.id === focusId)) {
+      quoteId = focusId;
+    } else {
+      // Otherwise it might be an analysis node id - find linked quote
+      const analysisNode = state.analysisNodes.find(n => n.id === focusId);
+      if (analysisNode?.quoteRefs?.length > 0) {
+        // Use the first quote ref's quoteId
+        quoteId = analysisNode.quoteRefs[0].quoteId || analysisNode.quoteRefs[0].id;
+      } else if (analysisNode?.link?.sourceId) {
+        // Try to find a quote linked to this analysis via analysisNodeIds
+        const linkedQuote = state.quotes.find(q => 
+          q.meta?.analysisNodeIds?.includes(focusId)
+        );
+        if (linkedQuote) quoteId = linkedQuote.id;
+      }
+    }
+    
+    if (quoteId) {
+      event.preventDefault();
+      showCueContextMenu(event, quoteId);
     }
   });
 
