@@ -1,5 +1,5 @@
 const DB_NAME = "neuronet";
-const DB_VERSION = 6; // Pinned tools + global subjects + cue nodes
+const DB_VERSION = 7; // Memory scheduling indexes (nextReview)
 
 let db;
 
@@ -15,19 +15,50 @@ export function initDB() {
 
     request.onupgradeneeded = (e) => {
       db = e.target.result;
+      const tx = e.target.transaction;
+
+      const ensureNodeIndexes = (nodeStore) => {
+        if (!nodeStore.indexNames.contains("type")) {
+          nodeStore.createIndex("type", "type", { unique: false });
+        }
+        if (!nodeStore.indexNames.contains("subject")) {
+          nodeStore.createIndex("subject", "subject", { unique: false });
+        }
+        if (!nodeStore.indexNames.contains("subjectType")) {
+          nodeStore.createIndex("subjectType", ["subject", "type"], { unique: false });
+        }
+        if (!nodeStore.indexNames.contains("subjectTypeNextReview")) {
+          nodeStore.createIndex("subjectTypeNextReview", ["subject", "type", "meta.nextReview"], { unique: false });
+        }
+      };
+
+      const ensureQuoteIndexes = (quoteStore) => {
+        if (!quoteStore.indexNames.contains("subject")) {
+          quoteStore.createIndex("subject", "subject", { unique: false });
+        }
+        if (!quoteStore.indexNames.contains("sourceId")) {
+          quoteStore.createIndex("sourceId", "link.sourceId", { unique: false });
+        }
+        if (!quoteStore.indexNames.contains("subjectSource")) {
+          quoteStore.createIndex("subjectSource", ["subject", "link.sourceId"], { unique: false });
+        }
+        if (!quoteStore.indexNames.contains("subjectNextReview")) {
+          quoteStore.createIndex("subjectNextReview", ["subject", "meta.nextReview"], { unique: false });
+        }
+      };
 
       if (!db.objectStoreNames.contains("nodes")) {
         const nodeStore = db.createObjectStore("nodes", { keyPath: "id" });
-        nodeStore.createIndex("type", "type", { unique: false });
-        nodeStore.createIndex("subject", "subject", { unique: false });
-        nodeStore.createIndex("subjectType", ["subject", "type"], { unique: false });
+        ensureNodeIndexes(nodeStore);
+      } else if (tx) {
+        ensureNodeIndexes(tx.objectStore("nodes"));
       }
 
       if (!db.objectStoreNames.contains("quotes")) {
         const quoteStore = db.createObjectStore("quotes", { keyPath: "id" });
-        quoteStore.createIndex("subject", "subject", { unique: false });
-        quoteStore.createIndex("sourceId", "link.sourceId", { unique: false });
-        quoteStore.createIndex("subjectSource", ["subject", "link.sourceId"], { unique: false });
+        ensureQuoteIndexes(quoteStore);
+      } else if (tx) {
+        ensureQuoteIndexes(tx.objectStore("quotes"));
       }
 
       if (!db.objectStoreNames.contains("pinnedTools")) {
@@ -119,6 +150,93 @@ export function getAllNodes() {
     const tx = db.transaction("nodes", "readonly");
     const req = tx.objectStore("nodes").getAll();
     req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+// ========== MEMORY (DUE QUERIES) ==========
+
+export function getDueQuotesForSubject(subject, { now = Date.now(), limit = 200 } = {}) {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error("IndexedDB is not initialized"));
+      return;
+    }
+
+    const tx = db.transaction("quotes", "readonly");
+    const store = tx.objectStore("quotes");
+
+    let index;
+    try {
+      index = store.index("subjectNextReview");
+    } catch (error) {
+      // Fallback: scan subject quotes once
+      const subjectIndex = store.index("subject");
+      const reqAll = subjectIndex.getAll(subject);
+      reqAll.onsuccess = () => {
+        const all = reqAll.result || [];
+        const due = all.filter((q) => (q?.meta?.nextReview ?? 0) <= now);
+        resolve(due.slice(0, limit));
+      };
+      reqAll.onerror = () => reject(reqAll.error);
+      tx.onerror = () => reject(tx.error);
+      return;
+    }
+
+    const range = IDBKeyRange.bound([subject, 0], [subject, now]);
+    const results = [];
+    const req = index.openCursor(range);
+
+    req.onsuccess = (e) => {
+      const cursor = e.target.result;
+      if (!cursor || results.length >= limit) {
+        resolve(results);
+        return;
+      }
+      results.push(cursor.value);
+      cursor.continue();
+    };
+    req.onerror = () => reject(req.error);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export function getDueAnalysisNodesForSubject(subject, { now = Date.now(), limit = 200 } = {}) {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error("IndexedDB is not initialized"));
+      return;
+    }
+
+    const tx = db.transaction("nodes", "readonly");
+    const store = tx.objectStore("nodes");
+
+    let index;
+    try {
+      index = store.index("subjectTypeNextReview");
+    } catch (error) {
+      // Fallback: scan analyses for subject once
+      getAnalysisNodesForSubject(subject).then((nodes) => {
+        const due = (nodes || []).filter((n) => (n?.meta?.nextReview ?? 0) <= now);
+        resolve(due.slice(0, limit));
+      }).catch(reject);
+      return;
+    }
+
+    const range = IDBKeyRange.bound([subject, "analysis", 0], [subject, "analysis", now]);
+    const results = [];
+    const req = index.openCursor(range);
+
+    req.onsuccess = (e) => {
+      const cursor = e.target.result;
+      if (!cursor || results.length >= limit) {
+        resolve(results);
+        return;
+      }
+      results.push(cursor.value);
+      cursor.continue();
+    };
     req.onerror = () => reject(req.error);
     tx.onerror = () => reject(tx.error);
   });
@@ -369,15 +487,30 @@ export function clearQuotes() {
  * Get all analysis nodes for a subject
  */
 export function getAnalysisNodesForSubject(subject) {
-  return new Promise(async (resolve, reject) => {
+  return new Promise((resolve, reject) => {
     if (!db) {
       reject(new Error("IndexedDB is not initialized"));
       return;
     }
 
-    const nodes = await getAllNodes();
-    const analyses = nodes.filter(n => n.type === "analysis" && n.subject === subject);
-    resolve(analyses);
+    const tx = db.transaction("nodes", "readonly");
+    const store = tx.objectStore("nodes");
+
+    let index;
+    try {
+      index = store.index("subjectType");
+    } catch (error) {
+      // Fallback for older DBs: scan all nodes once
+      getAllNodes()
+        .then((nodes) => resolve((nodes || []).filter((n) => n.type === "analysis" && n.subject === subject)))
+        .catch(reject);
+      return;
+    }
+
+    const req = index.getAll(IDBKeyRange.only([subject, "analysis"]));
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+    tx.onerror = () => reject(tx.error);
   });
 }
 

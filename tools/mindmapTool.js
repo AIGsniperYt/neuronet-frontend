@@ -29,7 +29,8 @@ const state = {
     panOffset: { x: 0, y: 0 },
     isPanning: false,
     panStartPos: { x: 0, y: 0 },
-    simulationRunning: true
+    simulationRunning: true,
+    sidebarView: "content"
   };
 
   const physicsConfig = {
@@ -57,10 +58,13 @@ const state = {
   const nodeSidebar = document.getElementById("nodeSidebar");
   const sidebarTitle = document.getElementById("sidebarTitle");
   const sidebarType = document.getElementById("sidebarType");
+  const sidebarContentLabel = document.getElementById("sidebarContentLabel");
   const fullContent = document.getElementById("fullContent");
+  const metaContent = document.getElementById("metaContent");
   const deleteNodeBtn = document.getElementById("deleteNodeBtn");
   const editNodeBtn = document.getElementById("editNodeBtn");
   const sidebarClose = document.getElementById("sidebarClose");
+  const toggleMetadataBtn = document.getElementById("toggleMetadataBtn");
 
   const config = {
     nodeRadius: 8,
@@ -123,6 +127,109 @@ const state = {
 
   function getNodeType(node) {
     return node.type || node.itemType || "unknown";
+  }
+
+  function formatTimestamp(ms) {
+    if (!Number.isFinite(Number(ms))) return null;
+    const d = new Date(Number(ms));
+    if (Number.isNaN(d.getTime())) return null;
+    return `${d.toLocaleString()} (${d.toISOString()})`;
+  }
+
+  function formatNumber(value, digits = 3) {
+    if (!Number.isFinite(Number(value))) return null;
+    return Number(value).toFixed(digits);
+  }
+
+  function formatMetadataHumanReadable(node) {
+    if (!node) return "";
+
+    const lines = [];
+    const push = (label, value) => {
+      if (value === undefined || value === null || value === "") return;
+      lines.push(`${label}: ${value}`);
+    };
+
+    push("id", node.id);
+    push("type", node.type);
+    push("subject", node.subject);
+
+    const createdAt = formatTimestamp(node.createdAt);
+    const updatedAt = formatTimestamp(node.updatedAt);
+    if (createdAt) push("createdAt", createdAt);
+    if (updatedAt) push("updatedAt", updatedAt);
+
+    if (node.type === "quote") {
+      if (node.link?.sourceId) push("link.sourceId", node.link.sourceId);
+      if (node.section) push("section", node.section);
+    }
+
+    if (node.type === "analysis") {
+      push("quoteRefs.count", Array.isArray(node.quoteRefs) ? node.quoteRefs.length : 0);
+    }
+
+    const meta = node.meta || {};
+    const memoryKeys = ["S", "D", "U", "interval", "nextReview", "lastReview", "reviewCount", "expectedTime", "avgTime", "timeVariance", "consistency", "confidence", "easeFactor", "honestyFlag", "clusterId"];
+    const metaHasAny = memoryKeys.some((k) => meta[k] !== undefined && meta[k] !== null);
+    if (metaHasAny) {
+      lines.push("");
+      lines.push("[memory]");
+
+      if (meta.S !== undefined) push("S", formatNumber(meta.S, 3));
+      if (meta.D !== undefined) push("D", formatNumber(meta.D, 3));
+      if (meta.U !== undefined) push("U", formatNumber(meta.U, 3));
+      if (meta.interval !== undefined) push("interval(days)", formatNumber(meta.interval, 3));
+      if (meta.reviewCount !== undefined) push("reviewCount", meta.reviewCount);
+
+      const nextReview = formatTimestamp(meta.nextReview);
+      const lastReview = formatTimestamp(meta.lastReview);
+      if (nextReview) push("nextReview", nextReview);
+      if (lastReview) push("lastReview", lastReview);
+
+      if (meta.expectedTime !== undefined) push("expectedTime(s)", formatNumber(meta.expectedTime, 2));
+      if (meta.avgTime !== undefined) push("avgTime(s)", formatNumber(meta.avgTime, 2));
+      if (meta.timeVariance !== undefined) push("timeVariance", formatNumber(meta.timeVariance, 3));
+      if (meta.consistency !== undefined) push("consistency", formatNumber(meta.consistency, 3));
+      if (meta.confidence !== undefined) push("confidence", formatNumber(meta.confidence, 3));
+      if (meta.easeFactor !== undefined) push("easeFactor", formatNumber(meta.easeFactor, 3));
+      if (meta.honestyFlag !== undefined) push("honestyFlag", formatNumber(meta.honestyFlag, 3));
+      if (meta.clusterId) push("clusterId", meta.clusterId);
+    }
+
+    const otherMetaKeys = Object.keys(meta || {}).filter((k) => !memoryKeys.includes(k)).sort();
+    if (otherMetaKeys.length > 0) {
+      lines.push("");
+      lines.push("[meta]");
+      otherMetaKeys.forEach((k) => {
+        const v = meta[k];
+        if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+          push(k, v);
+        } else if (Array.isArray(v)) {
+          push(k, `[${v.length} items]`);
+        } else if (v && typeof v === "object") {
+          push(k, "{...}");
+        }
+      });
+    }
+
+    return lines.join("\n");
+  }
+
+  function renderSidebar(selectedItem) {
+    if (!selectedItem) return;
+
+    sidebarTitle.textContent = getNodeDisplayTitle(selectedItem);
+    sidebarType.innerHTML = `<span>${getNodeTypeIcon(selectedItem.type)}</span> ${selectedItem.type.charAt(0).toUpperCase() + selectedItem.type.slice(1)}`;
+
+    const isMeta = state.sidebarView === "metadata";
+    if (sidebarContentLabel) sidebarContentLabel.textContent = isMeta ? "Metadata" : "Content";
+    if (toggleMetadataBtn) toggleMetadataBtn.textContent = isMeta ? "Content" : "Metadata";
+
+    if (fullContent) fullContent.style.display = isMeta ? "none" : "block";
+    if (metaContent) metaContent.style.display = isMeta ? "block" : "none";
+
+    if (fullContent) fullContent.textContent = getNodeFullContent(selectedItem);
+    if (metaContent) metaContent.textContent = formatMetadataHumanReadable(selectedItem);
   }
 
   function buildGraph() {
@@ -549,14 +656,12 @@ const state = {
 
   function openNodeSidebar(nodeId) {
     state.selectedNodeId = nodeId;
+    state.sidebarView = "content";
     
     const selectedItem = findItemById(nodeId);
     if (!selectedItem) return;
     
-    sidebarTitle.textContent = getNodeDisplayTitle(selectedItem);
-    sidebarType.innerHTML = `<span>${getNodeTypeIcon(selectedItem.type)}</span> ${selectedItem.type.charAt(0).toUpperCase() + selectedItem.type.slice(1)}`;
-    
-    fullContent.textContent = getNodeFullContent(selectedItem);
+    renderSidebar(selectedItem);
     
     if (nodeSidebar) nodeSidebar.classList.add("open");
   }
@@ -564,6 +669,7 @@ const state = {
   function closeSidebar() {
     if (nodeSidebar) nodeSidebar.classList.remove("open");
     state.selectedNodeId = null;
+    state.sidebarView = "content";
   }
 
   async function handleDeleteNode() {
@@ -753,6 +859,16 @@ const state = {
 
     if (sidebarClose) {
       sidebarClose.addEventListener("click", closeSidebar);
+    }
+
+    if (toggleMetadataBtn) {
+      toggleMetadataBtn.addEventListener("click", () => {
+        if (!state.selectedNodeId) return;
+        const selectedItem = findItemById(state.selectedNodeId);
+        if (!selectedItem) return;
+        state.sidebarView = state.sidebarView === "metadata" ? "content" : "metadata";
+        renderSidebar(selectedItem);
+      });
     }
 
     if (deleteNodeBtn) {

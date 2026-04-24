@@ -24,6 +24,12 @@
           </div>
         </div>
       </div>
+
+      <div id="gradingControls" style="display: none;">
+        <button id="gradeDidntKnowBtn" class="grade-btn grade-dk">Didn’t Know</button>
+        <button id="gradeKindaBtn" class="grade-btn grade-kinda">Kinda</button>
+        <button id="gradeEasyBtn" class="grade-btn grade-easy">Easy</button>
+      </div>
       
       <div id="flashcardControls">
         <button id="flipBtn" class="memory-btn">Flip Card</button>
@@ -133,6 +139,8 @@
     align-items: center;
     padding: 20px;
     position: relative;
+    flex-direction: column;
+    gap: 12px;
   }
   
   #flashcard {
@@ -185,13 +193,86 @@
     line-height: 1.5;
     color: var(--text-main);
   }
+
+  .blurt-input {
+    width: 100%;
+    box-sizing: border-box;
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.10);
+    color: var(--text-main);
+    resize: vertical;
+    outline: none;
+  }
+
+  .blurt-input:focus {
+    border-color: rgba(44,255,179,0.55);
+    box-shadow: 0 0 0 2px rgba(44,255,179,0.10);
+  }
   
   #flashcardControls {
     padding: 16px;
     display: flex;
     justify-content: center;
     gap: 12px;
-    margin-top: auto;
+    margin-top: 0;
+  }
+
+  #gradingControls {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    padding: 10px 16px 0 16px;
+    margin-bottom: 6px;
+  }
+
+  .grade-btn {
+    width: auto;
+    padding: 10px 14px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 700;
+    border: 1px solid rgba(255,255,255,0.10);
+    background: rgba(255,255,255,0.03);
+    color: var(--text-main);
+    letter-spacing: 0.2px;
+    transition: all 0.15s ease;
+  }
+
+  .grade-btn:hover {
+    transform: translateY(-1px);
+    border-color: rgba(44,255,179,0.35);
+    background: rgba(44,255,179,0.08);
+  }
+
+  .grade-dk {
+    border-color: rgba(255,77,77,0.35);
+  }
+
+  .grade-dk:hover {
+    border-color: rgba(255,77,77,0.7);
+    background: rgba(255,77,77,0.12);
+  }
+
+  .grade-kinda {
+    border-color: rgba(255,205,77,0.30);
+  }
+
+  .grade-kinda:hover {
+    border-color: rgba(255,205,77,0.65);
+    background: rgba(255,205,77,0.10);
+  }
+
+  .grade-easy {
+    border-color: rgba(63,208,125,0.35);
+  }
+
+  .grade-easy:hover {
+    border-color: rgba(63,208,125,0.75);
+    background: rgba(63,208,125,0.12);
   }
   
   #evidenceMatchingContainer {
