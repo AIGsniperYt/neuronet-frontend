@@ -1,5 +1,5 @@
-import { initDB, addNode, addNodes, getAllNodes, getNode, deleteNode, addQuote, addQuotes, getAllQuotes, getQuote, deleteQuote, clearNodes, clearQuotes, getQuotesForSubject, getAnalysisNodesForSubject, getQuotesReferencedByAnalysis, getAnalysesReferencingQuote, getPinnedTools, pinTool, unpinTool, isToolPinned, setPinnedToolsOrder, getSubjects, addSubject, deleteSubject, renameSubject } from "./db.js";
-import { syncLocalWithCloud, syncToCloud, deleteCloudNode, deleteCloudQuote, fetchCloudNodes, fetchCloudQuotes } from "./sync.js";
+import { initDB, addNode, addNodes, getAllNodes, getNode, deleteNode, addQuote, addQuotes, getAllQuotes, getQuote, deleteQuote, clearNodes, clearQuotes, clearCues, addCues, getQuotesForSubject, getAnalysisNodesForSubject, getQuotesReferencedByAnalysis, getAnalysesReferencingQuote, getPinnedTools, pinTool, unpinTool, isToolPinned, setPinnedToolsOrder, getSubjects, addSubject, deleteSubject, renameSubject, addCue, getAllCues, getCue, deleteCue, getCuesForQuote, getCuesForAnalysis, getCuesForSubject, updateCueLinks } from "./db.js";
+import { syncLocalWithCloud, syncToCloud, deleteCloudNode, deleteCloudQuote, deleteCloudCue, fetchCloudNodes, fetchCloudQuotes, fetchCloudCues } from "./sync.js";
 import { initAnalysisToolV2 } from "./tools/analysisTool.js";
 import { initMemoryTool } from "./tools/memoryTool.js";
 import { initMindmapTool } from "./tools/mindmapTool.js";
@@ -21,14 +21,19 @@ let toolContainer;
 
 const tools = {
   analysis: {
-    file: "analysis.html",  // loaded from ./tools/ by loadTool
+    file: "analysis.html",
     init: (context) => initAnalysisToolV2({
       getAllNodes,
       getAllQuotes,
+      getAllCues,
       addNode,
       addQuote,
+      addCue,
       getQuote,
+      getCue,
       deleteQuote,
+      deleteCue,
+      removeCueEverywhere,
       backupLocalNodesToCloud,
       removeNodeEverywhere,
       removeQuoteEverywhere,
@@ -46,10 +51,12 @@ const tools = {
     init: (context) => initMemoryTool({
       getAllNodes,
       getAllQuotes,
+      getAllCues,
       getQuotesForSubject,
       getAnalysisNodesForSubject,
       getQuotesReferencedByAnalysis,
       getAnalysesReferencingQuote,
+      getCuesForQuote,
       getNode,
       getNodeTimestamp,
       getSubjects,
@@ -237,13 +244,26 @@ async function removeQuoteEverywhere(id) {
   }
 }
 
+async function removeCueEverywhere(id) {
+  await deleteCue(id);
+
+  if (!window.currentUser) return;
+
+  try {
+    await deleteCloudCue(id);
+  } catch (error) {
+    console.log("Cloud cue delete skipped", error);
+  }
+}
+
 async function exportDatabaseJson() {
-  const [nodes, quotes] = await Promise.all([getAllNodes(), getAllQuotes()]);
+  const [nodes, quotes, cues] = await Promise.all([getAllNodes(), getAllQuotes(), getAllCues()]);
   const payload = {
-    schemaVersion: 3,
+    schemaVersion: 5,
     exportedAt: new Date().toISOString(),
     nodes,
-    quotes
+    quotes,
+    cues
   };
 
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -260,19 +280,27 @@ async function importDatabaseJson(file) {
   const payload = JSON.parse(text);
   const nodes = Array.isArray(payload?.nodes) ? payload.nodes : [];
   const quotes = Array.isArray(payload?.quotes) ? payload.quotes : [];
+  const cues = Array.isArray(payload?.cues) ? payload.cues : [];
 
   await clearNodes();
   await clearQuotes();
+  await clearCues();
   await addNodes(nodes);
   await addQuotes(quotes);
+  await addCues(cues);
 
   if (window.currentUser) {
-    const [cloudNodes, cloudQuotes] = await Promise.all([fetchCloudNodes(), fetchCloudQuotes()]);
+    const [cloudNodes, cloudQuotes, cloudCues] = await Promise.all([
+      fetchCloudNodes(),
+      fetchCloudQuotes(),
+      fetchCloudCues()
+    ]);
     await Promise.all([
       ...cloudNodes.map((node) => deleteCloudNode(node.id)),
-      ...cloudQuotes.map((quote) => deleteCloudQuote(quote.id))
+      ...cloudQuotes.map((quote) => deleteCloudQuote(quote.id)),
+      ...cloudCues.map((cue) => deleteCloudCue(cue.id))
     ]);
-    await syncToCloud(nodes, quotes);
+    await syncToCloud(nodes, quotes, cues);
   }
 
   if (currentToolName) {
@@ -702,6 +730,22 @@ document.addEventListener("DOMContentLoaded", async () => {
   const loadingMessage = document.getElementById("loadingMessage");
   const loadingCheckmark = document.getElementById("loadingCheckmark");
   const appElement = document.getElementById("app");
+
+  // Origin validation
+  const ALLOWED_ORIGINS = [
+    "http://127.0.0.1:5500",
+    "https://aigsniperyt.github.io"
+  ];
+  const currentOrigin = window.location.origin;
+  const isAllowed = ALLOWED_ORIGINS.some(origin => currentOrigin.startsWith(origin));
+
+  if (!isAllowed) {
+    loadingOverlay.style.display = "flex";
+    loadingMessage.innerHTML = `<span style="color:#ff6b6b;font-size:1.2rem;">&#10060; Access denied</span>`;
+    const checkmark = loadingOverlay.querySelector(".checkmark");
+    if (checkmark) checkmark.remove();
+    return;
+  }
 
   loadingOverlay.style.display = "flex";
   loadingMessage.textContent = "Connecting to the server...";

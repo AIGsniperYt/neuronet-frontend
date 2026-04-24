@@ -1,4 +1,4 @@
-import { getAllNodes, addNodes, getAllQuotes, addQuotes } from "./db.js";
+import { getAllNodes, addNodes, getAllQuotes, addQuotes, getAllCues, addCues } from "./db.js";
 
 const BACKEND = "https://neuronet-backend.onrender.com";
 
@@ -60,25 +60,42 @@ export async function fetchCloudQuotes() {
   return Array.isArray(cloudQuotes) ? cloudQuotes : [];
 }
 
+export async function fetchCloudCues() {
+  const res = await fetch(`${BACKEND}/api/nodes/cues`, {
+    credentials: "include"
+  });
+
+  if (!res.ok) {
+    throw new Error(`Cloud cue fetch failed with status ${res.status}`);
+  }
+
+  const cloudCues = await res.json();
+  return Array.isArray(cloudCues) ? cloudCues : [];
+}
+
 export async function syncLocalWithCloud() {
-  const [localNodes, cloudNodes, localQuotes, cloudQuotes] = await Promise.all([
+  const [localNodes, cloudNodes, localQuotes, cloudQuotes, localCues, cloudCues] = await Promise.all([
     getAllNodes(),
     fetchCloudNodes(),
     getAllQuotes(),
-    fetchCloudQuotes()
+    fetchCloudQuotes(),
+    getAllCues(),
+    fetchCloudCues()
   ]);
 
   const mergedNodes = mergeNodeSets(localNodes, cloudNodes);
   const mergedQuotes = mergeNodeSets(localQuotes, cloudQuotes);
+  const mergedCues = mergeNodeSets(localCues, cloudCues);
   await addNodes(mergedNodes);
   await addQuotes(mergedQuotes);
-  await syncToCloud(mergedNodes, mergedQuotes);
+  await addCues(mergedCues);
+  await syncToCloud(mergedNodes, mergedQuotes, mergedCues);
 
-  return { nodes: mergedNodes, quotes: mergedQuotes };
+  return { nodes: mergedNodes, quotes: mergedQuotes, cues: mergedCues };
 }
 
-export async function syncToCloud(localNodes, localQuotes = []) {
-  const [nodesRes, quotesRes] = await Promise.all([
+export async function syncToCloud(localNodes, localQuotes = [], localCues = []) {
+  const [nodesRes, quotesRes, cuesRes] = await Promise.all([
     fetch(`${BACKEND}/api/nodes/bulk`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -90,6 +107,12 @@ export async function syncToCloud(localNodes, localQuotes = []) {
       headers: { "Content-Type": "application/json" },
       credentials: "include",
       body: JSON.stringify(localQuotes)
+    }),
+    fetch(`${BACKEND}/api/nodes/cues/bulk`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(localCues)
     })
   ]);
 
@@ -99,6 +122,10 @@ export async function syncToCloud(localNodes, localQuotes = []) {
 
   if (!quotesRes.ok) {
     throw new Error(`Cloud quote sync failed with status ${quotesRes.status}`);
+  }
+
+  if (!cuesRes.ok) {
+    throw new Error(`Cloud cue sync failed with status ${cuesRes.status}`);
   }
 
   console.log("Sync to cloud complete");
@@ -123,5 +150,16 @@ export async function deleteCloudQuote(id) {
 
   if (!res.ok && res.status !== 404) {
     throw new Error(`Cloud delete quote failed with status ${res.status}`);
+  }
+}
+
+export async function deleteCloudCue(id) {
+  const res = await fetch(`${BACKEND}/api/nodes/cues/${id}`, {
+    method: "DELETE",
+    credentials: "include"
+  });
+
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`Cloud delete cue failed with status ${res.status}`);
   }
 }

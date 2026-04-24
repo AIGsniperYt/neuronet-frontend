@@ -2,10 +2,12 @@ export async function initMemoryTool(deps, context = {}) {
 const {
   getAllNodes,
   getAllQuotes,
+  getAllCues,
   getQuotesForSubject,
   getAnalysisNodesForSubject,
   getQuotesReferencedByAnalysis,
   getAnalysesReferencingQuote,
+  getCuesForQuote,
   getNode,
   getNodeTimestamp,
   getSubjects,
@@ -290,12 +292,15 @@ function applyCustomFlashcardOrder(flashcards) {
     const quotes = await getQuotesForSubject(state.currentSubject);
     state.flashcards = await Promise.all(quotes.map(async (quote) => {
       const analyses = await getAnalysesReferencingQuote(quote.id);
+      const cues = await getCuesForQuote(quote.id);
+      const cueNode = cues.length > 0 ? cues[0] : null;
       return {
         id: quote.id,
         type: "quote-learning",
         front: {
-          content: getCueForQuote(quote) || `Recall the quote from "${quote.section || "this source"}"`,
-          isCue: true
+          content: getCueForQuote(quote, cueNode),
+          isCue: true,
+          cueNode
         },
         back: {
           content: quote.quote,
@@ -307,7 +312,10 @@ function applyCustomFlashcardOrder(flashcards) {
     }));
   }
 
-  function getCueForQuote(quote) {
+  function getCueForQuote(quote, cueNode = null) {
+    if (cueNode?.cue) {
+      return cueNode.cue;
+    }
     const words = quote.quote.split(' ');
     if (words.length <= 4) return quote.quote;
     return `${words[0]} ... ${words[words.length - 1]}`;

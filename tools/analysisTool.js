@@ -368,7 +368,7 @@ function htmlToPlainText(html) {
     const parser = new DOMParser();
     const raw = isPlainText ? plainTextToHtml(input) : String(input || "");
     const doc = parser.parseFromString(`<div>${raw}</div>`, "text/html");
-    const container = doc.body.firstElementChild;
+    let container = doc.body.firstElementChild;
     const outDoc = document.implementation.createHTMLDocument("");
     const root = outDoc.createElement("div");
 
@@ -384,21 +384,17 @@ function htmlToPlainText(html) {
       const tag = node.tagName.toUpperCase();
 
       if (!allowedTags.has(tag)) {
-        const wrapper = outDoc.createElement("div"); // preserve block spacing
+        const wrapper = outDoc.createElement("div");
         Array.from(node.childNodes).forEach((child) => sanitizeNode(child, wrapper));
         targetParent.appendChild(wrapper);
         return;
       }
 
-      // Skip <a> tags entirely - just process their children
-      // (they're navigation anchors and create unwanted spacing)
       if (tag === "A") {
         Array.from(node.childNodes).forEach((child) => sanitizeNode(child, targetParent));
         return;
       }
 
-      // Unwrap <p> tags that contain ONLY inline formatting (no direct text, no block elements)
-      // This handles contentEditable wrapping <strong>Name</strong> in <p>
       if (tag === "P") {
         const hasDirectText = Array.from(node.childNodes).some(
           (child) => child.nodeType === Node.TEXT_NODE && (child.nodeValue || "").trim()
@@ -407,7 +403,6 @@ function htmlToPlainText(html) {
           (child) => child.nodeType === Node.ELEMENT_NODE && blockTags.has(child.tagName.toUpperCase())
         );
         
-        // If only contains inline elements with no direct text, unwrap the <p>
         if (!hasDirectText && !hasBlockChildren) {
           Array.from(node.childNodes).forEach((child) => sanitizeNode(child, targetParent));
           return;
@@ -1584,10 +1579,11 @@ function selectSource(sourceId) {
           return "";
         })();
         return `
-          <article class="item-card analysis-item ${isActive ? "active" : ""}" data-node-id="${escapeHtml(node.id)}" data-quote-start="${Number(node?.link?.start ?? 0)}">
+          <article class="item-card analysis-item ${isActive ? "active" : ""} ${node?.meta?.flagged ? "flagged" : ""}" data-node-id="${escapeHtml(node.id)}" data-quote-start="${Number(node?.link?.start ?? 0)}">
             <div class="card-header">
               <div class="location">#${index + 1}</div>
               <div class="card-actions">
+                <button class="icon-btn flag-btn ${node?.meta?.flagged ? "flagged" : ""}" type="button" data-action="flag-node" data-id="${escapeHtml(node.id)}" title="Flag for review" aria-label="Flag for review">🚩</button>
                 <button class="icon-btn copy-btn" type="button" data-action="copy-node" data-id="${escapeHtml(node.id)}" title="Copy referenced quotes" aria-label="Copy referenced quotes">📋</button>
                 <button class="icon-btn edit-btn" type="button" data-action="edit-node" data-id="${escapeHtml(node.id)}" title="Edit" aria-label="Edit analysis">✎</button>
                 <button class="icon-btn delete-btn" type="button" data-action="delete-node" data-id="${escapeHtml(node.id)}" title="Delete" aria-label="Delete analysis">🗑</button>
@@ -1967,10 +1963,93 @@ function selectSource(sourceId) {
   if (sourceEditor) {
     sourceEditor.addEventListener("paste", (event) => {
       event.preventDefault();
+      event.stopPropagation();
       const html = event.clipboardData?.getData("text/html");
       const text = event.clipboardData?.getData("text/plain") || "";
-      const clean = sanitizeRichHtml(html || text, !html);
-      document.execCommand("insertHTML", false, clean.contentHtml);
+      
+      let content = "";
+      if (html && html.includes("<!--StartFragment-->")) {
+        const start = html.indexOf("<!--StartFragment-->");
+        const end = html.indexOf("<!--EndFragment-->");
+        if (start !== -1 && end !== -1 && end > start) {
+          content = html.substring(start + 20, end);
+        }
+      }
+      
+      if (!content && text) {
+        content = text.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
+      }
+      
+      if (content) {
+        document.execCommand("insertHTML", false, content);
+      }
+    });
+    
+    // Remove inline styles and clean garbage after paste
+    sourceEditor.addEventListener("input", () => {
+      const walk = document.createTreeWalker(sourceEditor, NodeFilter.SHOW_ELEMENT);
+      const toRemove = [];
+      let node;
+      while (node = walk.nextNode()) {
+        // Remove all inline styles
+        node.style.color = "";
+        node.style.fontFamily = "";
+        node.style.fontSize = "";
+        node.style.whiteSpace = "";
+        node.style.backgroundColor = "";
+        
+        // Remove empty spans
+        if (node.tagName === "SPAN" && !node.textContent.trim() && !node.querySelector("*")) {
+          toRemove.push(node);
+        }
+        // Remove anchor tags (name attributes)
+        if (node.tagName === "A" && node.hasAttribute("name")) {
+          while (node.firstChild) {
+            node.parentNode.insertBefore(node.firstChild, node);
+          }
+          toRemove.push(node);
+        }
+      }
+      toRemove.forEach(n => n.remove());
+      
+      // Replace <i> with <em>, <b> with <strong>
+      sourceEditor.querySelectorAll("i").forEach(n => {
+        const em = document.createElement("em");
+        while (n.firstChild) em.appendChild(n.firstChild);
+        n.parentNode.replaceChild(em, n);
+      });
+      sourceEditor.querySelectorAll("b").forEach(n => {
+        const strong = document.createElement("strong");
+        while (n.firstChild) strong.appendChild(n.firstChild);
+        n.parentNode.replaceChild(strong, n);
+      });
+      
+      // Unwrap P tags that only contain inline elements (no direct text, no block elements)
+      const ps = sourceEditor.querySelectorAll("p");
+      ps.forEach(p => {
+        const hasDirectText = Array.from(p.childNodes).some(
+          (child) => child.nodeType === Node.TEXT_NODE && (child.nodeValue || "").trim()
+        );
+        const blockTagsArr = ["P", "DIV", "BLOCKQUOTE", "H1", "H2", "H3", "UL", "OL", "LI"];
+        const hasBlockChildren = Array.from(p.childNodes).some(
+          (child) => child.nodeType === Node.ELEMENT_NODE && blockTagsArr.includes(child.tagName.toUpperCase())
+        );
+        
+        if (!hasDirectText && !hasBlockChildren) {
+          while (p.firstChild) {
+            p.parentNode.insertBefore(p.firstChild, p);
+          }
+          p.remove();
+        }
+      });
+      
+      // Clean up empty P tags
+      const emptyPs = sourceEditor.querySelectorAll("p");
+      emptyPs.forEach(p => {
+        if (!p.textContent.trim() && !p.querySelector("img, br, blockquote")) {
+          p.remove();
+        }
+      });
     });
   }
 
@@ -1988,7 +2067,10 @@ function selectSource(sourceId) {
         sourceLevel2Input?.value || "",
         sourceLevel3Input?.value || ""
       ]);
-      const clean = sanitizeRichHtml(sourceEditor.innerHTML || "<p><br></p>");
+      
+      const contentHtml = sourceEditor.innerHTML || "<p><br></p>";
+      const contentText = sourceEditor.innerText || "";
+      
       const existing = getSourceById(sourceIdInput.value);
       const now = Date.now();
       const sourceId = sourceIdInput.value || crypto.randomUUID();
@@ -1999,9 +2081,9 @@ function selectSource(sourceId) {
         subject: state.selectedSubject,
         section: buildSection(path),
         title,
-        content: clean.contentText,
-        contentHtml: clean.contentHtml,
-        contentText: clean.contentText,
+        content: contentText,
+        contentHtml: contentHtml,
+        contentText: contentText,
         quote: "",
         analysis: "",
         link: {},
@@ -2043,6 +2125,13 @@ function selectSource(sourceId) {
   if (saveSourceBtn) {
     saveSourceBtn.addEventListener("click", () => {
       sourceForm.dispatchEvent(new Event("submit"));
+    });
+  }
+
+  if (newSourceBtn) {
+    newSourceBtn.addEventListener("click", () => {
+      resetSourceForm();
+      setSourceViewMode("editor");
     });
   }
 
@@ -2387,6 +2476,21 @@ function selectSource(sourceId) {
         state.focusedNodeId = null;
         state.focusedRangeKey = null;
         if (wasEditingThis) dismissAnalysisModal();
+        await refreshData();
+        await backupLocalNodesToCloud();
+        return;
+      }
+
+      if (action === "flag-node") {
+        const currentFlagged = node?.meta?.flagged || false;
+        const updatedNode = {
+          ...node,
+          meta: {
+            ...(node.meta || {}),
+            flagged: !currentFlagged
+          }
+        };
+        await addNode(updatedNode);
         await refreshData();
         await backupLocalNodesToCloud();
         return;
