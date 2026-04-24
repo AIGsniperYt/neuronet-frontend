@@ -138,24 +138,28 @@
   }
 
   .node-sidebar {
-    position: fixed;
-    top: 0;
-    right: 0;
-    width: 400px;
-    max-width: 90vw;
-    height: 100vh;
+    position: relative;
+    width: 0;
+    height: 100%;
     background: rgba(10, 30, 22, 0.98);
-    border-left: 1px solid rgba(44, 255, 179, 0.2);
-    transform: translateX(100%);
-    transition: transform 0.3s ease;
-    z-index: 2000;
+    border-left: 0px solid rgba(44, 255, 179, 0.2);
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), border-left-width 0.3s;
+    z-index: 10;
     display: flex;
     flex-direction: column;
-    backdrop-filter: blur(var(--glass-blur));
+    overflow: hidden;
   }
 
   .node-sidebar.open {
-    transform: translateX(0);
+    width: 400px;
+    border-left-width: 1px;
+  }
+
+  .sidebar-inner {
+    width: 400px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
   }
 
   .sidebar-header {
@@ -334,26 +338,28 @@
       <p>No nodes yet. Add sources, quotes, and analyses to see your knowledge network.</p>
     </div>
   </div>
-</div>
 
-<div id="nodeSidebar" class="node-sidebar">
-  <div class="sidebar-header">
-    <div>
-      <div id="sidebarTitle" class="sidebar-title"></div>
-      <div id="sidebarType" class="sidebar-type"></div>
+  <div id="nodeSidebar" class="node-sidebar">
+    <div class="sidebar-inner">
+      <div class="sidebar-header">
+        <div>
+          <div id="sidebarTitle" class="sidebar-title"></div>
+          <div id="sidebarType" class="sidebar-type"></div>
+        </div>
+        <button id="sidebarClose" class="sidebar-close">&times;</button>
+      </div>
+      
+      <div class="sidebar-content">
+        <div class="content-label" id="sidebarContentLabel">Content</div>
+        <div id="fullContent" class="content-text"></div>
+        <div id="metaContent" class="content-text" style="display: none;"></div>
+      </div>
+      
+      <div class="sidebar-actions">
+        <button id="toggleMetadataBtn" class="btn">Metadata</button>
+        <button id="editNodeBtn" class="btn primary">Edit</button>
+        <button id="deleteNodeBtn" class="btn danger">Delete</button>
+      </div>
     </div>
-    <button id="sidebarClose" class="sidebar-close">&times;</button>
-  </div>
-  
-  <div class="sidebar-content">
-    <div class="content-label" id="sidebarContentLabel">Content</div>
-    <div id="fullContent" class="content-text"></div>
-    <div id="metaContent" class="content-text" style="display: none;"></div>
-  </div>
-  
-  <div class="sidebar-actions">
-    <button id="toggleMetadataBtn" class="btn">Metadata</button>
-    <button id="editNodeBtn" class="btn primary">Edit</button>
-    <button id="deleteNodeBtn" class="btn danger">Delete</button>
   </div>
 </div>

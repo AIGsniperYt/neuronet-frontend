@@ -30,7 +30,10 @@ const state = {
     isPanning: false,
     panStartPos: { x: 0, y: 0 },
     simulationRunning: true,
-    sidebarView: "content"
+    sidebarView: "content",
+    layerNodes: [],
+    userInteracted: false,
+    hasDragged: false
   };
 
   const physicsConfig = {
@@ -46,9 +49,10 @@ const state = {
 
   const ringConfig = {
     subject: 0,
-    source: 80,
-    quote: 180,
-    analysis: 280
+    layer: 70,
+    source: 150,
+    quote: 250,
+    analysis: 350
   };
 
   const canvas = document.getElementById("mindmapCanvas");
@@ -74,13 +78,103 @@ const state = {
     maxZoom: 3,
     colors: {
       subject: "#ff6b6b",
+      "layer 1": "#b388ff",
+      "layer 2": "#9966ff",
+      "layer 3": "#7e57c2",
       source: "#4da6ff",
       quote: "#ff9b39",
       analysis: "#2cffb3"
     }
   };
 
+  function makeLayerId(subject, l1 = "", l2 = "", l3 = "") {
+    return `layer|${String(subject || "").trim()}|${String(l1 || "").trim()}|${String(l2 || "").trim()}|${String(l3 || "").trim()}`;
+  }
+
+  function getSourceLayerParts(source) {
+    const raw = Array.isArray(source?.meta?.hierarchyPath)
+      ? source.meta.hierarchyPath
+      : [source?.subject || "", ...(source?.section ? String(source.section).split(" > ") : [])];
+
+    const clean = (raw || []).map((s) => String(s || "").trim());
+    const subject = clean[0] || String(source?.subject || "").trim();
+    const l1 = clean[1] || "";
+    const l2 = clean[2] || "";
+    const l3 = clean[3] || "";
+    return { subject, l1, l2, l3 };
+  }
+
+  function computeLayerNodesFromSources(nodes) {
+    const sources = (nodes || []).filter((n) => n?.type === "source");
+    const layerMap = new Map();
+
+    for (const source of sources) {
+      const { subject, l1, l2, l3 } = getSourceLayerParts(source);
+      if (!subject || !l1) continue;
+
+      const now = Date.now();
+      const id1 = makeLayerId(subject, l1);
+      if (!layerMap.has(id1)) {
+        layerMap.set(id1, {
+          id: id1,
+          type: "layer 1",
+          subject,
+          title: l1,
+          createdAt: now,
+          updatedAt: now,
+          meta: {
+            layerLevel: 1,
+            layerName: l1,
+            layerPath: [subject, l1],
+            parentLayerId: null
+          }
+        });
+      }
+
+      if (!l2) continue;
+      const id2 = makeLayerId(subject, l1, l2);
+      if (!layerMap.has(id2)) {
+        layerMap.set(id2, {
+          id: id2,
+          type: "layer 2",
+          subject,
+          title: l2,
+          createdAt: now,
+          updatedAt: now,
+          meta: {
+            layerLevel: 2,
+            layerName: l2,
+            layerPath: [subject, l1, l2],
+            parentLayerId: id1
+          }
+        });
+      }
+
+      if (!l3) continue;
+      const id3 = makeLayerId(subject, l1, l2, l3);
+      if (!layerMap.has(id3)) {
+        layerMap.set(id3, {
+          id: id3,
+          type: "layer 3",
+          subject,
+          title: l3,
+          createdAt: now,
+          updatedAt: now,
+          meta: {
+            layerLevel: 3,
+            layerName: l3,
+            layerPath: [subject, l1, l2, l3],
+            parentLayerId: id2
+          }
+        });
+      }
+    }
+
+    return Array.from(layerMap.values());
+  }
+
   function getNodeTypeIcon(type) {
+    if (type?.startsWith("layer")) return "L";
     switch (type) {
       case "subject": return "📚";
       case "source": return "📄";
@@ -99,6 +193,11 @@ const state = {
       const text = node.quote || "";
       return text.substring(0, 40) + (text.length > 40 ? "..." : "") || "Untitled Quote";
     }
+    if (node.type?.startsWith("layer")) {
+      const name = node?.meta?.layerName || node.title || "";
+      const path = Array.isArray(node?.meta?.layerPath) ? node.meta.layerPath : [];
+      return name ? `Layer: ${name}` : (path.length ? path.join(" > ") : "Layer");
+    }
     if (node.type === "analysis") {
       return node.title || node.analysis?.substring(0, 40) + (node.analysis?.length > 40 ? "..." : "") || "Untitled Analysis";
     }
@@ -114,6 +213,7 @@ const state = {
   function getNodePreview(node, maxLength = 150) {
     if (node.type === "quote") return node.quote || "";
     if (node.type === "analysis") return node.analysis || "";
+    if (node.type?.startsWith("layer")) return (node?.meta?.layerPath || []).join(" > ") || "";
     if (node.type === "source") return node.content?.substring(0, maxLength) || node.contentText?.substring(0, maxLength) || "";
     return "";
   }
@@ -121,6 +221,7 @@ const state = {
   function getNodeFullContent(node) {
     if (node.type === "quote") return node.quote || "";
     if (node.type === "analysis") return node.analysis || "";
+    if (node.type?.startsWith("layer")) return (node?.meta?.layerPath || []).join(" > ") || "";
     if (node.type === "source") return node.content || node.contentText || "";
     return "";
   }
@@ -236,6 +337,7 @@ const state = {
     const graph = { nodes: new Map(), edges: [] };
     const items = getAllItems();
     const subjectNodes = items.filter(n => n.type === "subject");
+    const layers = items.filter(n => n.type?.startsWith("layer"));
     const sources = items.filter(n => n.type === "source");
     const quotes = items.filter(n => n.type === "quote");
     const analyses = items.filter(n => n.type === "analysis");
@@ -260,12 +362,32 @@ const state = {
       graph.nodes.get(to)?.connections.add(from);
     };
 
+    layers.forEach((layer) => {
+      const subjectNode = subjectNodes.find((s) => s.subject === layer.subject);
+      if (!subjectNode) return;
+      const parentId = layer?.meta?.parentLayerId || subjectNode.id;
+      addEdge(parentId, layer.id, "layer-chain", 3.2);
+    });
+
     sources.forEach(source => {
-      if (source.subject) {
-        const subjectNode = subjectNodes.find(s => s.subject === source.subject);
-        if (subjectNode) {
-          addEdge(subjectNode.id, source.id, "subject-source", 3);
-        }
+      if (!source.subject) return;
+      const subjectNode = subjectNodes.find(s => s.subject === source.subject);
+      if (!subjectNode) return;
+
+      const { l1, l2, l3 } = getSourceLayerParts(source);
+      if (!l1) {
+        addEdge(subjectNode.id, source.id, "subject-source", 3);
+        return;
+      }
+
+      const layerId = l3
+        ? makeLayerId(source.subject, l1, l2, l3)
+        : (l2 ? makeLayerId(source.subject, l1, l2) : makeLayerId(source.subject, l1));
+
+      if (graph.nodes.has(layerId)) {
+        addEdge(layerId, source.id, "layer-source", 3);
+      } else {
+        addEdge(subjectNode.id, source.id, "subject-source", 3);
       }
     });
 
@@ -297,7 +419,11 @@ const state = {
 
   function getAnchorPosition(node, centerX, centerY) {
     const type = node.type;
-    const baseRadius = ringConfig[type] || 200;
+    let baseRadius = ringConfig[type] || 200;
+    if (type === "layer") {
+      const level = Number(node?.data?.meta?.layerLevel || node?.meta?.layerLevel || 1);
+      baseRadius = ringConfig.layer + (Math.max(1, Math.min(3, level)) - 1) * 60;
+    }
     const variance = baseRadius * 0.4;
     const hash = node.id.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
     const angle = (hash % 360) * (Math.PI / 180);
@@ -316,96 +442,154 @@ const state = {
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
 
+    const nodeParents = new Map();
     graph.nodes.forEach((node, id) => {
       forces.set(id, { x: 0, y: 0 });
+      const parents = new Set();
+      const nodeLevel = getHierarchyLevel(node);
+      node.connections.forEach(neighborId => {
+        const neighbor = graph.nodes.get(neighborId);
+        if (neighbor && getHierarchyLevel(neighbor) < nodeLevel) {
+          parents.add(neighborId);
+        }
+      });
+      nodeParents.set(id, parents);
     });
 
-    graph.nodes.forEach((nodeA, idA) => {
-      graph.nodes.forEach((nodeB, idB) => {
-        if (idA === idB) return;
-        const posA = positions.get(idA);
+    // 1. Global Repulsion & Angular Placement
+    const nodesArr = Array.from(graph.nodes.entries());
+    for (let i = 0; i < nodesArr.length; i++) {
+      const [idA, nodeA] = nodesArr[i];
+      const posA = positions.get(idA);
+      if (!posA) continue;
+      
+      const parentsA = nodeParents.get(idA);
+
+      for (let j = i + 1; j < nodesArr.length; j++) {
+        const [idB, nodeB] = nodesArr[j];
         const posB = positions.get(idB);
-        if (!posA || !posB) return;
+        if (!posB) continue;
 
         const dx = posA.x - posB.x;
         const dy = posA.y - posB.y;
-        const dist = Math.sqrt(dx * dx + dy * dy) + 0.01;
+        let distSq = dx * dx + dy * dy;
+        
+        // Prevent singularity
+        if (distSq < 1) distSq = 1;
+        
+        const dist = Math.sqrt(distSq);
+        
+        const weightA = Math.max(1, nodeA.connections.size);
+        const weightB = Math.max(1, nodeB.connections.size);
+        let repStrength = 15000 + (weightA * weightB) * 5000;
+        
+        const parentsB = nodeParents.get(idB);
+        
+        let isSibling = false;
+        if (parentsA && parentsB) {
+          for (const p of parentsA) {
+            if (parentsB.has(p)) {
+              isSibling = true;
+              break;
+            }
+          }
+        }
 
-        if (dist > physicsConfig.repulsionRange) return;
+        let isGrandparent = false;
+        if (parentsA && !parentsA.has(idB)) {
+           for (const p of parentsA) {
+               const pParents = nodeParents.get(p);
+               if (pParents && pParents.has(idB)) isGrandparent = true;
+           }
+        }
+        if (parentsB && !parentsB.has(idA)) {
+           for (const p of parentsB) {
+               const pParents = nodeParents.get(p);
+               if (pParents && pParents.has(idA)) isGrandparent = true;
+           }
+        }
 
-        const repulsion = physicsConfig.repulsion / (dist * dist);
-        const fx = (dx / dist) * repulsion;
-        const fy = (dy / dist) * repulsion;
+        let forceMag = 0;
+
+        if (isSibling) {
+          // Attract slightly to siblings around a resting distance
+          const siblingIdeal = 90 + Math.max(weightA, weightB) * 10;
+          const siblingSpring = 0.008; // Softer sibling attraction
+          const attractForce = (dist - siblingIdeal) * siblingSpring;
+          // Subtly repel, but mostly allow spring to find equilibrium
+          forceMag = (repStrength * 0.3) / distSq - attractForce;
+        } else if (isGrandparent) {
+          // Repel strongly from grandparent to stretch branches outward
+          repStrength += 160000;
+          forceMag = repStrength / distSq;
+        } else {
+          forceMag = repStrength / distSq;
+        }
+        
+        const fx = (dx / dist) * forceMag;
+        const fy = (dy / dist) * forceMag;
 
         forces.get(idA).x += fx;
         forces.get(idA).y += fy;
-      });
-    });
+        forces.get(idB).x -= fx;
+        forces.get(idB).y -= fy;
+      }
+    }
 
+    // 2. Spring Attraction (Edges)
     graph.edges.forEach(edge => {
       const posFrom = positions.get(edge.from);
       const posTo = positions.get(edge.to);
       if (!posFrom || !posTo) return;
 
+      const nodeFrom = graph.nodes.get(edge.from);
+      const nodeTo = graph.nodes.get(edge.to);
+
       const dx = posTo.x - posFrom.x;
       const dy = posTo.y - posFrom.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
 
-      const dist = Math.sqrt(dx*dx + dy*dy) + 0.01;
-      const desired = 100;
-      const spring = (dist - desired) * 0.001;
+      // Dynamic spacing: if node has many connections, it needs more space
+      const weightFrom = Math.max(1, nodeFrom.connections.size);
+      const weightTo = Math.max(1, nodeTo.connections.size);
+      const levelFrom = getHierarchyLevel(nodeFrom);
+      const levelTo = getHierarchyLevel(nodeTo);
+      const hierarchyDepth = Math.max(levelFrom, levelTo);
 
-      forces.get(edge.from).x += (dx / dist) * spring;
-      forces.get(edge.from).y += (dy / dist) * spring;
-      forces.get(edge.to).x -= (dx / dist) * spring;
-      forces.get(edge.to).y -= (dy / dist) * spring;
+      // Estimate children count for the branch (connections minus the parent link)
+      const childrenCount = Math.max(0, Math.max(weightFrom, weightTo) - 1);
+      
+      // If only a few children (0-2), no extra length needed. If many children, expand length dramatically.
+      const childrenBonus = childrenCount <= 2 ? 0 : (childrenCount * 25);
+
+      // Base length + extra for deep hierarchies + bonus for many children
+      const idealLength = 90 + (hierarchyDepth * 15) + childrenBonus;
+
+      // Softer spring for a more elegant, less bouncy feel
+      const springK = 0.03;
+      const force = (dist - idealLength) * springK;
+
+      const fx = (dx / dist) * force;
+      const fy = (dy / dist) * force;
+
+      forces.get(edge.from).x += fx;
+      forces.get(edge.from).y += fy;
+      forces.get(edge.to).x -= fx;
+      forces.get(edge.to).y -= fy;
     });
 
+    // 3. Very Weak Center Gravity (just to prevent infinite drifting)
     graph.nodes.forEach((node, id) => {
       const pos = positions.get(id);
       if (!pos) return;
 
-      // Light centering preference for subject (not hard lock)
-      if (node.type === "subject") {
-        const dx = centerX - pos.x;
-        const dy = centerY - pos.y;
-        forces.get(id).x += dx * 0.005;
-        forces.get(id).y += dy * 0.005;
-        return;
-      }
-
-      // Inverse repulsion - pushes nodes apart to prevent collapsing
-      graph.nodes.forEach((otherNode, otherId) => {
-        if (id === otherId) return;
-        const otherPos = positions.get(otherId);
-        if (!otherPos) return;
-
-        const dx = pos.x - otherPos.x;
-        const dy = pos.y - otherPos.y;
-        const dist = Math.sqrt(dx * dx + dy * dy) + 1;
-        if (dist < 200) {
-          const repulsion = 120 / (dist * dist);
-          forces.get(id).x += (dx / dist) * repulsion;
-          forces.get(id).y += (dy / dist) * repulsion;
-        }
-      });
-
-      // Radial constraint - pushes nodes OUTWARD if too close, inward if too far
-      const dx = pos.x - centerX;
-      const dy = pos.y - centerY;
-      const radialDist = Math.sqrt(dx * dx + dy * dy) || 0.01;
-      const level = getHierarchyLevel(node);
-      const targetRadius = 140 * level;
+      const dx = centerX - pos.x;
+      const dy = centerY - pos.y;
       
-      // If node is inside its target ring, push outward. If outside, push back.
-      if (radialDist < targetRadius) {
-        const pushOut = (targetRadius - radialDist) * 0.015;
-        forces.get(id).x += (dx / radialDist) * pushOut;
-        forces.get(id).y += (dy / radialDist) * pushOut;
-      } else {
-        const pushIn = (radialDist - targetRadius) * 0.008;
-        forces.get(id).x -= (dx / radialDist) * pushIn;
-        forces.get(id).y -= (dy / radialDist) * pushIn;
-      }
+      // Equal, extremely gentle pull for all nodes.
+      // This prevents the "bent/pinned subject" issue because the subject is free to move relative to its children!
+      forces.get(id).x += dx * 0.00005;
+      forces.get(id).y += dy * 0.00005;
     });
 
     return forces;
@@ -414,10 +598,11 @@ const state = {
   function updatePositionsWithPhysics(forces) {
     const positions = state.nodePositions;
     const velocities = state.velocities;
-    const centerX = canvas.width / 2;
-    const centerY = canvas.height / 2;
-
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    
+    // Custom damping and velocity limits for our dynamic fractal engine
+    // Lower damping (more friction) to prevent bouncing, allowing a soft settling
+    const damping = 0.78; 
+    const maxVelocity = 20;
 
     state.graph.nodes.forEach((node, id) => {
       const pos = positions.get(id);
@@ -431,56 +616,66 @@ const state = {
       const vel = velocities.get(id) || { x: 0, y: 0 };
       const force = forces.get(id) || { x: 0, y: 0 };
 
-      const confidence = node.data?.meta?.confidence ?? 0.7;
-      const nodeDamping = physicsConfig.damping + (confidence * 0.05);
+      // Apply force to velocity
+      vel.x = (vel.x + force.x) * damping;
+      vel.y = (vel.y + force.y) * damping;
 
-      vel.x = vel.x * nodeDamping + force.x;
-      vel.y = vel.y * nodeDamping + force.y;
-
+      // Cap velocity to prevent extreme snapping
       const speed = Math.sqrt(vel.x * vel.x + vel.y * vel.y);
-      if (speed > physicsConfig.maxVelocity) {
-        vel.x = (vel.x / speed) * physicsConfig.maxVelocity;
-        vel.y = (vel.y / speed) * physicsConfig.maxVelocity;
+      if (speed > maxVelocity) {
+        vel.x = (vel.x / speed) * maxVelocity;
+        vel.y = (vel.y / speed) * maxVelocity;
       }
+
+      // Snap to 0 to reach perfectly resting state
+      if (Math.abs(vel.x) < 0.05) vel.x = 0;
+      if (Math.abs(vel.y) < 0.05) vel.y = 0;
 
       pos.x += vel.x;
       pos.y += vel.y;
 
-      if (Math.abs(vel.x) < physicsConfig.minVelocity) vel.x = 0;
-      if (Math.abs(vel.y) < physicsConfig.minVelocity) vel.y = 0;
-
-      minX = Math.min(minX, pos.x);
-      maxX = Math.max(maxX, pos.x);
-      minY = Math.min(minY, pos.y);
-      maxY = Math.max(maxY, pos.y);
-
       velocities.set(id, vel);
     });
-
-    const spreadX = maxX - minX;
-    const spreadY = maxY - minY;
-    const maxSpread = physicsConfig.maxGlobalSpread;
-
-    if (spreadX > maxSpread || spreadY > maxSpread) {
-      const scale = maxSpread / Math.max(spreadX, spreadY);
-      const centerOfMassX = (minX + maxX) / 2;
-      const centerOfMassY = (minY + maxY) / 2;
-
-      state.graph.nodes.forEach((node, id) => {
-        const pos = positions.get(id);
-        if (!pos) return;
-        pos.x = centerOfMassX + (pos.x - centerOfMassX) * scale;
-        pos.y = centerOfMassY + (pos.y - centerOfMassY) * scale;
-      });
-    }
   }
 
   function getHierarchyLevel(node) {
-    if (node.type === "subject") return 0;
-    if (node.type === "source") return 1;
-    if (node.type === "quote") return 2;
-    if (node.type === "analysis") return 3;
-    return 4;
+    const rawNode = node.data || node;
+    if (rawNode.type === "subject") return 0;
+    if (rawNode.type === "layer 1") return 1;
+    if (rawNode.type === "layer 2") return 2;
+    if (rawNode.type === "layer 3") return 3;
+    
+    if (rawNode.type === "source") {
+      const { l1, l2, l3 } = getSourceLayerParts(rawNode);
+      if (l3) return 4;
+      if (l2) return 3;
+      if (l1) return 2;
+      return 1;
+    }
+    if (rawNode.type === "quote") {
+      if (rawNode.link?.sourceId) {
+        const source = findItemById(rawNode.link.sourceId);
+        if (source) {
+          const { l1, l2, l3 } = getSourceLayerParts(source);
+          return (l3 ? 4 : (l2 ? 3 : (l1 ? 2 : 1))) + 1;
+        }
+      }
+      return 5;
+    }
+    if (rawNode.type === "analysis") {
+      if (rawNode.quoteRefs?.[0]?.quoteId) {
+        const quote = findItemById(rawNode.quoteRefs[0].quoteId);
+        if (quote && quote.link?.sourceId) {
+          const source = findItemById(quote.link.sourceId);
+          if (source) {
+            const { l1, l2, l3 } = getSourceLayerParts(source);
+            return (l3 ? 4 : (l2 ? 3 : (l1 ? 2 : 1))) + 2;
+          }
+        }
+      }
+      return 6;
+    }
+    return 7;
   }
 
   function layoutRadial(containerWidth, containerHeight) {
@@ -488,23 +683,17 @@ const state = {
     const centerY = containerHeight / 2;
     const graph = state.graph;
 
-    const levels = new Map();
+    // Exploding Cluster Layout: Start all nodes in a tiny cluster near the center.
+    // The massive global repulsion will naturally explode them outward instantly,
+    // and springs + grandparent-repulsion will smoothly unspool them into a perfect tree!
     graph.nodes.forEach((node, id) => {
-      const level = getHierarchyLevel(node);
-      if (!levels.has(level)) levels.set(level, []);
-      levels.get(level).push([id, node]);
-    });
-
-    const baseRadius = 140;
-    levels.forEach((nodes, level) => {
-      const radius = baseRadius * level;
-      nodes.forEach(([id, node], i) => {
-        const angle = (i / nodes.length) * Math.PI * 2;
-        const x = centerX + Math.cos(angle) * radius;
-        const y = centerY + Math.sin(angle) * radius;
-        state.nodePositions.set(id, { x, y });
-        state.velocities.set(id, { x: 0, y: 0 });
+      const angle = Math.random() * Math.PI * 2;
+      const r = Math.random() * 30; // 30px cluster
+      state.nodePositions.set(id, { 
+        x: centerX + Math.cos(angle) * r, 
+        y: centerY + Math.sin(angle) * r 
       });
+      state.velocities.set(id, { x: 0, y: 0 });
     });
   }
 
@@ -514,7 +703,7 @@ const state = {
   }
 
   function getAllItems() {
-    return [...state.nodes, ...state.quotes];
+    return [...state.nodes, ...state.quotes, ...(state.layerNodes || [])];
   }
 
   function findItemById(id) {
@@ -543,8 +732,51 @@ const state = {
         updatePositionsWithPhysics(forces);
       }
     }
+    fitCameraToGraph();
     render();
     requestAnimationFrame(tick);
+  }
+
+  function fitCameraToGraph() {
+    if (state.graph.nodes.size === 0 || state.userInteracted || !canvas) return;
+    
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    state.nodePositions.forEach(pos => {
+      minX = Math.min(minX, pos.x);
+      maxX = Math.max(maxX, pos.x);
+      minY = Math.min(minY, pos.y);
+      maxY = Math.max(maxY, pos.y);
+    });
+
+    if (minX === Infinity) return;
+
+    // Add padding around the graph
+    const padding = 150;
+    minX -= padding;
+    maxX += padding;
+    minY -= padding;
+    maxY += padding;
+
+    const contentWidth = Math.max(100, maxX - minX);
+    const contentHeight = Math.max(100, maxY - minY);
+    
+    const scaleX = canvas.width / contentWidth;
+    const scaleY = canvas.height / contentHeight;
+    const targetZoom = Math.min(config.maxZoom, Math.max(config.minZoom, Math.min(scaleX, scaleY)));
+
+    const centerOfMassX = (minX + maxX) / 2;
+    const centerOfMassY = (minY + maxY) / 2;
+
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    
+    const targetPanX = -(centerOfMassX - centerX) * targetZoom;
+    const targetPanY = -(centerOfMassY - centerY) * targetZoom;
+
+    // Smooth camera interpolation
+    state.zoom += (targetZoom - state.zoom) * 0.05;
+    state.panOffset.x += (targetPanX - state.panOffset.x) * 0.05;
+    state.panOffset.y += (targetPanY - state.panOffset.y) * 0.05;
   }
 
   function render() {
@@ -678,22 +910,28 @@ const state = {
     const selectedItem = findItemById(state.selectedNodeId);
     if (!selectedItem) return;
     
-    const confirmed = window.confirm(`Delete this ${selectedItem.type}? This action cannot be undone.`);
+    const message = selectedItem.type?.startsWith("layer")
+      ? "Delete this layer and everything inside it? (All sources + their quotes + any now-empty analyses will be removed.)"
+      : `Delete this ${selectedItem.type}? This action cannot be undone.`;
+    const confirmed = window.confirm(message);
     if (!confirmed) return;
     
     try {
-      if (selectedItem.type === "quote") {
-        await removeQuoteEverywhere(selectedItem.id);
-      } else {
-        if (selectedItem.type === "analysis") {
-          const allQuotes = state.quotes;
-          for (const quote of allQuotes) {
-            if (quote.meta?.analysisNodeIds?.includes(selectedItem.id)) {
-              quote.meta.analysisNodeIds = quote.meta.analysisNodeIds.filter(id => id !== selectedItem.id);
-              await addQuote(quote);
-            }
+      if (selectedItem.type?.startsWith("layer")) {
+        const parts = Array.isArray(selectedItem?.meta?.layerPath) ? selectedItem.meta.layerPath : [];
+        const prefix = parts.map((s) => String(s || "").trim()).filter(Boolean);
+        const sources = (state.nodes || []).filter((n) => n?.type === "source" && n?.subject === selectedItem.subject);
+        for (const source of sources) {
+          const { subject, l1, l2, l3 } = getSourceLayerParts(source);
+          const path = [subject, l1, l2, l3].filter(Boolean);
+          const matches = prefix.every((value, idx) => path[idx] === value);
+          if (matches) {
+            await removeNodeEverywhere(source.id);
           }
         }
+      } else if (selectedItem.type === "quote") {
+        await removeQuoteEverywhere(selectedItem.id);
+      } else {
         await removeNodeEverywhere(selectedItem.id);
       }
       
@@ -706,7 +944,6 @@ const state = {
   }
 
   function updateStats() {
-    const items = getAllItems();
     const totalNodes = document.getElementById("totalNodes");
     const totalSubjects = document.getElementById("totalSubjects");
     const totalSources = document.getElementById("totalSources");
@@ -714,11 +951,14 @@ const state = {
     const totalAnalyses = document.getElementById("totalAnalyses");
     const totalConnections = document.getElementById("totalConnections");
 
-    if (totalNodes) totalNodes.textContent = items.length;
-    if (totalSubjects) totalSubjects.textContent = items.filter(i => i.type === "subject").length;
-    if (totalSources) totalSources.textContent = items.filter(i => i.type === "source").length;
-    if (totalQuotes) totalQuotes.textContent = items.filter(i => i.type === "quote").length;
-    if (totalAnalyses) totalAnalyses.textContent = items.filter(i => i.type === "analysis").length;
+    const nodeItems = state.nodes || [];
+    const quoteItems = state.quotes || [];
+
+    if (totalNodes) totalNodes.textContent = nodeItems.length + quoteItems.length;
+    if (totalSubjects) totalSubjects.textContent = nodeItems.filter(i => i.type === "subject").length;
+    if (totalSources) totalSources.textContent = nodeItems.filter(i => i.type === "source").length;
+    if (totalQuotes) totalQuotes.textContent = quoteItems.length;
+    if (totalAnalyses) totalAnalyses.textContent = nodeItems.filter(i => i.type === "analysis").length;
 
     buildGraph();
     const connections = state.graph.edges;
@@ -729,6 +969,7 @@ const state = {
     const [nodes, quotes] = await Promise.all([getAllNodes(), getAllQuotes()]);
     state.nodes = nodes;
     state.quotes = quotes;
+    state.layerNodes = computeLayerNodesFromSources(nodes);
 
     buildGraph();
 
@@ -746,6 +987,11 @@ const state = {
   function setupEventListeners() {
     if (canvas) {
       canvas.addEventListener("click", (e) => {
+        if (state.hasDragged) {
+          state.hasDragged = false; // Reset it here just in case
+          return;
+        }
+        
         const rect = canvas.getBoundingClientRect();
         const pos = {
           x: e.clientX - rect.left,
@@ -768,9 +1014,13 @@ const state = {
         const node = findNodeAtPosition(pos.x, pos.y);
         
         if (state.isPanning) {
+          state.userInteracted = true;
+          state.hasDragged = true;
           state.panOffset.x += e.movementX;
           state.panOffset.y += e.movementY;
         } else if (state.draggingNodeId) {
+          state.userInteracted = true;
+          state.hasDragged = true;
           const centerX = canvas.width / 2;
           const centerY = canvas.height / 2;
           const nodePos = state.nodePositions.get(state.draggingNodeId);
@@ -787,6 +1037,7 @@ const state = {
       });
 
       canvas.addEventListener("mousedown", (e) => {
+        state.hasDragged = false;
         if (e.button === 1) {
           state.isPanning = true;
           canvas.style.cursor = "grabbing";
@@ -801,6 +1052,7 @@ const state = {
         };
         const node = findNodeAtPosition(pos.x, pos.y);
         if (node) {
+          state.userInteracted = true;
           state.draggingNodeId = node.id;
           state.lockedNodes.add(node.id);
           const nodePos = state.nodePositions.get(node.id);
@@ -832,6 +1084,7 @@ const state = {
       });
 
       canvas.addEventListener("wheel", (e) => {
+        state.userInteracted = true;
         e.preventDefault();
         const rect = canvas.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
@@ -882,7 +1135,17 @@ const state = {
           if (selectedItem) {
             closeSidebar();
             window.dispatchEvent(new CustomEvent("neuronet-open-tool", {
-              detail: { tool: "analysis", nodeId: selectedItem.id }
+              detail: (() => {
+                if (selectedItem.type === "subject") {
+                  const subject = String(selectedItem.subject || selectedItem.title || "").trim();
+                  return subject ? { tool: "analysis", subject } : { tool: "analysis", nodeId: selectedItem.id };
+                }
+                if (selectedItem.type?.startsWith("layer")) {
+                  const subject = String(selectedItem.subject || "").trim();
+                  return subject ? { tool: "analysis", subject } : { tool: "analysis", nodeId: selectedItem.id };
+                }
+                return { tool: "analysis", nodeId: selectedItem.id };
+              })()
             }));
           }
         }
@@ -903,33 +1166,6 @@ const state = {
     
     if (state.nodePositions.size === 0) {
       initializePositions(width, height);
-    } else {
-      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-      state.nodePositions.forEach(pos => {
-        minX = Math.min(minX, pos.x);
-        maxX = Math.max(maxX, pos.x);
-        minY = Math.min(minY, pos.y);
-        maxY = Math.max(maxY, pos.y);
-      });
-      
-      const contentWidth = maxX - minX;
-      const contentHeight = maxY - minY;
-      
-      if (contentWidth > width - 100 || contentHeight > height - 100) {
-        const scaleX = (width - 100) / contentWidth;
-        const scaleY = (height - 100) / contentHeight;
-        const scale = Math.min(scaleX, scaleY, 1);
-        
-        const centerX = width / 2;
-        const centerY = height / 2;
-        const oldCenterX = (minX + maxX) / 2;
-        const oldCenterY = (minY + maxY) / 2;
-        
-        state.nodePositions.forEach(pos => {
-          pos.x = centerX + (pos.x - oldCenterX) * scale;
-          pos.y = centerY + (pos.y - oldCenterY) * scale;
-        });
-      }
     }
   }
 

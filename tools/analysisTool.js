@@ -1861,108 +1861,131 @@ function selectSource(sourceId) {
       return;
     }
 
-    // Build layer data
-    const layerData = {};
-    
-    sources.forEach(source => {
-      const path = source?.meta?.hierarchyPath || [source.subject, ...(source.section ? source.section.split(" > ") : [])].filter(Boolean);
-      const cleanPath = path.map(s => (s || "").trim());
-      
-      const l1 = cleanPath[1] || "__other__";
+    const OTHER_KEY = "__other__";
+    const DIRECT_KEY = "__direct__";
+
+    const layerEntries = sources.map((source) => {
+      const path = source?.meta?.hierarchyPath || [source.subject, ...(source.section ? source.section.split(" > ") : [])];
+      const cleanPath = (path || []).map((s) => String(s || "").trim());
+      const l1 = cleanPath[1] || OTHER_KEY;
       const l2 = cleanPath[2] || "";
-      
-      if (!layerData[l1]) layerData[l1] = {};
-      if (l2) {
-        layerData[l1][l2] = source;
-      } else {
-        // Direct child under layer 1
-        layerData[l1]["__direct__"] = source;
-      }
+      const l3 = cleanPath[3] || "";
+      return { source, l1, l2, l3 };
     });
 
-    state.layerData = layerData;
-    
-    // Render Layer 1
-    const l1Options = Object.keys(layerData).sort((a, b) => {
-      if (a === "__other__") return 1;
-      if (b === "__other__") return -1;
+    state.layerEntries = layerEntries;
+
+    const l1Options = Array.from(new Set(layerEntries.map((e) => e.l1))).sort((a, b) => {
+      if (a === OTHER_KEY) return 1;
+      if (b === OTHER_KEY) return -1;
       return a.localeCompare(b);
     });
-    
-    layer1Select.innerHTML = l1Options.map(k => {
-      const label = k === "__other__" ? "(Other)" : k;
+
+    layer1Select.innerHTML = l1Options.map((k) => {
+      const label = k === OTHER_KEY ? "(Other)" : k;
       return `<option value="${escapeHtml(k)}">${escapeHtml(label)}</option>`;
     }).join("");
 
-    // Auto-load first valid source
-    const firstL1 = l1Options[0];
-    const firstL2 = layerData[firstL1] ? Object.keys(layerData[firstL1])[0] : null;
-    const targetSource = firstL2 ? layerData[firstL1][firstL2] : layerData[firstL1]["__direct__"];
-    
-    if (targetSource) {
-      state.selectedSourceId = targetSource.id;
-      renderReaderAndNodes();
-    }
-    
-    // Hide extra dropdowns if only layer 1
-    if (l1Options.length === 1 && !firstL2) {
-      layer1Select.style.display = "inline-block";
-      layer2Select.style.display = "none";
-      layer3Select.style.display = "none";
-    } else {
-      layer1Select.style.display = "inline-block";
-      triggerLayer1Change();
-    }
-    
-    deleteSourceBtn.disabled = !state.selectedSourceId;
-  }
-  
-  function triggerLayer1Change() {
-    const selectedL1 = layer1Select.value;
-    const layerInfo = state.layerData[selectedL1] || {};
-    const l2Options = Object.keys(layerInfo).filter(k => k !== "__direct__").sort();
-    
-    if (l2Options.length > 0) {
+    const currentL1 = l1Options.includes(layer1Select.value) ? layer1Select.value : l1Options[0];
+    layer1Select.value = currentL1;
+
+    const updateLayerSelection = () => {
+      const selectedL1 = layer1Select.value || currentL1;
+      const entriesL1 = layerEntries.filter((e) => e.l1 === selectedL1);
+
+      const l2Keys = Array.from(new Set(entriesL1.map((e) => e.l2 || DIRECT_KEY))).sort((a, b) => {
+        if (a === DIRECT_KEY) return -1;
+        if (b === DIRECT_KEY) return 1;
+        return a.localeCompare(b);
+      });
+      const hasNonDirectL2 = l2Keys.some((k) => k !== DIRECT_KEY);
+
+      if (!hasNonDirectL2) {
+        layer2Select.style.display = "none";
+        layer3Select.style.display = "none";
+
+        const sourcesForL1 = entriesL1.map((e) => e.source);
+        renderSourceOptions(sourcesForL1);
+        return;
+      }
+
       layer2Select.style.display = "inline-block";
-      layer2Select.innerHTML = l2Options.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join("");
-      
-      const selectedL2 = layer2Select.value;
-      const targetSource = layerInfo[selectedL2];
-      
-      if (targetSource) {
-        state.selectedSourceId = targetSource.id;
-        renderReaderAndNodes();
+      layer2Select.innerHTML = l2Keys.map((k) => {
+        const label = k === DIRECT_KEY ? "(Direct)" : k;
+        return `<option value="${escapeHtml(k)}">${escapeHtml(label)}</option>`;
+      }).join("");
+
+      const currentL2 = l2Keys.includes(layer2Select.value) ? layer2Select.value : l2Keys[0];
+      layer2Select.value = currentL2;
+
+      const entriesL2 = entriesL1.filter((e) => (e.l2 || DIRECT_KEY) === currentL2);
+
+      const l3Keys = Array.from(new Set(entriesL2.map((e) => e.l3 || DIRECT_KEY))).sort((a, b) => {
+        if (a === DIRECT_KEY) return -1;
+        if (b === DIRECT_KEY) return 1;
+        return a.localeCompare(b);
+      });
+      const hasNonDirectL3 = l3Keys.some((k) => k !== DIRECT_KEY);
+
+      if (!hasNonDirectL3) {
+        layer3Select.style.display = "none";
+        renderSourceOptions(entriesL2.map((e) => e.source));
+        return;
       }
-    } else {
-      layer2Select.style.display = "none";
-      // Direct child
-      const targetSource = layerInfo["__direct__"];
-      if (targetSource) {
-        state.selectedSourceId = targetSource.id;
-        renderReaderAndNodes();
+
+      layer3Select.style.display = "inline-block";
+      layer3Select.innerHTML = l3Keys.map((k) => {
+        const label = k === DIRECT_KEY ? "(Direct)" : k;
+        return `<option value="${escapeHtml(k)}">${escapeHtml(label)}</option>`;
+      }).join("");
+
+      const currentL3 = l3Keys.includes(layer3Select.value) ? layer3Select.value : l3Keys[0];
+      layer3Select.value = currentL3;
+
+      const entriesL3 = entriesL2.filter((e) => (e.l3 || DIRECT_KEY) === currentL3);
+      renderSourceOptions(entriesL3.map((e) => e.source));
+    };
+
+    function renderSourceOptions(sourceList) {
+      const list = (sourceList || []).slice().sort((a, b) => String(a?.title || "").localeCompare(String(b?.title || "")));
+
+      if (!list.length) {
+        sourceSelect.innerHTML = `<option value="">No sources</option>`;
+        state.selectedSourceId = "";
+        deleteSourceBtn.disabled = true;
+        return;
       }
+
+      sourceSelect.style.display = "inline-block";
+
+      if (!list.some((s) => s?.id === state.selectedSourceId)) {
+        state.selectedSourceId = list[0].id;
+      }
+
+      sourceSelect.innerHTML = list
+        .map((s) => `<option value="${escapeHtml(s.id)}" ${s.id === state.selectedSourceId ? "selected" : ""}>${escapeHtml(s.title || "Untitled")}</option>`)
+        .join("");
+
+      selectSource(state.selectedSourceId);
+      deleteSourceBtn.disabled = !state.selectedSourceId;
     }
+
+    layer1Select.style.display = "inline-block";
+    updateLayerSelection();
+
+    state.updateLayerSelection = updateLayerSelection;
   }
 
   if (layer1Select) {
-    layer1Select.addEventListener("change", triggerLayer1Change);
+    layer1Select.addEventListener("change", () => state.updateLayerSelection?.());
   }
-  
+
   if (layer2Select) {
-    layer2Select.addEventListener("change", () => {
-      const selectedL1 = layer1Select.value;
-      const selectedL2 = layer2Select.value;
-      const targetSource = state.layerData[selectedL1]?.[selectedL2];
-      
-      if (targetSource) {
-        state.selectedSourceId = targetSource.id;
-        renderReaderAndNodes();
-      }
-    });
+    layer2Select.addEventListener("change", () => state.updateLayerSelection?.());
   }
 
   if (layer3Select) {
-    layer3Select.style.display = "none";
+    layer3Select.addEventListener("change", () => state.updateLayerSelection?.());
   }
 
   function renderReaderAndNodes() {
@@ -2309,95 +2332,7 @@ function selectSource(sourceId) {
       }
     });
   }
-  
-  // Layer cascade event listeners
-  if (layer1Select) {
-    layer1Select.addEventListener("change", () => {
-      const selectedL1 = layer1Select.value;
-      const { layer1Data, layer2Data, sources } = state.layerData || {};
-      if (!layer1Data) return;
-      
-      const sourcesInL1 = layer1Data[selectedL1] || [];
-      const hasL2 = sourcesInL1.some(s => s.l2);
-      
-      if (hasL2) {
-        layer2Select.style.display = "inline-block";
-        const l2Options = [...new Set(sourcesInL1.map(s => s.l2).filter(Boolean))].sort();
-        layer2Select.innerHTML = l2Options.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join("");
-        
-        const selectedL2 = layer2Select.value;
-        if (selectedL2) {
-          const hasL3 = layer2Data[selectedL1]?.[selectedL2]?.some(s => s.l3);
-          if (hasL3) {
-            layer3Select.style.display = "inline-block";
-            const l3Options = [...new Set(layer2Data[selectedL1]?.[selectedL2]?.map(s => s.l3).filter(Boolean))].sort();
-            layer3Select.innerHTML = l3Options.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join("");
-          } else {
-            layer3Select.style.display = "none";
-          }
-        }
-        
-        // Update sources
-        const sourcesInL2 = layer2Data[selectedL1]?.[selectedL2] || [];
-        renderLayerSources(sourcesInL2.map(s => s.source));
-      } else {
-        layer2Select.style.display = "none";
-        layer3Select.style.display = "none";
-        renderLayerSources(sourcesInL1.map(s => s.source));
-      }
-    });
-  }
-  
-  if (layer2Select) {
-    layer2Select.addEventListener("change", () => {
-      const { layer1Data, layer2Data } = state.layerData || {};
-      if (!layer1Data) return;
-      
-      const selectedL1 = layer1Select.value;
-      const selectedL2 = layer2Select.value;
-      
-      const hasL3 = layer2Data[selectedL1]?.[selectedL2]?.some(s => s.l3);
-      if (hasL3) {
-        layer3Select.style.display = "inline-block";
-        const l3Options = [...new Set(layer2Data[selectedL1]?.[selectedL2]?.map(s => s.l3).filter(Boolean))].sort();
-        layer3Select.innerHTML = l3Options.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join("");
-      } else {
-        layer3Select.style.display = "none";
-      }
-      
-      const sourcesInL2 = layer2Data[selectedL1]?.[selectedL2] || [];
-      renderLayerSources(sourcesInL2.map(s => s.source));
-    });
-  }
-  
-  if (layer3Select) {
-    layer3Select.addEventListener("change", () => {
-      const { layer2Data } = state.layerData || {};
-      const selectedL1 = layer1Select.value;
-      const selectedL2 = layer2Select.value;
-      const selectedL3 = layer3Select.value;
-      
-      const sourcesInL3 = layer2Data[selectedL1]?.[selectedL2]?.filter(s => s.l3 === selectedL3) || [];
-      renderLayerSources(sourcesInL3.map(s => s.source));
-    });
-  }
-  
-  function renderLayerSources(sourceList) {
-    if (!sourceList?.length) {
-      sourceSelect.innerHTML = `<option value="">No sources</option>`;
-      return;
-    }
-    
-    if (!getSourceById(state.selectedSourceId)) {
-      state.selectedSourceId = sourceList[0].id;
-    }
-    
-    sourceSelect.innerHTML = sourceList
-      .map(s => `<option value="${escapeHtml(s.id)}" ${s.id === state.selectedSourceId ? "selected" : ""}>${escapeHtml(s.title || "Untitled")}</option>`)
-      .join("");
-    
-    selectSource(state.selectedSourceId);
-  }
+
 
   // Add click handler for the new "+ Add Analysis Node" button
   const addAnalysisNodeBtn = document.getElementById("addAnalysisNodeBtn");

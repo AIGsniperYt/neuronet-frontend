@@ -226,6 +226,29 @@ function parseTags(value) {
 }
 
 async function removeNodeEverywhere(id) {
+  const node = await getNode(id);
+
+  // Cascade deletes + integrity cleanup
+  if (node) {
+    const nodeType = node.type || node?.meta?.kind || "";
+
+    if (nodeType === "subject") {
+      const subjectName = String(node.subject || node.title || "").trim();
+      if (subjectName) {
+        await deleteSubjectCascadeEverywhere(subjectName);
+        return;
+      }
+    }
+
+    if (nodeType === "source") {
+      await deleteSourceCascadeEverywhere(node);
+    }
+
+    if (nodeType === "analysis") {
+      await detachAnalysisFromQuotesAndCues(node);
+    }
+  }
+
   await deleteNode(id);
 
   if (!window.currentUser) return;
@@ -238,6 +261,7 @@ async function removeNodeEverywhere(id) {
 }
 
 async function removeQuoteEverywhere(id) {
+  await deleteQuoteCascadeLocal(id);
   await deleteQuote(id);
 
   if (!window.currentUser) return;
@@ -246,6 +270,120 @@ async function removeQuoteEverywhere(id) {
     await deleteCloudQuote(id);
   } catch (error) {
     console.log("Cloud quote delete skipped", error);
+  }
+}
+
+function isEmptyAnalysisNode(node) {
+  if (!node || node.type !== "analysis") return false;
+  const analysisText = String(node.analysis || "").trim();
+  const quoteRefs = Array.isArray(node.quoteRefs) ? node.quoteRefs.filter((r) => r && r.quoteId) : [];
+  return analysisText.length === 0 && quoteRefs.length === 0;
+}
+
+async function detachAnalysisFromQuotesAndCues(analysisNode) {
+  if (!analysisNode?.id) return;
+  const analysisId = analysisNode.id;
+
+  // Remove analysisId from any quote.meta.analysisNodeIds (fast enough for current scale)
+  const allQuotes = await getAllQuotes();
+  const now = Date.now();
+  for (const quote of allQuotes || []) {
+    const ids = Array.isArray(quote?.meta?.analysisNodeIds) ? quote.meta.analysisNodeIds : [];
+    if (!ids.includes(analysisId)) continue;
+    const nextIds = ids.filter((qid) => qid !== analysisId);
+    await addQuote({
+      ...quote,
+      meta: {
+        ...(quote.meta || {}),
+        analysisNodeIds: nextIds
+      },
+      updatedAt: now
+    });
+  }
+
+  // Clear analysisId on cues that were attached to this analysis (keep cue if it still has a quoteId)
+  const cues = await getCuesForAnalysis(analysisId);
+  for (const cue of cues || []) {
+    if (!cue?.id) continue;
+    if (!cue.quoteId) {
+      await removeCueEverywhere(cue.id);
+      continue;
+    }
+    await updateCueLinks(cue.id, cue.quoteId, null);
+  }
+}
+
+async function deleteQuoteCascadeLocal(quoteId) {
+  if (!quoteId) return;
+
+  // Remove quote reference from analysis nodes; delete emptied analyses.
+  const analyses = await getAnalysesReferencingQuote(quoteId);
+  const now = Date.now();
+  for (const analysis of analyses || []) {
+    if (!analysis?.id) continue;
+    const nextRefs = (analysis.quoteRefs || []).filter((ref) => ref?.quoteId && ref.quoteId !== quoteId);
+    const nextAnalysis = { ...analysis, quoteRefs: nextRefs, updatedAt: now };
+    if (isEmptyAnalysisNode(nextAnalysis)) {
+      await removeNodeEverywhere(analysis.id);
+    } else {
+      await addNode(nextAnalysis);
+    }
+  }
+
+  // Delete cues for this quote (quote -> cues ownership)
+  const cues = await getCuesForQuote(quoteId);
+  for (const cue of cues || []) {
+    if (!cue?.id) continue;
+    await removeCueEverywhere(cue.id);
+  }
+}
+
+async function deleteSourceCascadeEverywhere(sourceNode) {
+  if (!sourceNode?.id) return;
+
+  // Delete quotes that belong to this source.
+  const allQuotes = await getAllQuotes();
+  const linkedQuotes = (allQuotes || []).filter((q) => q?.link?.sourceId === sourceNode.id);
+  for (const quote of linkedQuotes) {
+    if (!quote?.id) continue;
+    await removeQuoteEverywhere(quote.id);
+  }
+}
+
+async function deleteSubjectCascadeEverywhere(subjectName) {
+  const subject = String(subjectName || "").trim();
+  if (!subject) return;
+
+  // Delete nodes first to avoid expensive integrity updates while wiping the subject.
+  const allNodes = await getAllNodes();
+  const relatedNodes = (allNodes || []).filter((node) => {
+    if (!node) return false;
+    if (node.type === "subject" || node?.meta?.kind === "subject") {
+      return String(node.subject || node.title || "").trim() === subject;
+    }
+    return node.subject === subject;
+  });
+
+  for (const node of relatedNodes) {
+    if (!node?.id) continue;
+    await deleteNode(node.id);
+    if (window.currentUser) {
+      try { await deleteCloudNode(node.id); } catch (error) { console.log("Cloud delete skipped", error); }
+    }
+  }
+
+  // Delete quotes (and their cues) for the subject.
+  const subjectQuotes = await getQuotesForSubject(subject);
+  for (const quote of subjectQuotes || []) {
+    if (!quote?.id) continue;
+    await removeQuoteEverywhere(quote.id);
+  }
+
+  // Safety: if any cues remain for the subject, delete them.
+  const subjectCues = await getCuesForSubject(subject);
+  for (const cue of subjectCues || []) {
+    if (!cue?.id) continue;
+    await removeCueEverywhere(cue.id);
   }
 }
 
