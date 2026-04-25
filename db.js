@@ -1,5 +1,5 @@
 const DB_NAME = "neuronet";
-const DB_VERSION = 7; // Memory scheduling indexes (nextReview)
+const DB_VERSION = 8; // Added tags store
 
 let db;
 
@@ -71,6 +71,11 @@ export function initDB() {
         cueStore.createIndex("subject", "subject", { unique: false });
         cueStore.createIndex("quoteId", "quoteId", { unique: false });
         cueStore.createIndex("analysisId", "analysisId", { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains("tags")) {
+        const tagStore = db.createObjectStore("tags", { keyPath: "id" });
+        tagStore.createIndex("title", "title", { unique: true });
       }
     };
 
@@ -981,4 +986,67 @@ export async function renameSubject(oldName, newName) {
   }
 
   return newName;
+}
+
+// ========== TAGS ==========
+
+function tagStoreExists() {
+  return db && db.objectStoreNames.contains("tags");
+}
+
+export function addTag(tag) {
+  return new Promise((resolve, reject) => {
+    if (!db || !tagStoreExists()) {
+      reject(new Error("Tags store not available"));
+      return;
+    }
+
+    const record = {
+      ...tag,
+      id: tag.id || `tag-${tag.title.toLowerCase().replace(/\s+/g, "-")}`,
+      type: "tag",
+      createdAt: tag.createdAt || Date.now(),
+      updatedAt: tag.updatedAt || Date.now()
+    };
+
+    const tx = db.transaction("tags", "readwrite");
+    const store = tx.objectStore("tags");
+    const req = store.put(record);
+
+    tx.oncomplete = () => {
+      emitDBChange({ type: "upsert-tag", ids: [record.id] });
+      resolve(record);
+    };
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export function getAllTags() {
+  return new Promise((resolve, reject) => {
+    if (!db || !tagStoreExists()) {
+      resolve([]);
+      return;
+    }
+    const tx = db.transaction("tags", "readonly");
+    const req = tx.objectStore("tags").getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export function deleteTag(id) {
+  return new Promise((resolve, reject) => {
+    if (!db || !tagStoreExists()) {
+      reject(new Error("Tags store not available"));
+      return;
+    }
+    const tx = db.transaction("tags", "readwrite");
+    const store = tx.objectStore("tags");
+    store.delete(id);
+    tx.oncomplete = () => {
+      emitDBChange({ type: "delete-tag", ids: [id] });
+      resolve();
+    };
+    tx.onerror = () => reject(tx.error);
+  });
 }

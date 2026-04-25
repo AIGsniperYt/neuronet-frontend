@@ -1,4 +1,4 @@
-import { initDB, addNode, addNodes, getAllNodes, getNode, deleteNode, addQuote, addQuotes, getAllQuotes, getQuote, deleteQuote, clearNodes, clearQuotes, clearCues, addCues, getQuotesForSubject, getAnalysisNodesForSubject, getDueQuotesForSubject, getDueAnalysisNodesForSubject, getQuotesReferencedByAnalysis, getAnalysesReferencingQuote, getPinnedTools, pinTool, unpinTool, isToolPinned, setPinnedToolsOrder, getSubjects, addSubject, deleteSubject, renameSubject, addCue, getAllCues, getCue, deleteCue, getCuesForQuote, getCuesForAnalysis, getCuesForSubject, updateCueLinks } from "./db.js";
+import { initDB, addNode, addNodes, getAllNodes, getNode, deleteNode, addQuote, addQuotes, getAllQuotes, getQuote, deleteQuote, clearNodes, clearQuotes, clearCues, addCues, getQuotesForSubject, getAnalysisNodesForSubject, getDueQuotesForSubject, getDueAnalysisNodesForSubject, getQuotesReferencedByAnalysis, getAnalysesReferencingQuote, getPinnedTools, pinTool, unpinTool, isToolPinned, setPinnedToolsOrder, getSubjects, addSubject, deleteSubject, renameSubject, addCue, getAllCues, getCue, deleteCue, getCuesForQuote, getCuesForAnalysis, getCuesForSubject, updateCueLinks, getAllTags, addTag, deleteTag } from "./db.js";
 import { syncLocalWithCloud, syncToCloud, deleteCloudNode, deleteCloudQuote, deleteCloudCue, fetchCloudNodes, fetchCloudQuotes, fetchCloudCues } from "./sync.js";
 import { initAnalysisToolV2 } from "./tools/analysisTool.js";
 import { initMemoryTool } from "./tools/memoryTool.js";
@@ -74,12 +74,19 @@ const tools = {
     init: (context) => initMindmapTool({
       getAllNodes,
       getAllQuotes,
+      getAllCues,
       addNode,
       addQuote,
+      addCue,
       deleteNode,
       deleteQuote,
+      deleteCue,
       removeNodeEverywhere,
       removeQuoteEverywhere,
+      removeCueEverywhere,
+      getAllTags,
+      addTag,
+      deleteTag,
       escapeHtml
     }, context)
   },
@@ -675,6 +682,19 @@ function returnToGlobalLaunchpad() {
     window.__neuronetOnReturnToGlobal();
   }
   showLaunchpad();
+
+  // Make the transition back to home prominent on the neural background
+  if (window.__neuronetCanvas) {
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+    // High-strength pulse for prominence
+    window.__neuronetCanvas.triggerRadialPulse(cx, cy, 2.2);
+    // Burst of energy for "alien intelligent" feel
+    setTimeout(() => {
+      window.__neuronetCanvas.triggerRandomNodes(15, 0.9);
+      window.__neuronetCanvas.triggerVerticalWave(0.5);
+    }, 50);
+  }
 }
 
 // Wire up back button handler

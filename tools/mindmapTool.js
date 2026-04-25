@@ -2,12 +2,19 @@ export async function initMindmapTool(deps, context = {}) {
   const {
     getAllNodes,
     getAllQuotes,
+    getAllCues,
+    getAllTags,
     addNode,
     addQuote,
+    addCue,
+    addTag,
     deleteNode,
     deleteQuote,
+    deleteCue,
+    deleteTag,
     removeNodeEverywhere,
     removeQuoteEverywhere,
+    removeCueEverywhere,
     escapeHtml
   } = deps;
 
@@ -33,7 +40,9 @@ const state = {
     sidebarView: "content",
     layerNodes: [],
     userInteracted: false,
-    hasDragged: false
+    hasDragged: false,
+    isConnecting: false,
+    connectingSourceId: null
   };
 
   const physicsConfig = {
@@ -83,7 +92,9 @@ const state = {
       "layer 3": "#7e57c2",
       source: "#4da6ff",
       quote: "#ff9b39",
-      analysis: "#2cffb3"
+      analysis: "#2cffb3",
+      cue: "#ff79c6",
+      tag: "#f1fa8c"
     }
   };
 
@@ -180,6 +191,8 @@ const state = {
       case "source": return "📄";
       case "quote": return "💬";
       case "analysis": return "💡";
+      case "cue": return "🎯";
+      case "tag": return "🏷️";
       default: return "●";
     }
   }
@@ -199,13 +212,21 @@ const state = {
       return name ? `Layer: ${name}` : (path.length ? path.join(" > ") : "Layer");
     }
     if (node.type === "analysis") {
-      return node.title || node.analysis?.substring(0, 40) + (node.analysis?.length > 40 ? "..." : "") || "Untitled Analysis";
+      const text = node.analysis || "";
+      return node.title || text.substring(0, 40) + (text.length > 40 ? "..." : "") || "Untitled Analysis";
     }
     if (node.type === "source") {
       return node.title || node.subject || "Untitled Source";
     }
+    if (node.type === "cue") {
+      const content = node.cue || "";
+      return content.substring(0, 40) + (content.length > 40 ? "..." : "") || "Untitled Cue";
+    }
     if (node.type === "subject") {
       return node.title || node.subject || "Untitled Subject";
+    }
+    if (node.type === "tag") {
+      return `#${node.title || "Untitled Tag"}`;
     }
     return node.subject || node.title || "Unknown";
   }
@@ -215,6 +236,7 @@ const state = {
     if (node.type === "analysis") return node.analysis || "";
     if (node.type?.startsWith("layer")) return (node?.meta?.layerPath || []).join(" > ") || "";
     if (node.type === "source") return node.content?.substring(0, maxLength) || node.contentText?.substring(0, maxLength) || "";
+    if (node.type === "cue") return node.cue || "";
     return "";
   }
 
@@ -223,6 +245,7 @@ const state = {
     if (node.type === "analysis") return node.analysis || "";
     if (node.type?.startsWith("layer")) return (node?.meta?.layerPath || []).join(" > ") || "";
     if (node.type === "source") return node.content || node.contentText || "";
+    if (node.type === "cue") return node.cue || "";
     return "";
   }
 
@@ -331,6 +354,130 @@ const state = {
 
     if (fullContent) fullContent.textContent = getNodeFullContent(selectedItem);
     if (metaContent) metaContent.textContent = formatMetadataHumanReadable(selectedItem);
+
+    // Render Connections
+    const connectionsItems = document.getElementById("connectionsItems");
+    const connectionCount = document.getElementById("connectionCount");
+    const graphNode = state.graph.nodes.get(selectedItem.id);
+    
+    if (connectionsItems && connectionCount && graphNode) {
+      const neighbors = Array.from(graphNode.connections);
+      connectionCount.textContent = neighbors.length;
+      connectionsItems.innerHTML = "";
+
+      neighbors.forEach(neighborId => {
+        const neighbor = findItemById(neighborId);
+        if (!neighbor) return;
+
+        const itemEl = document.createElement("div");
+        itemEl.className = "connection-item";
+        itemEl.innerHTML = `
+          <div class="connection-info">
+            <span>${getNodeTypeIcon(neighbor.type)}</span>
+            <span class="connection-name">${getNodeDisplayTitle(neighbor)}</span>
+          </div>
+          <button class="btn-break" title="Break Connection" data-target-id="${neighborId}">&times;</button>
+        `;
+        
+        itemEl.querySelector(".btn-break").addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (confirm(`Break connection to "${getNodeDisplayTitle(neighbor)}"?`)) {
+            breakLink(selectedItem.id, neighborId);
+          }
+        });
+
+        itemEl.addEventListener("click", () => {
+          selectNode(neighborId);
+        });
+
+        connectionsItems.appendChild(itemEl);
+      });
+    }
+
+    // Render Tags
+    renderSidebarTags(selectedItem);
+
+    nodeSidebar.classList.add("open");
+  }
+
+  function renderSidebarTags(item) {
+    const sidebarContent = document.querySelector(".sidebar-content");
+    let tagsContainer = document.getElementById("sidebarTagsContainer");
+    
+    if (!tagsContainer) {
+      tagsContainer = document.createElement("div");
+      tagsContainer.id = "sidebarTagsContainer";
+      tagsContainer.className = "tags-section";
+      sidebarContent.appendChild(tagsContainer);
+    }
+
+    const tags = item.meta?.tags || [];
+    tagsContainer.innerHTML = `
+      <div class="tags-header">Tags</div>
+      <div class="tags-list">
+        ${tags.map(tag => `
+          <div class="tag-pill">
+            <span>${tag}</span>
+            <button class="tag-remove" data-tag="${tag}">&times;</button>
+          </div>
+        `).join("")}
+        <button id="addTagBtn" class="tag-add-pill">+ Add Tag</button>
+      </div>
+    `;
+
+    tagsContainer.querySelectorAll(".tag-remove").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        removeTagFromNode(item, btn.dataset.tag);
+      });
+    });
+
+    const addBtn = document.getElementById("addTagBtn");
+    if (addBtn) {
+      addBtn.addEventListener("click", () => {
+        const tagName = window.prompt("Enter tag name:");
+        if (tagName) {
+          addTagToNode(item, tagName);
+        }
+      });
+    }
+  }
+
+  async function addTagToNode(item, tagName) {
+    if (!item.meta) item.meta = {};
+    if (!item.meta.tags) item.meta.tags = [];
+    
+    const normalized = tagName.trim();
+    if (!normalized) return;
+
+    // Ensure tag exists in DB
+    const existingTags = state.tags || [];
+    let tag = existingTags.find(t => t.title.toLowerCase() === normalized.toLowerCase());
+    if (!tag) {
+      tag = await addTag({ title: normalized });
+    }
+    
+    if (!item.meta.tags.includes(tag.title)) {
+      item.meta.tags.push(tag.title);
+      await saveItem(item);
+      await refreshData();
+      if (state.selectedNodeId === item.id) renderSidebar(item);
+    }
+  }
+
+  async function removeTagFromNode(item, tagName) {
+    if (item.meta && item.meta.tags) {
+      item.meta.tags = item.meta.tags.filter(t => t !== tagName);
+      await saveItem(item);
+      await refreshData();
+      if (state.selectedNodeId === item.id) renderSidebar(item);
+    }
+  }
+
+  async function saveItem(item) {
+    if (item.type === "quote") await addQuote(item);
+    else if (item.type === "cue") await addCue(item);
+    else await addNode(item);
   }
 
   function buildGraph() {
@@ -341,6 +488,7 @@ const state = {
     const sources = items.filter(n => n.type === "source");
     const quotes = items.filter(n => n.type === "quote");
     const analyses = items.filter(n => n.type === "analysis");
+    const cues = items.filter(n => n.type === "cue");
 
     items.forEach(item => {
       graph.nodes.set(item.id, {
@@ -402,6 +550,30 @@ const state = {
         if (ref.quoteId) {
           addEdge(ref.quoteId, analysis.id, "quote-analysis", 2);
         }
+      });
+    });
+
+    cues.forEach(cue => {
+      if (cue.quoteId) addEdge(cue.quoteId, cue.id, "quote-cue", 2);
+      if (cue.analysisId) addEdge(cue.analysisId, cue.id, "analysis-cue", 2);
+    });
+
+    // Tag links
+    items.forEach(item => {
+      const itemTags = item.meta?.tags || [];
+      itemTags.forEach(tagName => {
+        const tag = (state.tags || []).find(t => t.title.toLowerCase() === tagName.toLowerCase());
+        if (tag) {
+          addEdge(item.id, tag.id, "tag-link", 1.2);
+        }
+      });
+    });
+
+    // Manual links (bidirectional no-limit connections)
+    items.forEach(item => {
+      const manualLinks = item.meta?.manualLinks || [];
+      manualLinks.forEach(targetId => {
+        addEdge(item.id, targetId, "manual-link", 1.5);
       });
     });
 
@@ -753,7 +925,13 @@ const state = {
       }
       return 6;
     }
-    return 7;
+    if (rawNode.type === "cue") {
+      if (rawNode.quoteId) return 6;
+      if (rawNode.analysisId) return 7;
+      return 5;
+    }
+    if (rawNode.type === "tag") return 4;
+    return 8;
   }
 
   function layoutRadial(containerWidth, containerHeight) {
@@ -781,7 +959,13 @@ const state = {
   }
 
   function getAllItems() {
-    return [...state.nodes, ...state.quotes, ...(state.layerNodes || [])];
+    return [
+      ...(state.nodes || []),
+      ...(state.quotes || []),
+      ...(state.cues || []),
+      ...(state.tags || []),
+      ...(state.layerNodes || [])
+    ];
   }
 
   function findItemById(id) {
@@ -1009,6 +1193,8 @@ const state = {
         }
       } else if (selectedItem.type === "quote") {
         await removeQuoteEverywhere(selectedItem.id);
+      } else if (selectedItem.type === "cue") {
+        await removeCueEverywhere(selectedItem.id);
       } else {
         await removeNodeEverywhere(selectedItem.id);
       }
@@ -1027,16 +1213,30 @@ const state = {
     const totalSources = document.getElementById("totalSources");
     const totalQuotes = document.getElementById("totalQuotes");
     const totalAnalyses = document.getElementById("totalAnalyses");
+    const totalCues = document.getElementById("totalCues");
+    const totalTags = document.getElementById("totalTags");
     const totalConnections = document.getElementById("totalConnections");
 
     const nodeItems = state.nodes || [];
     const quoteItems = state.quotes || [];
+    const cueItems = state.cues || [];
+    const tagItems = state.tags || [];
 
-    if (totalNodes) totalNodes.textContent = nodeItems.length + quoteItems.length;
+    if (totalNodes) totalNodes.textContent = nodeItems.length + quoteItems.length + cueItems.length + tagItems.length;
     if (totalSubjects) totalSubjects.textContent = nodeItems.filter(i => i.type === "subject").length;
     if (totalSources) totalSources.textContent = nodeItems.filter(i => i.type === "source").length;
     if (totalQuotes) totalQuotes.textContent = quoteItems.length;
     if (totalAnalyses) totalAnalyses.textContent = nodeItems.filter(i => i.type === "analysis").length;
+    if (totalCues) {
+      const cueCount = cueItems.length;
+      totalCues.textContent = cueCount;
+      totalCues.parentElement.style.display = cueCount > 0 ? "flex" : "none";
+    }
+    if (totalTags) {
+      const tagCount = tagItems.length;
+      totalTags.textContent = tagCount;
+      totalTags.parentElement.style.display = tagCount > 0 ? "flex" : "none";
+    }
 
     buildGraph();
     const connections = state.graph.edges;
@@ -1044,9 +1244,11 @@ const state = {
   }
 
   async function refreshData() {
-    const [nodes, quotes] = await Promise.all([getAllNodes(), getAllQuotes()]);
+    const [nodes, quotes, cues, tags] = await Promise.all([getAllNodes(), getAllQuotes(), getAllCues(), getAllTags()]);
     state.nodes = nodes;
     state.quotes = quotes;
+    state.cues = cues;
+    state.tags = tags;
     state.layerNodes = computeLayerNodesFromSources(nodes);
 
     buildGraph();
@@ -1060,6 +1262,161 @@ const state = {
     }
 
     layoutRadial(canvas?.parentElement?.clientWidth || 800, canvas?.parentElement?.clientHeight || 600);
+  }
+
+  async function createNewNode(type) {
+    const subject = contextSubject || window.prompt("Enter subject for the new node:") || "General";
+    const now = Date.now();
+    
+    try {
+      if (type === "analysis") {
+        const title = window.prompt("Enter analysis title:");
+        if (title === null) return;
+        const analysis = window.prompt("Enter analysis content:");
+        if (analysis === null) return;
+        
+        await addNode({
+          type: "analysis",
+          subject,
+          title,
+          analysis,
+          createdAt: now,
+          updatedAt: now,
+          quoteRefs: [],
+          meta: {}
+        });
+      } else if (type === "quote") {
+        const quote = window.prompt("Enter quote text:");
+        if (quote === null) return;
+        
+        await addQuote({
+          type: "quote",
+          subject,
+          quote,
+          createdAt: now,
+          updatedAt: now,
+          link: { sourceId: null },
+          meta: {}
+        });
+      } else if (type === "cue") {
+        const cue = window.prompt("Enter cue text:");
+        if (cue === null) return;
+        
+        await addCue({
+          type: "cue",
+          subject,
+          cue,
+          createdAt: now,
+          updatedAt: now,
+          meta: {}
+        });
+      }
+      
+      await refreshData();
+      if (window.__neuronetCanvas) {
+        window.__neuronetCanvas.triggerVerticalWave(0.8);
+      }
+    } catch (error) {
+      console.error("Failed to create node:", error);
+      alert("Error: " + error.message);
+    }
+  }
+
+  async function linkNodes(id1, id2) {
+    if (id1 === id2) return;
+    
+    const item1 = findItemById(id1);
+    const item2 = findItemById(id2);
+    if (!item1 || !item2) return;
+
+    // Special logic for existing link structures
+    if (item1.type === "analysis" && item2.type === "quote") {
+      if (!item1.quoteRefs) item1.quoteRefs = [];
+      if (!item1.quoteRefs.find(r => r.quoteId === item2.id)) {
+        item1.quoteRefs.push({ quoteId: item2.id, quote: item2.quote });
+        await addNode(item1);
+      }
+      return;
+    }
+    
+    if (item1.type === "quote" && item2.type === "analysis") {
+      return linkNodes(id2, id1);
+    }
+
+    if (item1.type === "cue") {
+      if (item2.type === "quote") {
+        item1.quoteId = item2.id;
+        await addCue(item1);
+        return;
+      } else if (item2.type === "analysis") {
+        item1.analysisId = item2.id;
+        await addCue(item1);
+        return;
+      }
+    }
+    
+    if (item2.type === "cue") {
+      return linkNodes(id2, id1);
+    }
+
+    // Generic bidirectional manual link
+    const updateManualLink = async (item, targetId) => {
+      if (!item.meta) item.meta = {};
+      if (!item.meta.manualLinks) item.meta.manualLinks = [];
+      if (!item.meta.manualLinks.includes(targetId)) {
+        item.meta.manualLinks.push(targetId);
+        if (item.type === "quote") await addQuote(item);
+        else if (item.type === "cue") await addCue(item);
+        else await addNode(item);
+      }
+    };
+
+    await updateManualLink(item1, id2);
+    await updateManualLink(item2, id1);
+  }
+
+  async function breakLink(id1, id2) {
+    const item1 = findItemById(id1);
+    const item2 = findItemById(id2);
+    if (!item1 || !item2) return;
+
+    const removeFromMeta = async (item, targetId) => {
+      if (item.meta && item.meta.manualLinks) {
+        item.meta.manualLinks = item.meta.manualLinks.filter(id => id !== targetId);
+        if (item.type === "quote") await addQuote(item);
+        else if (item.type === "cue") await addCue(item);
+        else await addNode(item);
+      }
+    };
+
+    // Remove from manual links
+    await removeFromMeta(item1, id2);
+    await removeFromMeta(item2, id1);
+
+    // Specific structural breaks
+    if (item1.type === "analysis" && item2.type === "quote") {
+      if (item1.quoteRefs) {
+        item1.quoteRefs = item1.quoteRefs.filter(r => r.quoteId !== id2);
+        await addNode(item1);
+      }
+    } else if (item1.type === "quote" && item2.type === "analysis") {
+      await breakLink(id2, id1);
+    }
+
+    if (item1.type === "cue") {
+      if (item1.quoteId === id2) {
+        item1.quoteId = null;
+        await addCue(item1);
+      } else if (item1.analysisId === id2) {
+        item1.analysisId = null;
+        await addCue(item1);
+      }
+    } else if (item2.type === "cue") {
+      await breakLink(id2, id1);
+    }
+
+    await refreshData();
+    if (state.selectedNodeId === id1) renderSidebar(item1);
   }
 
   function setupEventListeners() {
@@ -1078,6 +1435,10 @@ const state = {
         const node = findNodeAtPosition(pos.x, pos.y);
         if (node) {
           openNodeSidebar(node.id);
+          // Trigger reactive pulse at screen coordinates
+          if (window.__neuronetCanvas) {
+            window.__neuronetCanvas.triggerRadialPulse(e.clientX, e.clientY, 1.2);
+          }
         } else {
           closeSidebar();
         }
@@ -1214,18 +1575,108 @@ const state = {
             closeSidebar();
             window.dispatchEvent(new CustomEvent("neuronet-open-tool", {
               detail: (() => {
-                if (selectedItem.type === "subject") {
-                  const subject = String(selectedItem.subject || selectedItem.title || "").trim();
-                  return subject ? { tool: "analysis", subject } : { tool: "analysis", nodeId: selectedItem.id };
-                }
-                if (selectedItem.type?.startsWith("layer")) {
-                  const subject = String(selectedItem.subject || "").trim();
-                  return subject ? { tool: "analysis", subject } : { tool: "analysis", nodeId: selectedItem.id };
-                }
-                return { tool: "analysis", nodeId: selectedItem.id };
+                const subject = String(selectedItem.subject || selectedItem.title || "").trim();
+                return { 
+                  tool: "analysis", 
+                  subject: subject || contextSubject,
+                  nodeId: selectedItem.id 
+                };
               })()
             }));
           }
+        }
+      });
+    }
+
+    // New Node Dropdown
+    const newNodeDropdown = document.getElementById("newNodeDropdown");
+    const dropdownToggle = newNodeDropdown?.querySelector(".dropdown-toggle");
+    const dropdownBtns = newNodeDropdown?.querySelectorAll(".dropdown-content button");
+
+    if (dropdownToggle) {
+      dropdownToggle.addEventListener("click", (e) => {
+        e.stopPropagation();
+        newNodeDropdown.classList.toggle("open");
+      });
+    }
+
+    dropdownBtns?.forEach(btn => {
+      btn.addEventListener("click", () => {
+        const type = btn.dataset.type;
+        createNewNode(type);
+        newNodeDropdown.classList.remove("open");
+      });
+    });
+
+    document.addEventListener("click", () => {
+      newNodeDropdown?.classList.remove("open");
+    });
+
+    // Connection Mode
+    const connectNodesBtn = document.getElementById("connectNodesBtn");
+    const connectingOverlay = document.getElementById("connectingOverlay");
+
+    if (connectNodesBtn) {
+      connectNodesBtn.addEventListener("click", () => {
+        state.isConnecting = !state.isConnecting;
+        state.connectingSourceId = null;
+        
+        connectNodesBtn.classList.toggle("active", state.isConnecting);
+        if (!state.isConnecting) {
+          connectingOverlay?.classList.remove("visible");
+        }
+      });
+    }
+
+    // Handle connection clicks
+    if (canvas) {
+      canvas.addEventListener("click", async (e) => {
+        if (!state.isConnecting || state.hasDragged) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const pos = {
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top
+        };
+        const node = findNodeAtPosition(pos.x, pos.y);
+        
+        if (node) {
+          if (!state.connectingSourceId) {
+            state.connectingSourceId = node.id;
+            if (connectingOverlay) {
+              connectingOverlay.textContent = `Connecting from: ${getNodeDisplayTitle(node)}... Select target.`;
+              connectingOverlay.classList.add("visible");
+            }
+          } else {
+            const sourceId = state.connectingSourceId;
+            const targetId = node.id;
+            
+            if (sourceId !== targetId) {
+              await linkNodes(sourceId, targetId);
+              await refreshData();
+              if (window.__neuronetCanvas) {
+                window.__neuronetCanvas.triggerRadialPulse(e.clientX, e.clientY, 1.0);
+              }
+            }
+            
+            state.connectingSourceId = null;
+            state.isConnecting = false;
+            connectNodesBtn?.classList.remove("active");
+            connectingOverlay?.classList.remove("visible");
+          }
+        }
+      });
+    }
+
+    // Connections Toggle
+    const connectionsHeader = document.getElementById("connectionsHeader");
+    const connectionsContainer = document.getElementById("connectionsContainer");
+    if (connectionsHeader && connectionsContainer) {
+      connectionsHeader.addEventListener("click", () => {
+        connectionsContainer.classList.toggle("collapsed");
+        const toggle = document.getElementById("connectionsToggle");
+        if (toggle) {
+          toggle.textContent = connectionsContainer.classList.contains("collapsed") ? "▶" : "▼";
         }
       });
     }
@@ -1233,6 +1684,10 @@ const state = {
 
   function handleDBChange() {
     refreshData();
+    // Trigger reactive sweep on data change
+    if (window.__neuronetCanvas) {
+      window.__neuronetCanvas.triggerVerticalWave(0.8);
+    }
   }
 
   function handleResize() {

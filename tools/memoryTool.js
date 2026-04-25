@@ -377,6 +377,8 @@ export async function initMemoryTool(deps, context = {}) {
 
     renderUI();
     state.session.lastGradeReaction = grade;
+    // Always trigger reactive thought/impulse on grade
+    updateSystemThought(grade);
     await navigateNext();
   }
 
@@ -440,9 +442,7 @@ export async function initMemoryTool(deps, context = {}) {
   async function navigateTo(index) {
     if (index === state.currentIndex || index < 0 || index >= state.flashcards.length) return;
     
-    if (memoryStats && memoryStats.classList.contains("open")) {
-      updateSystemThought();
-    }
+    updateSystemThought();
     
     const direction = index > state.currentIndex ? "forward" : "back";
     
@@ -794,9 +794,7 @@ async function loadLaunchpad() {
     state.showAnalysis = false;
     state.session.shownAt = Date.now();
     state.session.revealedAt = null;
-    if (memoryStats && memoryStats.classList.contains("open")) {
-      updateSystemThought();
-    }
+    updateSystemThought();
   }
 
   async function buildQuoteLearningQueue() {
@@ -1717,6 +1715,41 @@ async function loadLaunchpad() {
   function updateSystemThought(lastGrade = null) {
     const thought = generateSystemThought(lastGrade);
     typewriteThought(thought);
+
+    // Trigger reactive background canvas impulses
+    if (window.__neuronetCanvas) {
+      // Update background "buzz" based on streak - brain on fire!
+      const baseBuzz = 0.004;
+      const streakIntensity = (state.stats.streak || 0) * 0.0015;
+      window.__neuronetCanvas.setBuzz(Math.min(baseBuzz + streakIntensity, 0.04));
+
+      if (lastGrade === "easy") {
+        const streakBonus = Math.min((state.stats.streak || 0) * 0.2, 2.0);
+        const cx = window.innerWidth / 2;
+        const cy = window.innerHeight / 2;
+        
+        // Choose ONE prominent impulse type appropriately
+        if (state.stats.streak > 0 && state.stats.streak % 5 === 0) {
+          // Milestone reward
+          window.__neuronetCanvas.triggerVerticalWave(1.8 + streakBonus);
+        } else if (Math.random() > 0.5) {
+          window.__neuronetCanvas.triggerRadialPulse(cx, cy, 2.2 + streakBonus);
+        } else {
+          window.__neuronetCanvas.triggerSweep(1.4 + streakBonus);
+        }
+      } else if (lastGrade === "didnt_know") {
+        // Failed recall - "confused" random node firings
+        window.__neuronetCanvas.triggerRandomNodes(15, 0.7);
+        // Reset buzz on mistake
+        window.__neuronetCanvas.setBuzz(baseBuzz);
+      } else if (lastGrade === "kinda") {
+        // In-between - radial pulse from center
+        window.__neuronetCanvas.triggerRadialPulse(window.innerWidth / 2, window.innerHeight / 2, 1.3);
+      } else if (lastGrade === null) {
+        // General observation / new card - subtle random nodes
+        window.__neuronetCanvas.triggerRandomNodes(3, 0.4);
+      }
+    }
   }
 
   window.__neuronetMemoryCleanup = () => {

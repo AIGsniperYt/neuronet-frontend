@@ -1,7 +1,7 @@
 let canvas, ctx;
 let nodes = [];
 
-const nodeCount = 95;
+const nodeCount = 100;
 const maxDist = 150;
 const separationStrength = 0.02;
 const edgeRepulsionStrength = 0.01;
@@ -64,12 +64,16 @@ class Node {
     this.vx += moveX + (Math.random() - 0.5) * randomDrift;
     this.vy += moveY + (Math.random() - 0.5) * randomDrift;
 
-    const maxSpeed = 0.6;
+    const maxSpeed = 2.2;
     let speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
     if (speed > maxSpeed) {
       this.vx = (this.vx / speed) * maxSpeed;
       this.vy = (this.vy / speed) * maxSpeed;
     }
+
+    // Apply damping so ripples dissipate
+    this.vx *= 0.94;
+    this.vy *= 0.94;
 
     this.x += this.vx;
     this.y += this.vy;
@@ -86,8 +90,8 @@ class Node {
     const e = this.energy;
 
     ctx.beginPath();
-    ctx.arc(this.x, this.y, this.radius * (1 + e * 2), 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(180, 255, 230, ${0.3 + e * 0.5})`;
+    ctx.arc(this.x, this.y, this.radius * (1 + e * 1.8), 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(160, 255, 220, ${0.3 + e * 0.35})`;
     ctx.fill();
   }
 }
@@ -148,11 +152,12 @@ function connect() {
 
     for (let { node: b, dist } of neighbors) {
       a.neighbors.push(b);
+      const energy = (a.energy + b.energy) / 2;
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
-      ctx.strokeStyle = `rgba(120, 220, 180, ${0.5 * (1 - dist / maxDist)})`;
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = `rgba(140, 230, 200, ${0.1 + energy * 0.4})`;
+      ctx.lineWidth = 0.8 + energy * 1.5;
       ctx.stroke();
     }
   }
@@ -211,11 +216,11 @@ function drawField() {
 
     let radius;
     if (w.type === "sweep") {
-      radius = w.age * 3;
+      radius = w.age * 18.0;
     } else if (w.type === "vertical") {
-      radius = w.age * 3;
+      radius = w.age * 18.0;
     } else {
-      radius = w.age * 2.2;
+      radius = w.age * 3.8;
     }
 
     nodes.forEach((n) => {
@@ -231,11 +236,31 @@ function drawField() {
       }
 
       const band = Math.abs(dist - radius);
+      const isLinear = w.type === "sweep" || w.type === "vertical";
+      const bandLimit = isLinear ? 8 : 12;
 
-      if (band < 8) {
-        const intensity = (1 - band / 8) * w.strength * Math.exp(-w.age * 0.01);
+      if (band < bandLimit) {
+        // Linear waves are softer and less distracting
+        const decayRate = isLinear ? 0.003 : 0.01;
+        let intensity = (1 - band / bandLimit) * w.strength * Math.exp(-w.age * decayRate);
+        
+        if (isLinear) intensity *= 0.45; // Soften the global passes
 
         n.energy = Math.max(n.energy, intensity);
+
+        const neuralRippleForce = intensity * 1.1;
+        if (w.type === "sweep") {
+          n.vx += (n.x > w.x ? 1 : -1) * neuralRippleForce;
+        } else if (w.type === "vertical") {
+          n.vy += (n.y > w.y ? 1 : -1) * neuralRippleForce;
+        } else {
+          // Use existing dx/dy if possible, or recalculate
+          const rdx = n.x - w.x;
+          const rdy = n.y - w.y;
+          const rdist = Math.hypot(rdx, rdy) || 1;
+          n.vx += (rdx / rdist) * neuralRippleForce;
+          n.vy += (rdy / rdist) * neuralRippleForce;
+        }
 
         n.neighbors.forEach((m) => {
           const ax = n.x;
@@ -253,13 +278,13 @@ function drawField() {
             ctx.moveTo(ax, ay);
             ctx.lineTo(bx, by);
 
-            ctx.strokeStyle = `rgba(200, 255, 240, ${intensity * 0.4})`;
+            ctx.strokeStyle = `rgba(180, 255, 230, ${intensity * 0.35})`;
             ctx.lineWidth = 1.8;
             ctx.stroke();
 
             ctx.beginPath();
             ctx.arc(x, y, 2.5, 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(240, 255, 250, ${intensity})`;
+            ctx.fillStyle = `rgba(160, 255, 220, ${Math.min(0.8, intensity * 0.8)})`;
             ctx.fill();
           }
         });
@@ -267,12 +292,16 @@ function drawField() {
     });
   }
 
-  waves = waves.filter((w) => w.age < 220);
+  waves = waves.filter((w) => {
+    const maxAge = (w.type === "sweep" || w.type === "vertical") ? 500 : 220;
+    return w.age < maxAge;
+  });
 }
 
 // ========== PATTERNS ==========
 
 function triggerRadialPulse(originX, originY, strength = 1) {
+  console.log(`[Canvas] Radial Pulse at (${originX}, ${originY}) strength: ${strength}`);
   waves.push({
     x: originX,
     y: originY,
@@ -282,9 +311,10 @@ function triggerRadialPulse(originX, originY, strength = 1) {
 }
 
 function triggerSweep(strength = 1) {
+  console.log(`[Canvas] Horizontal Sweep strength: ${strength}`);
   waves.push({
-    x: -50,
-    y: canvas.height / 2,
+    x: 0,
+    y: 0,
     age: 0,
     strength: strength,
     type: "sweep",
@@ -317,6 +347,8 @@ function triggerRandomNodes(count = 5, strength = 1) {
 
 // ========== ANIMATION ==========
 
+let buzzFactor = 0.004;
+
 function animate() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -328,7 +360,8 @@ function animate() {
   connect();
   drawField();
 
-  if (Math.random() < 0.004) {
+  // Spontaneous activity increases with buzzFactor
+  if (Math.random() < buzzFactor) {
     spawnWave(nodes[Math.random() * nodes.length | 0]);
   }
 
@@ -355,7 +388,12 @@ function initCanvas() {
   window.addEventListener("resize", resize);
   resize();
 
-  setTimeout(() => triggerRadialPulse(canvas.width / 2, canvas.height / 2), 500);
+  setTimeout(() => {
+    if (window.__neuronetCanvas) {
+      window.__neuronetCanvas.triggerRadialPulse(canvas.width / 2, canvas.height / 2, 2.5);
+      window.__neuronetCanvas.triggerRandomNodes(10, 0.6);
+    }
+  }, 500);
 
   animate();
 }
@@ -367,6 +405,7 @@ window.__neuronetCanvas = {
   triggerSweep,
   triggerVerticalWave,
   triggerRandomNodes,
+  setBuzz: (factor) => { buzzFactor = factor; },
   getCanvas: () => canvas,
   getCtx: () => ctx,
   getNodes: () => nodes,

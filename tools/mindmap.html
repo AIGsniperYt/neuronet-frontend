@@ -62,7 +62,6 @@
   }
 
   .stat-pill strong {
-    color: var(--accent);
     font-size: 1rem;
     line-height: 1;
   }
@@ -71,6 +70,28 @@
     color: var(--text-muted);
     font-size: 0.75rem;
   }
+
+  /* Color-coded stat pills */
+  .stat-pill.stat-subjects strong { color: #ff6b6b; }
+  .stat-pill.stat-subjects { border-color: rgba(255, 107, 107, 0.2); }
+
+  .stat-pill.stat-sources strong { color: #4da6ff; }
+  .stat-pill.stat-sources { border-color: rgba(77, 166, 255, 0.2); }
+
+  .stat-pill.stat-quotes strong { color: #ff9b39; }
+  .stat-pill.stat-quotes { border-color: rgba(255, 155, 57, 0.2); }
+
+  .stat-pill.stat-analyses strong { color: #2cffb3; }
+  .stat-pill.stat-analyses { border-color: rgba(44, 255, 179, 0.2); }
+
+  .stat-pill.stat-cues strong { color: #ff79c6; }
+  .stat-pill.stat-cues { border-color: rgba(255, 121, 198, 0.2); }
+
+  .stat-pill.stat-tags strong { color: #f1fa8c; }
+  .stat-pill.stat-tags { border-color: rgba(241, 250, 140, 0.2); }
+
+  .stat-pill.stat-links strong { color: #b388ff; }
+  .stat-pill.stat-links { border-color: rgba(179, 136, 255, 0.2); }
 
   .blueprint-area {
     position: relative;
@@ -296,34 +317,303 @@
     font-size: 0.9rem;
     max-width: 250px;
   }
+
+  /* Header Actions */
+  .header-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .dropdown {
+    position: relative;
+    display: inline-block;
+  }
+
+  .dropdown-content {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: 100%;
+    background: rgba(10, 30, 22, 0.98);
+    min-width: 160px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    border: 1px solid rgba(44, 255, 179, 0.2);
+    border-radius: 8px;
+    z-index: 100;
+    margin-top: 8px;
+    overflow: hidden;
+  }
+
+  .dropdown-content button {
+    width: 100%;
+    padding: 12px 16px;
+    background: transparent;
+    border: none;
+    color: var(--text-main);
+    text-align: left;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .dropdown-content button:hover {
+    background: rgba(44, 255, 179, 0.1);
+    color: var(--accent);
+  }
+
+  .dropdown.open .dropdown-content {
+    display: block;
+    animation: dropdownFadeIn 0.2s ease-out;
+  }
+
+  @keyframes dropdownFadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .btn-header {
+    padding: 8px 14px;
+    font-size: 0.85rem;
+  }
+
+  .btn.active {
+    background: rgba(44, 255, 179, 0.2);
+    border-color: var(--accent);
+    box-shadow: 0 0 10px rgba(44, 255, 179, 0.2);
+  }
+
+  .connecting-overlay {
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(44, 255, 179, 0.9);
+    color: #0a1e16;
+    padding: 8px 20px;
+    border-radius: 999px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    z-index: 100;
+    pointer-events: none;
+    display: none;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+  }
+
+  .connecting-overlay.visible {
+    display: block;
+    animation: pulseConnecting 2s infinite;
+  }
+
+  @keyframes pulseConnecting {
+    0% { opacity: 0.8; transform: translateX(-50%) scale(1); }
+    50% { opacity: 1; transform: translateX(-50%) scale(1.05); }
+    100% { opacity: 0.8; transform: translateX(-50%) scale(1); }
+  }
+  /* Connections List */
+  .connections-list {
+    margin-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding-top: 12px;
+  }
+
+  .connections-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    font-size: 0.8rem;
+    color: rgba(230, 255, 245, 0.6);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .connections-header:hover {
+    color: var(--accent);
+  }
+
+  .connections-items {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .connection-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    font-size: 0.85rem;
+    transition: all 0.2s ease;
+  }
+
+  .connection-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+
+  .connection-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .connection-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .btn-break {
+    background: transparent;
+    border: none;
+    color: rgba(255, 93, 93, 0.4);
+    cursor: pointer;
+    padding: 2px 6px;
+    font-size: 1.1rem;
+    transition: all 0.2s ease;
+    border-radius: 4px;
+  }
+
+  .btn-break:hover {
+    color: #ff5d5d;
+    background: rgba(255, 93, 93, 0.1);
+  }
+
+  .connections-container.collapsed .connections-items {
+    display: none;
+  }
+
+  /* Tags Section */
+  .tags-section {
+    margin-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding-top: 12px;
+  }
+
+  .tags-header {
+    font-size: 0.8rem;
+    color: rgba(230, 255, 245, 0.6);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .tags-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .tag-pill {
+    background: rgba(241, 250, 140, 0.15);
+    border: 1px solid rgba(241, 250, 140, 0.3);
+    color: #f1fa8c;
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 0.8rem;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.2s ease;
+  }
+
+  .tag-pill:hover {
+    background: rgba(241, 250, 140, 0.25);
+    border-color: rgba(241, 250, 140, 0.5);
+  }
+
+  .tag-remove {
+    background: transparent;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 0;
+    line-height: 1;
+    opacity: 0.6;
+  }
+
+  .tag-remove:hover {
+    opacity: 1;
+  }
+
+  .tag-add-pill {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px dashed rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.6);
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .tag-add-pill:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(44, 255, 179, 0.4);
+    color: var(--accent);
+  }
 </style>
 
 <div class="mindmap-shell">
   <div class="mindmap-header">
     <h2>Mindmap</h2>
     <p>Visualize connections between your knowledge nodes</p>
+    
+    <div class="header-actions">
+      <button id="connectNodesBtn" class="btn btn-header">Connect Nodes</button>
+      <div class="dropdown" id="newNodeDropdown">
+        <button class="btn btn-header primary dropdown-toggle">New Node ▾</button>
+        <div class="dropdown-content">
+          <button data-type="analysis"><span>💡</span> Analysis</button>
+          <button data-type="quote"><span>💬</span> Quote</button>
+          <button data-type="cue"><span>🎯</span> Cue</button>
+        </div>
+      </div>
+    </div>
+
     <div class="stats-bar">
       <div class="stat-pill">
         <strong id="totalNodes">0</strong>
         <span class="stat-label">Total</span>
       </div>
-      <div class="stat-pill">
+      <div class="stat-pill stat-subjects">
         <strong id="totalSubjects">0</strong>
         <span class="stat-label">Subjects</span>
       </div>
-      <div class="stat-pill">
+      <div class="stat-pill stat-sources">
         <strong id="totalSources">0</strong>
         <span class="stat-label">Sources</span>
       </div>
-      <div class="stat-pill">
+      <div class="stat-pill stat-quotes">
         <strong id="totalQuotes">0</strong>
         <span class="stat-label">Quotes</span>
       </div>
-      <div class="stat-pill">
+      <div class="stat-pill stat-analyses">
         <strong id="totalAnalyses">0</strong>
         <span class="stat-label">Analyses</span>
       </div>
-      <div class="stat-pill">
+      <div class="stat-pill stat-cues">
+        <strong id="totalCues">0</strong>
+        <span class="stat-label">Cues</span>
+      </div>
+      <div class="stat-pill stat-tags">
+        <strong id="totalTags">0</strong>
+        <span class="stat-label">Tags</span>
+      </div>
+      <div class="stat-pill stat-links">
         <strong id="totalConnections">0</strong>
         <span class="stat-label">Links</span>
       </div>
@@ -331,6 +621,7 @@
   </div>
 
   <div class="blueprint-area" id="blueprintArea">
+    <div id="connectingOverlay" class="connecting-overlay">Select target node to connect...</div>
     <canvas id="mindmapCanvas"></canvas>
     
     <div id="emptyState" class="empty-state">
@@ -347,6 +638,14 @@
           <div id="sidebarType" class="sidebar-type"></div>
         </div>
         <button id="sidebarClose" class="sidebar-close">&times;</button>
+      </div>
+
+      <div id="connectionsContainer" class="connections-list">
+        <div class="connections-header" id="connectionsHeader">
+          <span>Connections (<span id="connectionCount">0</span>)</span>
+          <span id="connectionsToggle">▼</span>
+        </div>
+        <div id="connectionsItems" class="connections-items"></div>
       </div>
       
       <div class="sidebar-content">
