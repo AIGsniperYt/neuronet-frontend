@@ -25,6 +25,7 @@ export async function initMemoryTool(deps, context = {}) {
   }
 
   const state = {
+    view: contextSubject ? "study" : "launchpad",
     currentSubject: contextSubject || "",
     currentMode: "quote-learning",
     flashcards: [], // session history (cards shown)
@@ -36,7 +37,8 @@ export async function initMemoryTool(deps, context = {}) {
       surprisePool: [],
       shownAt: null,
       revealedAt: null,
-      suppressDBChange: false
+      suppressDBChange: 0,
+      lastGradeReaction: null
     },
     stats: {
       totalStudied: 0,
@@ -54,26 +56,30 @@ export async function initMemoryTool(deps, context = {}) {
     }
   };
 
-  let memoryTool, modeSelect, newSessionBtn, statsBtn;
+  let memoryTool, modeSelect, newSessionBtn, statsBtn, backToDecksBtn;
+  let memoryLaunchpad, deckList, keyboardHint, memoryContent;
   let flashcardContainer, flashcard, flashcardContent, flashcardBackContent;
-  let flipBtn, prevBtn, nextBtn, showAnalysisBtn;
   let gradingControls, gradeDidntKnowBtn, gradeKindaBtn, gradeEasyBtn;
   let evidenceMatchingContainer, evidencePrompt, quoteOptions, evidenceFeedback;
-  let memoryStats, statsContent, closeStatsBtn;
+  let memoryStats, statsContent, closeStatsBtn, roundProgress, resetMemoryBtn;
+  let systemThinkingText;
   
   function getDOMElements() {
     memoryTool = document.getElementById("memoryTool");
     modeSelect = document.getElementById("modeSelect");
     newSessionBtn = document.getElementById("newSessionBtn");
     statsBtn = document.getElementById("statsBtn");
+    backToDecksBtn = document.getElementById("backToDecksBtn");
+    memoryLaunchpad = document.getElementById("memoryLaunchpad");
+    deckList = document.getElementById("deckList");
+    keyboardHint = document.getElementById("keyboardHint");
+    memoryContent = document.getElementById("memoryContent");
     flashcardContainer = document.getElementById("flashcardContainer");
     flashcard = document.getElementById("flashcard");
     flashcardContent = document.getElementById("flashcardContent");
     flashcardBackContent = document.getElementById("flashcardBackContent");
-    flipBtn = document.getElementById("flipBtn");
-    prevBtn = document.getElementById("prevBtn");
-    nextBtn = document.getElementById("nextBtn");
-    showAnalysisBtn = document.getElementById("showAnalysisBtn");
+
+
     gradingControls = document.getElementById("gradingControls");
     gradeDidntKnowBtn = document.getElementById("gradeDidntKnowBtn");
     gradeKindaBtn = document.getElementById("gradeKindaBtn");
@@ -85,13 +91,18 @@ export async function initMemoryTool(deps, context = {}) {
     memoryStats = document.getElementById("memoryStats");
     statsContent = document.getElementById("statsContent");
     closeStatsBtn = document.getElementById("closeStatsBtn");
+    roundProgress = document.getElementById("roundProgress");
+    resetMemoryBtn = document.getElementById("resetMemoryBtn");
+    systemThinkingText = document.getElementById("systemThinkingText");
   }
 
   async function initialize() {
     try {
       getDOMElements();
-      await refreshSubjectList();
-      await loadFlashcards();
+      await loadLaunchpad();
+      if (state.currentSubject) {
+        await loadFlashcards();
+      }
       renderUI();
       attachEventListeners();
       attachKeyboardShortcuts();
@@ -105,6 +116,15 @@ export async function initMemoryTool(deps, context = {}) {
   }
 
   function attachEventListeners() {
+    if (backToDecksBtn) {
+      backToDecksBtn.addEventListener("click", async () => {
+        state.view = "launchpad";
+        state.currentSubject = "";
+        await loadLaunchpad();
+        renderUI();
+      });
+    }
+
     if (modeSelect) {
       modeSelect.addEventListener("click", async () => {
         const modes = ["quote-learning", "analysis-learning", "evidence-matching", "blurt"];
@@ -126,30 +146,51 @@ export async function initMemoryTool(deps, context = {}) {
     }
 
     if (statsBtn) {
-      statsBtn.addEventListener("click", () => {
+      let statsInterval = null;
+
+      const openStats = () => {
         renderStats();
-        if (memoryStats) memoryStats.style.display = "block";
+        updateSystemThought();
+        if (memoryStats) memoryStats.classList.add("open");
+        if (!statsInterval) {
+          statsInterval = setInterval(() => {
+            if (memoryStats && memoryStats.classList.contains("open")) {
+              renderStats();
+            } else {
+              clearInterval(statsInterval);
+              statsInterval = null;
+            }
+          }, 1000);
+        }
+      };
+
+      const closeStats = () => {
+        if (memoryStats) memoryStats.classList.remove("open");
+        clearInterval(statsInterval);
+        statsInterval = null;
+      };
+
+      statsBtn.addEventListener("click", () => {
+        if (memoryStats && memoryStats.classList.contains("open")) {
+          closeStats();
+        } else {
+          openStats();
+        }
       });
+
+      if (closeStatsBtn) {
+        closeStatsBtn.addEventListener("click", closeStats);
+      }
+
+      window.__neuronetStatsCleanup = () => {
+        clearInterval(statsInterval);
+        statsInterval = null;
+      };
     }
 
-    if (flipBtn) {
-      flipBtn.addEventListener("click", () => flipCard());
-    }
 
-    if (prevBtn) {
-      prevBtn.addEventListener("click", () => navigatePrevious());
-    }
 
-    if (nextBtn) {
-      nextBtn.addEventListener("click", () => navigateNext());
-    }
 
-    if (showAnalysisBtn) {
-      showAnalysisBtn.addEventListener("click", () => {
-        state.showAnalysis = !state.showAnalysis;
-        renderUI();
-      });
-    }
 
     if (gradeDidntKnowBtn) {
       gradeDidntKnowBtn.addEventListener("click", async () => {
@@ -167,9 +208,22 @@ export async function initMemoryTool(deps, context = {}) {
       });
     }
 
-    if (closeStatsBtn) {
+    if (resetMemoryBtn) {
+      resetMemoryBtn.addEventListener("click", async () => {
+        if (confirm("Are you sure you want to reset ALL memory metadata for this subject? This cannot be undone.")) {
+          await resetSubjectMemoryMetadata();
+          await loadFlashcards();
+          renderUI();
+        }
+      });
+    }
+
+    if (closeStatsBtn && !closeStatsBtn.dataset.bound) {
+      // closeStats is wired up inside the statsBtn block above when statsBtn exists
+      // Fallback binding if statsBtn is absent
+      closeStatsBtn.dataset.bound = "1";
       closeStatsBtn.addEventListener("click", () => {
-        if (memoryStats) memoryStats.style.display = "none";
+        if (memoryStats) memoryStats.classList.remove("open");
       });
     }
 
@@ -185,7 +239,7 @@ export async function initMemoryTool(deps, context = {}) {
     document.addEventListener("keydown", handleKeyDown);
   }
 
-  function handleKeyDown(e) {
+  async function handleKeyDown(e) {
     if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
     
     if (state.currentMode === "evidence-matching") {
@@ -201,7 +255,7 @@ export async function initMemoryTool(deps, context = {}) {
       }
       if (e.key === "Enter" || e.key === " " || e.key === "ArrowRight" || e.key === "ArrowDown") {
         e.preventDefault();
-        navigateNext();
+        await navigateNext();
         return;
       }
     }
@@ -214,12 +268,12 @@ export async function initMemoryTool(deps, context = {}) {
       case "ArrowLeft":
       case "ArrowUp":
         e.preventDefault();
-        navigatePrevious();
+        await navigatePrevious();
         break;
       case "ArrowRight":
       case "ArrowDown":
         e.preventDefault();
-        navigateNext();
+        await navigateNext();
         break;
     }
   }
@@ -272,7 +326,7 @@ export async function initMemoryTool(deps, context = {}) {
         meta: mergeMemoryStateIntoMeta(persistRecord.meta || {}, updatedMemoryState),
         updatedAt: nowMs
       };
-      state.session.suppressDBChange = true;
+      state.session.suppressDBChange++;
       await addQuote(updatedQuote);
       if (isBlurt) {
         currentCard.targetRecord = updatedQuote;
@@ -285,7 +339,7 @@ export async function initMemoryTool(deps, context = {}) {
         meta: mergeMemoryStateIntoMeta(persistRecord.meta || {}, updatedMemoryState),
         updatedAt: nowMs
       };
-      state.session.suppressDBChange = true;
+      state.session.suppressDBChange++;
       await addNode(updatedNode);
       if (isBlurt) {
         currentCard.targetRecord = updatedNode;
@@ -306,24 +360,37 @@ export async function initMemoryTool(deps, context = {}) {
     }
 
     await maybeEnqueueSurpriseCard();
+    
+    // Re-enqueue the card into the continuous heap with its newly calculated priority
+    const nextPriority = computePriority(updatedMemoryState, nowMs);
+    const recycledCard = {
+      ...currentCard,
+      review: { required: true, graded: false, grade: null, responseTimeMs: null },
+      memoryState: updatedMemoryState
+    };
+    if (isBlurt) {
+      recycledCard.blurt = { submitted: false, text: "" };
+    }
+    if (state.session.heap) {
+      state.session.heap.push({ priority: nextPriority, card: recycledCard });
+    }
+
     renderUI();
+    state.session.lastGradeReaction = grade;
+    await navigateNext();
   }
 
-  function navigatePrevious() {
+  async function navigatePrevious() {
     const currentCard = state.flashcards[state.currentIndex];
     if (currentCard?.review?.required && !currentCard.review.graded) {
       return;
     }
     if (state.currentIndex > 0) {
-      state.currentIndex--;
-      state.isFlipped = false;
-      state.session.shownAt = Date.now();
-      state.session.revealedAt = null;
-      renderUI();
+      await navigateTo(state.currentIndex - 1);
     }
   }
 
-  function navigateNext() {
+  async function navigateNext() {
     if (state.currentMode === "evidence-matching") {
       if (state.evidenceMatching.selectedOption !== null && !state.evidenceMatching.answered) {
         checkEvidenceMatchingAnswer();
@@ -331,7 +398,12 @@ export async function initMemoryTool(deps, context = {}) {
         return;
       }
       if (state.evidenceMatching.answered) {
-        moveToNextEvidenceQuestion();
+        if (state.currentIndex < state.flashcards.length - 1) {
+          await navigateTo(state.currentIndex + 1);
+        } else {
+          // If at end, maybe reload or show finished
+          alert("Completed all evidence matching for this round!");
+        }
         return;
       }
     }
@@ -342,16 +414,64 @@ export async function initMemoryTool(deps, context = {}) {
     }
 
     if (state.currentIndex < state.flashcards.length - 1) {
-      state.currentIndex++;
-      state.isFlipped = false;
-      state.session.shownAt = Date.now();
-      state.session.revealedAt = null;
-      renderUI();
+      await navigateTo(state.currentIndex + 1);
       return;
     }
 
     if (state.session.heap && state.session.heap.size() > 0) {
-      drawNextCardFromHeap();
+      if (flashcard) {
+        flashcard.classList.add("slide-away");
+        setTimeout(() => {
+          drawNextCardFromHeap();
+          renderUI();
+          flashcard.classList.remove("slide-away");
+          flashcard.classList.add("slide-in");
+          setTimeout(() => {
+            flashcard.classList.remove("slide-in");
+          }, 250);
+        }, 350);
+      } else {
+        drawNextCardFromHeap();
+        renderUI();
+      }
+    }
+  }
+
+  async function navigateTo(index) {
+    if (index === state.currentIndex || index < 0 || index >= state.flashcards.length) return;
+    
+    if (memoryStats && memoryStats.classList.contains("open")) {
+      updateSystemThought();
+    }
+    
+    const direction = index > state.currentIndex ? "forward" : "back";
+    
+    if (flashcard) {
+      const exitClass = direction === "forward" ? "slide-away" : "slide-away-back";
+      const enterClass = direction === "forward" ? "slide-in" : "slide-in-back";
+      
+      flashcard.classList.add(exitClass);
+      setTimeout(async () => {
+        state.currentIndex = index;
+        state.isFlipped = false;
+        state.session.shownAt = Date.now();
+        state.session.revealedAt = null;
+
+        if (state.currentMode === "evidence-matching") {
+          await loadEvidenceMatchingForAnalysis(state.flashcards[index].id);
+        }
+        
+        renderUI();
+        
+        flashcard.classList.remove(exitClass);
+        flashcard.classList.add(enterClass);
+        setTimeout(() => {
+          flashcard.classList.remove(enterClass);
+        }, 250);
+      }, 350);
+    } else {
+      state.currentIndex = index;
+      state.isFlipped = false;
       renderUI();
     }
   }
@@ -366,20 +486,41 @@ export async function initMemoryTool(deps, context = {}) {
   }
 
   function handleDBChange(event) {
-    if (state.session.suppressDBChange) {
-      state.session.suppressDBChange = false;
+    if (state.session.suppressDBChange > 0) {
+      state.session.suppressDBChange--;
       return;
     }
     loadFlashcards().then(renderUI);
   }
 
-async function refreshSubjectList() {
+async function loadLaunchpad() {
     const subjects = await getSubjects();
-    if (subjects.length > 0 && !state.currentSubject) {
-      state.currentSubject = subjects[0];
-    }
-    if (!state.currentSubject) {
+    if (!deckList) return;
+    
+    deckList.innerHTML = "";
+    if (subjects.length === 0) {
+      deckList.innerHTML = `<div style="color: var(--text-muted);">No decks found. Add quotes or analyses in the Analysis Tool.</div>`;
       return;
+    }
+    
+    for (const subject of subjects) {
+      const quotes = await getQuotesForSubject(subject) || [];
+      const analyses = await getAnalysisNodesForSubject(subject) || [];
+      const total = quotes.length + analyses.length;
+      
+      const card = document.createElement("div");
+      card.className = "deck-card";
+      card.innerHTML = `
+        <div class="deck-title">${escapeHtml(subject)}</div>
+        <div class="deck-stats">${total} items</div>
+      `;
+      card.addEventListener("click", async () => {
+        state.currentSubject = subject;
+        state.view = "study";
+        await loadFlashcards();
+        renderUI();
+      });
+      deckList.appendChild(card);
     }
   }
 
@@ -397,6 +538,7 @@ async function refreshSubjectList() {
     state.session.surprisePool = [];
     state.session.shownAt = null;
     state.session.revealedAt = null;
+    state.session.suppressDBChange = 0;
 
     if (state.currentMode === "quote-learning") {
       await buildQuoteLearningQueue();
@@ -480,7 +622,8 @@ async function refreshSubjectList() {
       avgTime: clampNumber(Number(meta.avgTime ?? (getExpectedTimeMs(kind) / 1000)), 0.2, 240),
       timeVariance: clampNumber(Number(meta.timeVariance ?? 0.7), 0, 1000),
       consistency: clampNumber(Number(meta.consistency ?? 0.7), 0, 1),
-      confidence: clampNumber(Number(meta.confidence ?? 0.7), 0, 1)
+      confidence: clampNumber(Number(meta.confidence ?? 0.7), 0, 1),
+      lastGrade: meta.lastGrade || null
     };
   }
 
@@ -498,7 +641,8 @@ async function refreshSubjectList() {
       avgTime: memoryState.avgTime,
       timeVariance: memoryState.timeVariance,
       consistency: memoryState.consistency,
-      confidence: memoryState.confidence
+      confidence: memoryState.confidence,
+      lastGrade: memoryState.lastGrade
     };
   }
 
@@ -556,13 +700,19 @@ async function refreshSubjectList() {
       avgTime,
       timeVariance,
       consistency,
-      confidence: confidenceOut
+      confidence: confidenceOut,
+      lastGrade: grade
     };
   }
 
   function computePriority(memoryState, nowMs) {
-    const nextReview = Number.isFinite(Number(memoryState.nextReview)) ? Number(memoryState.nextReview) : 0;
-    const overdueDays = Math.max(0, nowMs - nextReview) / 86400000;
+    let overdueDays;
+    if (Number.isFinite(Number(memoryState.nextReview)) && memoryState.nextReview > 0) {
+      overdueDays = (nowMs - Number(memoryState.nextReview)) / 86400000;
+    } else {
+      // New card - give it priority comparable to exactly due cards
+      overdueDays = 0;
+    }
     const U = clampNumber(Number(memoryState.U ?? 0.5), 0, 1);
     return 1 + overdueDays + U * 0.8;
   }
@@ -644,14 +794,14 @@ async function refreshSubjectList() {
     state.showAnalysis = false;
     state.session.shownAt = Date.now();
     state.session.revealedAt = null;
+    if (memoryStats && memoryStats.classList.contains("open")) {
+      updateSystemThought();
+    }
   }
 
   async function buildQuoteLearningQueue() {
     const nowMs = Date.now();
-    const [dueQuotes, allQuotes, allCues] = await Promise.all([
-      typeof getDueQuotesForSubject === "function"
-        ? getDueQuotesForSubject(state.currentSubject, { now: nowMs, limit: 400 })
-        : Promise.resolve([]),
+    const [allQuotes, allCues] = await Promise.all([
       getQuotesForSubject(state.currentSubject),
       getAllCues()
     ]);
@@ -663,30 +813,10 @@ async function refreshSubjectList() {
         if (!cuesByQuoteId.has(cue.quoteId)) cuesByQuoteId.set(cue.quoteId, cue);
       });
 
-    const quoteMap = new Map();
-    (dueQuotes || []).forEach((q) => quoteMap.set(q.id, q));
-    (allQuotes || [])
-      .filter((q) => !Number.isFinite(Number(q?.meta?.nextReview)))
-      .forEach((q) => quoteMap.set(q.id, q));
-
-    state.session.surprisePool = (allQuotes || [])
-      .filter((q) => !quoteMap.has(q.id))
-      .filter((q) => Number.isFinite(Number(q?.meta?.nextReview)) && Number(q.meta.nextReview) > nowMs)
-      .map((q) => {
-        const memoryState = getMemoryStateFromMeta(q.meta || {}, "quote");
-        return {
-          memoryKind: "quote",
-          record: q,
-          cueNode: cuesByQuoteId.get(q.id) || null,
-          memoryState
-        };
-      })
-      .filter((c) => (c?.memoryState?.U ?? 0) >= 0.6)
-      .sort((a, b) => (b.memoryState.U ?? 0) - (a.memoryState.U ?? 0))
-      .slice(0, 80);
+    state.session.surprisePool = [];
 
     const cards = await Promise.all(
-      Array.from(quoteMap.values()).map(async (quote) => {
+      (allQuotes || []).map(async (quote) => {
         const analyses = await getAnalysesReferencingQuote(quote.id);
         const cueNode = cuesByQuoteId.get(quote.id) || null;
         const memoryState = getMemoryStateFromMeta(quote.meta || {}, "quote");
@@ -729,36 +859,12 @@ async function refreshSubjectList() {
 
   async function buildAnalysisLearningQueue() {
     const nowMs = Date.now();
-    const [dueAnalyses, allAnalyses] = await Promise.all([
-      typeof getDueAnalysisNodesForSubject === "function"
-        ? getDueAnalysisNodesForSubject(state.currentSubject, { now: nowMs, limit: 400 })
-        : Promise.resolve([]),
-      getAnalysisNodesForSubject(state.currentSubject)
-    ]);
+    const allAnalyses = await getAnalysisNodesForSubject(state.currentSubject);
 
-    const analysisMap = new Map();
-    (dueAnalyses || []).forEach((a) => analysisMap.set(a.id, a));
-    (allAnalyses || [])
-      .filter((a) => !Number.isFinite(Number(a?.meta?.nextReview)))
-      .forEach((a) => analysisMap.set(a.id, a));
-
-    state.session.surprisePool = (allAnalyses || [])
-      .filter((a) => !analysisMap.has(a.id))
-      .filter((a) => Number.isFinite(Number(a?.meta?.nextReview)) && Number(a.meta.nextReview) > nowMs)
-      .map((a) => {
-        const memoryState = getMemoryStateFromMeta(a.meta || {}, "analysis");
-        return {
-          memoryKind: "analysis",
-          record: a,
-          memoryState
-        };
-      })
-      .filter((c) => (c?.memoryState?.U ?? 0) >= 0.6)
-      .sort((a, b) => (b.memoryState.U ?? 0) - (a.memoryState.U ?? 0))
-      .slice(0, 80);
+    state.session.surprisePool = [];
 
     const cards = await Promise.all(
-      Array.from(analysisMap.values()).map(async (analysis) => {
+      (allAnalyses || []).map(async (analysis) => {
         const quotes = await getQuotesReferencedByAnalysis(analysis.id);
         const memoryState = getMemoryStateFromMeta(analysis.meta || {}, "analysis");
         return {
@@ -799,7 +905,69 @@ async function refreshSubjectList() {
     const quotesById = new Map((quotes || []).map((q) => [q.id, q]));
     const analysesById = new Map((analyses || []).map((a) => [a.id, a]));
 
-    const subjectCues = (allCues || []).filter((c) => c?.subject === state.currentSubject && c?.cue);
+    let subjectCues = (allCues || []).filter((c) => c?.subject === state.currentSubject && c?.cue);
+
+    // FALLBACK: If no explicit cues exist for this subject, generate virtual cues from quotes and analyses
+    if (subjectCues.length === 0) {
+      // Build a map of quoteId -> [analyses] to find cross-references
+      const quoteToAnalyses = new Map();
+      (analyses || []).forEach(a => {
+        if (a.quoteRefs) {
+          a.quoteRefs.forEach(ref => {
+            if (!quoteToAnalyses.has(ref.quoteId)) quoteToAnalyses.set(ref.quoteId, []);
+            quoteToAnalyses.get(ref.quoteId).push(a);
+          });
+        }
+      });
+
+      (quotes || []).forEach(q => {
+        // For a quote, if it has a referencing analysis, use that as a hint
+        const linkedAnalyses = quoteToAnalyses.get(q.id) || [];
+        let cueText = q.section ? `Recall quote from: ${q.section}` : "Recall this quote";
+        
+        if (linkedAnalyses.length > 0) {
+          const a = linkedAnalyses[0];
+          const cleanA = (a.analysis || "").replace(/[#*`]/g, "").trim();
+          const aSnippet = cleanA.substring(0, 80) + (cleanA.length > 80 ? "..." : "");
+          cueText = `Recall quote related to analysis: "${aSnippet}"`;
+        }
+
+        subjectCues.push({
+          id: `v-cue-q-${q.id}`,
+          subject: state.currentSubject,
+          quoteId: q.id,
+          cue: cueText,
+          isVirtual: true
+        });
+      });
+
+      (analyses || []).forEach(a => {
+        let cueText = "";
+        
+        // For an analysis, if it has linked quotes, use the first quote as the prompt
+        if (a.quoteRefs && a.quoteRefs.length > 0) {
+          const firstQuote = quotesById.get(a.quoteRefs[0].quoteId);
+          if (firstQuote) {
+            cueText = `Recall analysis for quote: "${firstQuote.quote.substring(0, 100)}${firstQuote.quote.length > 100 ? "..." : ""}"`;
+          }
+        }
+
+        // Fallback to snippet if no linked quotes or quote not found
+        if (!cueText) {
+          const clean = (a.analysis || "").replace(/[#*`]/g, "").trim();
+          const displayTitle = a.title || (clean.substring(0, 50) + (clean.length > 50 ? "..." : ""));
+          cueText = displayTitle ? `Recall analysis: ${displayTitle}` : "Recall this analysis";
+        }
+
+        subjectCues.push({
+          id: `v-cue-a-${a.id}`,
+          subject: state.currentSubject,
+          analysisId: a.id,
+          cue: cueText,
+          isVirtual: true
+        });
+      });
+    }
 
     subjectCues.forEach((cue) => {
       let targetKind = null;
@@ -815,6 +983,7 @@ async function refreshSubjectList() {
       }
 
       const memoryState = getMemoryStateFromMeta(targetRecord.meta || {}, targetKind);
+      // Blurt is harder, so we expect more time
       memoryState.expectedTime = Math.max(memoryState.expectedTime, getExpectedTimeMs("blurt") / 1000);
 
       const card = {
@@ -826,7 +995,12 @@ async function refreshSubjectList() {
         targetRecord,
         review: { required: true, graded: false, grade: null, responseTimeMs: null },
         front: { content: cue.cue, isCue: true, cueNode: cue },
-        back: { isBlurtInput: true },
+        back: { 
+          isBlurtInput: true,
+          targetContent: targetKind === "quote" ? targetRecord.quote : targetRecord.analysis,
+          targetRecord,
+          targetKind
+        },
         blurt: { submitted: false, text: "" },
         memoryState
       };
@@ -846,7 +1020,52 @@ async function refreshSubjectList() {
       state.flashcards = [];
       return;
     }
-    await loadEvidenceMatchingForAnalysis(analyses[0].id);
+    
+    // Create placeholders for all analyses to show in the dots
+    state.flashcards = analyses.map(analysis => ({
+      id: analysis.id,
+      type: "evidence-matching",
+      record: analysis,
+      memoryState: getMemoryStateFromMeta(analysis.meta || {}, "analysis"),
+      review: { required: false, graded: false }, // Evidence matching doesn't strictly grade in SRS yet
+      front: { content: analysis.analysis, isAnalysis: true },
+      back: { content: "Select supporting quotes", isInstruction: true }
+    }));
+    
+    state.currentIndex = 0;
+    await loadEvidenceMatchingForAnalysis(state.flashcards[0].id);
+  }
+
+  async function resetSubjectMemoryMetadata() {
+    if (!state.currentSubject) return;
+    
+    const [quotes, analyses] = await Promise.all([
+      getQuotesForSubject(state.currentSubject),
+      getAnalysisNodesForSubject(state.currentSubject)
+    ]);
+    
+    const srsKeys = ["S", "D", "U", "interval", "nextReview", "lastReview", "reviewCount", "expectedTime", "avgTime", "timeVariance", "consistency", "confidence", "lastGrade"];
+    
+    state.session.suppressDBChange = (quotes || []).length + (analyses || []).length;
+    
+    const promises = [];
+    
+    for (const quote of (quotes || [])) {
+      if (quote.meta) {
+        srsKeys.forEach(key => delete quote.meta[key]);
+        promises.push(addQuote(quote));
+      }
+    }
+    
+    for (const analysis of (analyses || [])) {
+      if (analysis.meta) {
+        srsKeys.forEach(key => delete analysis.meta[key]);
+        promises.push(addNode(analysis));
+      }
+    }
+    
+    await Promise.all(promises);
+    console.log("Memory metadata reset successfully for subject:", state.currentSubject);
   }
 
   async function loadEvidenceMatchingForAnalysis(analysisId) {
@@ -874,7 +1093,11 @@ async function refreshSubjectList() {
       wasCorrect: null
     };
 
-    state.flashcards = [{
+    const cardIndex = state.flashcards.findIndex(f => f.id === analysisId);
+    const existingCard = cardIndex !== -1 ? state.flashcards[cardIndex] : null;
+
+    const card = {
+      ...(existingCard || {}),
       id: analysisId,
       type: "evidence-matching",
       front: {
@@ -885,7 +1108,13 @@ async function refreshSubjectList() {
         content: "Select the quotes that support this analysis",
         isInstruction: true
       }
-    }];
+    };
+
+    if (cardIndex !== -1) {
+      state.flashcards[cardIndex] = card;
+    } else {
+      state.flashcards.push(card);
+    }
   }
 
   function shuffleArray(array) {
@@ -900,6 +1129,25 @@ async function refreshSubjectList() {
       getDOMElements();
     }
     
+    if (state.view === "launchpad") {
+      if (memoryLaunchpad) memoryLaunchpad.style.display = "flex";
+      if (memoryContent) memoryContent.style.display = "none";
+      if (modeSelect) modeSelect.style.display = "none";
+      if (newSessionBtn) newSessionBtn.style.display = "none";
+      if (statsBtn) statsBtn.style.display = "none";
+      if (backToDecksBtn) backToDecksBtn.style.display = "none";
+      if (keyboardHint) keyboardHint.style.display = "none";
+      return;
+    } else {
+      if (memoryLaunchpad) memoryLaunchpad.style.display = "none";
+      if (memoryContent) memoryContent.style.display = "flex";
+      if (modeSelect) modeSelect.style.display = "inline-block";
+      if (newSessionBtn) newSessionBtn.style.display = "inline-block";
+      if (statsBtn) statsBtn.style.display = "inline-block";
+      if (backToDecksBtn) backToDecksBtn.style.display = "inline-block";
+      if (keyboardHint) keyboardHint.style.display = "block";
+    }
+    
     if (modeSelect) {
       modeSelect.textContent = 
         state.currentMode === "quote-learning" ? "Quote Learning" :
@@ -912,7 +1160,7 @@ async function refreshSubjectList() {
       state.currentMode !== "evidence-matching" ? "flex" : "none";
     if (evidenceMatchingContainer) evidenceMatchingContainer.style.display = 
       state.currentMode === "evidence-matching" ? "block" : "none";
-    if (memoryStats) memoryStats.style.display = "none";
+    // Don't hide stats here - it's a sidebar now
 
     if (!state.currentSubject) {
       if (flashcardContent) flashcardContent.textContent = "Select a subject to start studying.";
@@ -936,12 +1184,96 @@ async function refreshSubjectList() {
         state.isFlipped &&
         !currentCard.review.graded &&
         (currentCard.type !== "blurt" || !!currentCard.blurt?.submitted);
-      gradingControls.style.display = shouldShowGrading ? "flex" : "none";
+      
+      if (shouldShowGrading) {
+        gradingControls.style.display = "flex";
+        // Small timeout to allow display: flex to apply before adding visible class for transition
+        requestAnimationFrame(() => {
+          gradingControls.classList.add("visible");
+        });
+      } else {
+        gradingControls.classList.remove("visible");
+        // Hide after transition
+        setTimeout(() => {
+          if (!gradingControls.classList.contains("visible")) {
+            gradingControls.style.display = "none";
+          }
+        }, 400);
+      }
     }
 
     if (state.currentMode === "evidence-matching") {
       renderEvidenceMatchingUI();
     }
+
+    renderRoundProgress();
+  }
+
+  function renderRoundProgress() {
+    if (!roundProgress) return;
+    roundProgress.innerHTML = "";
+
+    const roundSize = 8;
+    const isHeapMode = ["analysis-learning", "blurt"].includes(state.currentMode);
+
+    // For heap-based modes, always show: already-seen history cards + upcoming from heap
+    // For quote-learning (linear), use the standard paged window
+    const roundStart = isHeapMode ? 0 : Math.floor(state.currentIndex / roundSize) * roundSize;
+
+    const upcoming = (state.session.heap && state.session.heap.items.length > 0)
+      ? [...state.session.heap.items].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
+      : [];
+
+    // For heap modes, show the last [roundSize] cards seen + preview upcoming
+    let slotCards = [];
+    if (isHeapMode) {
+      // Show current window: up to 8 slots, starting from max(0, currentIndex - roundSize + 1)
+      const windowStart = Math.max(0, state.currentIndex - roundSize + 1);
+      for (let i = windowStart; i < windowStart + roundSize; i++) {
+        if (i < state.flashcards.length) {
+          slotCards.push({ card: state.flashcards[i], index: i });
+        } else {
+          const upcomingIdx = i - state.flashcards.length;
+          slotCards.push({ card: upcoming[upcomingIdx]?.card || null, index: i });
+        }
+      }
+    } else {
+      for (let i = roundStart; i < roundStart + roundSize; i++) {
+        if (i < state.flashcards.length) {
+          slotCards.push({ card: state.flashcards[i], index: i });
+        } else {
+          const upcomingIdx = i - state.flashcards.length;
+          slotCards.push({ card: upcoming[upcomingIdx]?.card || null, index: i });
+        }
+      }
+    }
+
+    slotCards.forEach(({ card, index }) => {
+      const dot = document.createElement("div");
+      dot.className = "progress-dot";
+      if (index === state.currentIndex) dot.classList.add("active");
+
+      if (card && card.review) {
+        let displayGrade = null;
+        if (card.review.graded) {
+          displayGrade = card.review.grade;
+        } else if (card.memoryState && card.memoryState.lastGrade) {
+          displayGrade = card.memoryState.lastGrade;
+          dot.style.opacity = "0.4";
+        }
+        if (displayGrade === "didnt_know") dot.classList.add("grade-dk");
+        else if (displayGrade === "kinda") dot.classList.add("grade-kinda");
+        else if (displayGrade === "easy") dot.classList.add("grade-easy");
+      }
+
+      dot.title = card ? `Card ${index + 1}` : "Upcoming from heap";
+
+      dot.addEventListener("click", () => {
+        if (index < state.flashcards.length) navigateTo(index);
+      });
+
+      roundProgress.appendChild(dot);
+    });
   }
 
   function updateFlashcardDisplay(flashcardData, flashcardElement) {
@@ -952,7 +1284,22 @@ async function refreshSubjectList() {
 
 // Front content
      if (front.isCue) {
-       flashcardContent.innerHTML = `<div class="cue">${escapeHtml(front.content || "")}</div>`;
+       // For blurt cards pointing at a quote, render the cue more prominently
+       const isBlurtQuoteCard = flashcardData.type === "blurt" && flashcardData.targetKind === "quote";
+       const isBlurtAnalysisCard = flashcardData.type === "blurt" && flashcardData.targetKind === "analysis";
+       if (isBlurtQuoteCard) {
+         flashcardContent.innerHTML = `
+           <div class="blurt-prompt-label">Recall the quote:</div>
+           <div class="cue">${escapeHtml(front.content || "")}</div>
+         `;
+       } else if (isBlurtAnalysisCard) {
+         flashcardContent.innerHTML = `
+           <div class="blurt-prompt-label">Recall the analysis:</div>
+           <div class="cue">${escapeHtml(front.content || "")}</div>
+         `;
+       } else {
+         flashcardContent.innerHTML = `<div class="cue">${escapeHtml(front.content || "")}</div>`;
+       }
      } else if (front.isQuestion) {
        flashcardContent.innerHTML = `<div class="question">${escapeHtml(front.content || "")}</div>`;
        if (front.quotes && front.quotes.length > 0) {
@@ -977,64 +1324,91 @@ async function refreshSubjectList() {
        flashcardContent.textContent = front.content || "";
      }
 
-// Back content
-     if (back.isQuote) {
-       flashcardBackContent.innerHTML = `<div class="quote">${escapeHtml(back.content || "")}</div>`;
-       if (back.quoteData) {
-         flashcardBackContent.innerHTML += `<div class="quote-meta">From: ${escapeHtml(back.quoteData.section || "unknown source")}</div>`;
-       }
-       // Show linked analyses if available
-       if (back.analyses && back.analyses.length > 0) {
-         flashcardBackContent.innerHTML += `<div class="linked-analyses">`;
-         flashcardBackContent.innerHTML += `<div class="linked-analyses-title">Linked Analyses:</div>`;
-         back.analyses.forEach(analysis => {
-           flashcardBackContent.innerHTML += `<div class="linked-analysis-item">${formatAnalysisForDisplay(analysis.analysis || '')}</div>`;
-         });
-         flashcardBackContent.innerHTML += `</div>`;
-       }
-     } else if (back.isAnalysis) {
-       flashcardBackContent.innerHTML = `<div class="analysis">${formatAnalysisForDisplay(back.content || "")}</div>`;
-       // Show linked quotes if available
-       if (back.quotes && back.quotes.length > 0) {
-         flashcardBackContent.innerHTML += `<div class="linked-quotes">`;
-         flashcardBackContent.innerHTML += `<div class="linked-quotes-title">Linked Quotes:</div>`;
-         back.quotes.forEach(quote => {
-           flashcardBackContent.innerHTML += `<div class="linked-quote-item">${escapeHtml(quote.quote)}</div>`;
-           if (quote.section) {
-             flashcardBackContent.innerHTML += `<div class="linked-quote-source">${escapeHtml(quote.section)}</div>`;
-           }
-         });
-         flashcardBackContent.innerHTML += `</div>`;
-       }
-     } else if (back.isBlurtInput) {
-       const existingText = flashcardData?.blurt?.text || "";
-       flashcardBackContent.innerHTML = `
-         <div class="instruction">Type your recall. When finished, submit to grade.</div>
-         <textarea id="blurtInput" class="blurt-input" rows="6" placeholder="Write what you remember...">${escapeHtml(existingText)}</textarea>
-         <button id="blurtSubmitBtn" class="memory-btn">Submit Recall</button>
-       `;
+// Back content - Only populate if flipped to prevent spoiling the next card during transitions
+    if (state.isFlipped) {
+      if (back.isQuote) {
+        flashcardBackContent.innerHTML = `<div class="quote">${escapeHtml(back.content || "")}</div>`;
+        if (back.quoteData) {
+          flashcardBackContent.innerHTML += `<div class="quote-meta">From: ${escapeHtml(back.quoteData.section || "unknown source")}</div>`;
+        }
+        if (back.analyses && back.analyses.length > 0) {
+          flashcardBackContent.innerHTML += `<div class="linked-analyses">`;
+          flashcardBackContent.innerHTML += `<div class="linked-analyses-title">Linked Analyses:</div>`;
+          back.analyses.forEach(analysis => {
+            flashcardBackContent.innerHTML += `<div class="linked-analysis-item">${formatAnalysisForDisplay(analysis.analysis || '')}</div>`;
+          });
+          flashcardBackContent.innerHTML += `</div>`;
+        }
+      } else if (back.isAnalysis) {
+        flashcardBackContent.innerHTML = `<div class="analysis">${formatAnalysisForDisplay(back.content || "")}</div>`;
+        if (back.quotes && back.quotes.length > 0) {
+          flashcardBackContent.innerHTML += `<div class="linked-quotes">`;
+          flashcardBackContent.innerHTML += `<div class="linked-quotes-title">Linked Quotes:</div>`;
+          back.quotes.forEach(quote => {
+            flashcardBackContent.innerHTML += `<div class="linked-quote-item">${escapeHtml(quote.quote)}</div>`;
+            if (quote.section) {
+              flashcardBackContent.innerHTML += `<div class="linked-quote-source">${escapeHtml(quote.section)}</div>`;
+            }
+          });
+          flashcardBackContent.innerHTML += `</div>`;
+        }
+      } else if (back.isBlurtInput) {
+        if (!flashcardData.blurt?.submitted) {
+          const existingText = flashcardData?.blurt?.text || "";
+          flashcardBackContent.innerHTML = `
+            <div class="instruction">Type your recall. When finished, submit to grade.</div>
+            <textarea id="blurtInput" class="blurt-input" rows="6" placeholder="Write what you remember...">${escapeHtml(existingText)}</textarea>
+            <button id="blurtSubmitBtn" class="memory-btn">Submit Recall</button>
+          `;
 
-       const input = flashcardBackContent.querySelector("#blurtInput");
-       const submitBtn = flashcardBackContent.querySelector("#blurtSubmitBtn");
-       if (input) {
-         input.addEventListener("input", () => {
-           flashcardData.blurt = flashcardData.blurt || { submitted: false, text: "" };
-           flashcardData.blurt.text = input.value;
-         });
-       }
-       if (submitBtn) {
-         submitBtn.addEventListener("click", () => {
-           flashcardData.blurt = flashcardData.blurt || { submitted: false, text: "" };
-           flashcardData.blurt.submitted = true;
-           state.session.revealedAt = Date.now();
-           renderUI();
-         });
-       }
-     } else if (back.isInstruction) {
-       flashcardBackContent.innerHTML = `<div class="instruction">${escapeHtml(back.content || "")}</div>`;
-     } else {
-       flashcardBackContent.textContent = back.content || "";
-     }
+          const input = flashcardBackContent.querySelector("#blurtInput");
+          const submitBtn = flashcardBackContent.querySelector("#blurtSubmitBtn");
+          if (input) {
+            input.focus();
+            input.addEventListener("input", () => {
+              flashcardData.blurt = flashcardData.blurt || { submitted: false, text: "" };
+              flashcardData.blurt.text = input.value;
+            });
+          }
+          if (submitBtn) {
+            submitBtn.addEventListener("click", () => {
+              flashcardData.blurt = flashcardData.blurt || { submitted: false, text: "" };
+              flashcardData.blurt.submitted = true;
+              state.session.revealedAt = Date.now();
+              renderUI();
+            });
+          }
+        } else {
+          // Show comparison
+          const userText = flashcardData.blurt?.text || "";
+          const targetText = back.targetContent || "";
+          const isQuoteTarget = back.targetKind === "quote";
+          const formattedTarget = isQuoteTarget
+            ? `<div class="quote">${escapeHtml(targetText)}</div>${back.targetRecord?.section ? `<div class="quote-meta">From: ${escapeHtml(back.targetRecord.section)}</div>` : ""}`
+            : `<div class="analysis">${formatAnalysisForDisplay(targetText)}</div>`;
+          flashcardBackContent.innerHTML = `
+            <div class="blurt-comparison">
+              <div class="blurt-user-section">
+                <div class="blurt-label">Your Recall:</div>
+                <div class="blurt-text">${escapeHtml(userText) || '<i style="color:var(--text-muted)">Nothing entered</i>'}</div>
+              </div>
+              <div class="blurt-target-section">
+                <div class="blurt-label">${isQuoteTarget ? "The Quote:" : "The Analysis:"}</div>
+                <div class="blurt-text">${formattedTarget}</div>
+              </div>
+            </div>
+            <div class="instruction">Grade your recall based on accuracy.</div>
+          `;
+        }
+      } else if (back.isInstruction) {
+        flashcardBackContent.innerHTML = `<div class="instruction">${escapeHtml(back.content || "")}</div>`;
+      } else {
+        flashcardBackContent.textContent = back.content || "";
+      }
+    } else {
+      // Clear back content when not flipped to ensure no spoilers during animations
+      flashcardBackContent.innerHTML = "";
+    }
 
     // Update flip state
     if (flashcardElement && flashcardElement.classList) {
@@ -1046,13 +1420,7 @@ async function refreshSubjectList() {
     const hasNextInHistory = state.currentIndex < state.flashcards.length - 1;
     const hasNextInHeap = !!state.session.heap && state.session.heap.size() > 0;
 
-    if (prevBtn) prevBtn.disabled = state.currentIndex === 0 || requiresGrade;
-    if (nextBtn) nextBtn.disabled = requiresGrade || (!hasNextInHistory && !hasNextInHeap);
-    if (showAnalysisBtn) {
-      showAnalysisBtn.style.display = 
-        state.currentMode === "quote-learning" && flashcardData.back?.quoteData 
-          ? "inline-block" : "none";
-    }
+
   }
 
   function formatAnalysisForDisplay(text) {
@@ -1145,35 +1513,216 @@ async function refreshSubjectList() {
 
   function renderStats() {
     if (!statsContent) return;
-    
+
+    const nowMs = Date.now();
+    const heapItems = state.session.heap?.items
+      ? [...state.session.heap.items].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
+      : [];
+
+    const gradeIcon = g => g === "easy" ? "🟢" : g === "kinda" ? "🟡" : g === "didnt_know" ? "🔴" : "⚪";
+    const fmtInterval = ms => {
+      if (!ms) return "–";
+      const days = Math.round(ms / 86400000);
+      return days < 1 ? "<1d" : `${days}d`;
+    };
+    const fmtDate = ms => ms ? new Date(ms).toLocaleDateString() : "never";
+    const fmtPriority = p => typeof p === "number" ? p.toFixed(2) : "–";
+
+    const cardLabel = (card) => {
+      if (!card) return "?";
+      if (card.type === "blurt") return (card.cue?.cue || "Blurt").substring(0, 60);
+      if (card.type === "analysis-learning") return ((card.record?.analysis || "").replace(/[#*`]/g,"").trim().substring(0, 60) + "...");
+      return ((card?.record?.quote || card?.front?.content || "?").substring(0, 60) + "...");
+    };
+
+    const renderCardRow = (card, priority, rank, isCurrent = false) => {
+      const ms = card?.memoryState || {};
+      const label = cardLabel(card);
+      const due = ms.nextReview ? fmtDate(ms.nextReview) : "new";
+      const grade = gradeIcon(ms.lastGrade);
+      return `
+        <div class="heap-item${isCurrent ? " heap-item-current" : ""}">
+          <div class="heap-item-rank">${isCurrent ? "▶" : `#${rank}`}</div>
+          <div class="heap-item-body">
+            <div class="heap-item-label">${escapeHtml(label)}${isCurrent ? " <span class=\"heap-current-tag\">on screen</span>" : ""}</div>
+            <div class="heap-item-meta">
+              <span title="Priority">⬆ ${fmtPriority(priority)}</span>
+              <span title="Next review">📅 ${due}</span>
+              <span title="Interval">⏱ ${fmtInterval((ms.interval || 0) * 86400000)}</span>
+              <span title="Last grade">${grade} ${ms.lastGrade || "new"}</span>
+              <span title="Reviews">✓ ${ms.reviewCount || 0}x</span>
+            </div>
+          </div>
+        </div>`;
+    };
+
+    const currentCard = state.flashcards[state.currentIndex];
+    const currentPriority = currentCard ? computePriority(currentCard.memoryState || {}, nowMs) : null;
+    const currentCardHTML = currentCard
+      ? renderCardRow(currentCard, currentPriority, 0, true)
+      : "";
+
+    const heapHTML = heapItems.length === 0 && !currentCard
+      ? `<div style="color:var(--text-muted);padding:12px 0;">Heap is empty — all cards are in history.</div>`
+      : currentCardHTML + heapItems.map((item, i) => renderCardRow(item.card, item.priority, i + 1, false)).join("");
+
     statsContent.innerHTML = `
-      <div class="stat-item">
-        <span class="stat-label">Total Studied:</span>
-        <span class="stat-value">${state.stats.totalStudied}</span>
+      <div class="stats-grid">
+        <div class="stat-item"><span class="stat-label">Studied</span><span class="stat-value">${state.stats.totalStudied}</span></div>
+        <div class="stat-item"><span class="stat-label">Correct</span><span class="stat-value">${state.stats.correctAnswers}</span></div>
+        <div class="stat-item"><span class="stat-label">Streak</span><span class="stat-value">${state.stats.streak}</span></div>
+        <div class="stat-item"><span class="stat-label">Best</span><span class="stat-value">${state.stats.bestStreak}</span></div>
+        <div class="stat-item"><span class="stat-label">Accuracy</span><span class="stat-value">${state.stats.totalStudied > 0 ? Math.round((state.stats.correctAnswers / state.stats.totalStudied) * 100) : 0}%</span></div>
       </div>
-      <div class="stat-item">
-        <span class="stat-label">Correct Answers:</span>
-        <span class="stat-value">${state.stats.correctAnswers}</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-label">Current Streak:</span>
-        <span class="stat-value">${state.stats.streak}</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-label">Best Streak:</span>
-        <span class="stat-value">${state.stats.bestStreak}</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-label">Success Rate:</span>
-        <span class="stat-value">${state.stats.totalStudied > 0 ? 
-          Math.round((state.stats.correctAnswers / state.stats.totalStudied) * 100) : 0}%</span>
+      <div class="heap-section">
+        <div class="heap-section-title">Heap Queue (${heapItems.length} cards)</div>
+        <div class="heap-list">${heapHTML}</div>
       </div>
     `;
+  }
+
+  // ─── System Thinking Panel ───────────────────────────────────────────────
+
+  let _typewriterTimer = null;
+  let _lastThoughtMsg = "";
+
+  function generateSystemThought(manualGrade = null) {
+    const lastGrade = manualGrade || state.session.lastGradeReaction;
+    // Consume the grade reaction so it doesn't repeat on unrelated refreshes
+    state.session.lastGradeReaction = null;
+
+    const card = state.flashcards[state.currentIndex];
+    const ms = card?.memoryState || {};
+    const heapSize = (state.session.heap?.items?.length || 0);
+    const reviewCount = ms.reviewCount || 0;
+    const U = ms.U ?? 0.5;
+    const S = ms.S ?? 1;
+    const D = ms.D ?? 1;
+    const interval = ms.interval || 0;
+    const mode = state.currentMode;
+    const isNew = reviewCount === 0;
+
+    // Build a pool of contextual messages based on state
+    const pool = [];
+
+    // --- Post-grade reactions ---
+    if (lastGrade === "easy") {
+      pool.push("Strong recall. Stability increased — scheduling this further out.");
+      pool.push("Memory trace consolidated. Interval extended based on response time.");
+      pool.push(`Confidence rising. Next review in ~${Math.round(interval)} day${interval !== 1 ? "s" : ""}.`);
+      if (U < 0.3) pool.push("Low uncertainty detected. This item is well anchored.");
+    } else if (lastGrade === "kinda") {
+      pool.push("Partial recall. Interval kept short to reinforce the trace.");
+      pool.push("Uncertainty remains. This card will resurface sooner than average.");
+      pool.push("Consolidation incomplete — scheduling a prompt review.");
+    } else if (lastGrade === "didnt_know") {
+      pool.push("Recall failed. Difficulty increased, stability reset. Prioritising this card.");
+      pool.push("Memory gap detected. This item returns to the top of the queue.");
+      pool.push("High uncertainty. Spaced repetition will retry this shortly.");
+    }
+
+    // --- Card state observations ---
+    if (isNew) {
+      pool.push("First encounter. Baseline memory state initialised.");
+      pool.push("New item. No prior review data — using default SRS parameters.");
+    } else if (reviewCount === 1) {
+      pool.push("Second review. Building early stability from the first pass.");
+    } else if (reviewCount >= 10) {
+      pool.push(`Mature memory. ${reviewCount} reviews logged — long-term retention forming.`);
+    } else if (reviewCount >= 5) {
+      pool.push(`${reviewCount} reviews in. Stability trend is ${S > 2 ? "positive" : "developing"}.`);
+    }
+
+    // --- Uncertainty / difficulty insights ---
+    if (U > 0.75) {
+      pool.push("Uncertainty is high — this card has inconsistent recall patterns.");
+    } else if (U < 0.2 && reviewCount > 3) {
+      pool.push("Uncertainty is very low. This item is well-established in long-term memory.");
+    }
+    if (D > 3) {
+      pool.push("Difficulty signal is elevated. This may need more frequent reinforcement.");
+    } else if (D < 0.5 && reviewCount > 2) {
+      pool.push("Low difficulty score. The algorithm is easing the schedule for this item.");
+    }
+
+    // --- Heap / session observations ---
+    if (heapSize === 0 && state.flashcards.length > 0) {
+      pool.push("Heap is empty — all items are in session history.");
+    } else if (heapSize > 10) {
+      pool.push(`${heapSize} items queued. Prioritising highest-urgency cards first.`);
+    }
+    if (state.stats.streak >= 5) {
+      pool.push(`${state.stats.streak}-card streak. Recall quality is strong this session.`);
+    }
+    if (state.stats.totalStudied > 0 && state.stats.correctAnswers / state.stats.totalStudied < 0.4) {
+      pool.push("Session accuracy is low. Consider shorter intervals or a review break.");
+    }
+
+    // --- Mode-specific ---
+    if (mode === "blurt") {
+      pool.push("Blurt mode active. Free recall is the strongest consolidation method.");
+      pool.push("Active retrieval engaged — the effort itself strengthens the memory trace.");
+    } else if (mode === "evidence-matching") {
+      pool.push("Evidence matching active. Testing associative linkage between ideas.");
+    } else if (mode === "analysis-learning") {
+      pool.push("Analysis mode. Tracking conceptual memory separate from quote recall.");
+    }
+
+    // --- Fallback ---
+    if (pool.length === 0) {
+      pool.push("Monitoring memory state. Heap sorted by urgency score.");
+      pool.push("SRS algorithm running. Cards scheduled by stability and difficulty.");
+    }
+
+    // Pick randomly, avoid repeating the last message
+    let candidates = pool.filter(m => m !== _lastThoughtMsg);
+    if (candidates.length === 0) candidates = pool;
+    let msg = candidates[Math.floor(Math.random() * candidates.length)];
+    
+    // If we had a grade reaction, potentially combine it with an observation for a 'smart' synthesis
+    if (lastGrade && pool.length > 1) {
+      const observation = pool.filter(m => !m.includes("recall") && !m.includes("Grade") && !m.includes("Trace") && !m.includes("Stability"))[0];
+      if (observation && Math.random() > 0.5) {
+        msg = `${msg} ${observation}`;
+      }
+    }
+
+    _lastThoughtMsg = msg;
+    return msg;
+  }
+
+  function typewriteThought(text) {
+    if (!systemThinkingText) return;
+    clearTimeout(_typewriterTimer);
+    systemThinkingText.innerHTML = '<span class="cursor"></span>';
+    let i = 0;
+    const cursor = systemThinkingText.querySelector(".cursor");
+
+    const tick = () => {
+      if (i >= text.length) {
+        if (cursor) cursor.remove();
+        systemThinkingText.innerHTML = text;
+        return;
+      }
+      const chunk = text.slice(0, i + 1);
+      systemThinkingText.innerHTML = `${chunk}<span class="cursor"></span>`;
+      i++;
+      // Faster, 'alien' speed
+      const delay = 5 + Math.random() * 8;
+      _typewriterTimer = setTimeout(tick, delay);
+    };
+    tick();
+  }
+
+  function updateSystemThought(lastGrade = null) {
+    const thought = generateSystemThought(lastGrade);
+    typewriteThought(thought);
   }
 
   window.__neuronetMemoryCleanup = () => {
     document.removeEventListener("db-change", handleDBChange);
     document.removeEventListener("keydown", handleKeyDown);
+    if (window.__neuronetStatsCleanup) window.__neuronetStatsCleanup();
   };
 
   await initialize();

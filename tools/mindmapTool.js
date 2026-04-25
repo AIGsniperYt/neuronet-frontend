@@ -270,7 +270,7 @@ const state = {
     }
 
     const meta = node.meta || {};
-    const memoryKeys = ["S", "D", "U", "interval", "nextReview", "lastReview", "reviewCount", "expectedTime", "avgTime", "timeVariance", "consistency", "confidence", "easeFactor", "honestyFlag", "clusterId"];
+    const memoryKeys = ["S", "D", "U", "interval", "nextReview", "lastReview", "reviewCount", "expectedTime", "avgTime", "timeVariance", "consistency", "confidence", "easeFactor", "honestyFlag", "clusterId", "lastGrade"];
     const metaHasAny = memoryKeys.some((k) => meta[k] !== undefined && meta[k] !== null);
     if (metaHasAny) {
       lines.push("");
@@ -486,10 +486,12 @@ const state = {
         const parentsB = nodeParents.get(idB);
         
         let isSibling = false;
+        let commonParentId = null;
         if (parentsA && parentsB) {
           for (const p of parentsA) {
             if (parentsB.has(p)) {
               isSibling = true;
+              commonParentId = p;
               break;
             }
           }
@@ -512,12 +514,31 @@ const state = {
         let forceMag = 0;
 
         if (isSibling) {
-          // Attract slightly to siblings around a resting distance
-          const siblingIdeal = 90 + Math.max(weightA, weightB) * 10;
+          const parentNode = graph.nodes.get(commonParentId);
+          // Children count is connections minus the parent link
+          const siblingCount = parentNode ? Math.max(1, parentNode.connections.size - 1) : 1;
+          
+          // Boost repulsion if there are many siblings to prevent clumping
+          // The more siblings, the stronger they push each other apart
+          let siblingRepMultiplier = 0.35;
+          if (siblingCount > 3) {
+            siblingRepMultiplier += (siblingCount - 3) * 0.15;
+          }
+
+          // Also increase the ideal distance between siblings when they are numerous
+          // This ensures the "mesh" of siblings doesn't collapse too tightly in a circle
+          const siblingIdeal = 100 + (Math.max(weightA, weightB) * 10) + (siblingCount > 4 ? (siblingCount - 4) * 20 : 0);
+          
           const siblingSpring = 0.008; // Softer sibling attraction
           const attractForce = (dist - siblingIdeal) * siblingSpring;
-          // Subtly repel, but mostly allow spring to find equilibrium
-          forceMag = (repStrength * 0.3) / distSq - attractForce;
+
+          // Weaken repulsion slightly for analysis nodes to keep them more compact
+          if (nodeA.type === "analysis" && nodeB.type === "analysis") {
+            siblingRepMultiplier *= 0.3;
+          }
+
+          // Repulsion force adjusted by sibling multiplier, minus the spring attraction
+          forceMag = (repStrength * siblingRepMultiplier) / distSq - attractForce;
         } else if (isGrandparent) {
           // Repel strongly from grandparent to stretch branches outward
           repStrength += 160000;
@@ -590,6 +611,63 @@ const state = {
       // This prevents the "bent/pinned subject" issue because the subject is free to move relative to its children!
       forces.get(id).x += dx * 0.00005;
       forces.get(id).y += dy * 0.00005;
+    });
+
+    // 4. Angular Sector Encouragement (Fractal Spreading)
+    // This pushes children to spread out in a sector oriented AWAY from their grandparent
+    graph.nodes.forEach((node, id) => {
+      const parents = nodeParents.get(id);
+      if (!parents || parents.size === 0) return;
+      
+      const pos = positions.get(id);
+      
+      parents.forEach(parentId => {
+        const parentNode = graph.nodes.get(parentId);
+        const parentPos = positions.get(parentId);
+        if (!parentNode || !parentPos) return;
+        
+        const gParents = nodeParents.get(parentId);
+        if (!gParents || gParents.size === 0) return; // Root children spread 360
+        
+        // Use the first grandparent as the orientation anchor
+        const gId = gParents.values().next().value;
+        const gPos = positions.get(gId);
+        if (!gPos) return;
+        
+        // Forward direction: away from grandparent
+        const dxGP = parentPos.x - gPos.x;
+        const dyGP = parentPos.y - gPos.y;
+        const angleGP = Math.atan2(dyGP, dxGP);
+        
+        // Current direction: parent to child
+        const dxPC = pos.x - parentPos.x;
+        const dyPC = pos.y - parentPos.y;
+        const anglePC = Math.atan2(dyPC, dxPC);
+        
+        // Calculate shortest angular distance
+        let angleDiff = anglePC - angleGP;
+        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+        
+        // Sector width scales with child count. 
+        // 1 child = narrow (~70deg), many children = wide (up to 270deg)
+        const siblingCount = Math.max(1, parentNode.connections.size - 1);
+        const sectorWidth = Math.min(Math.PI * 1.5, (siblingCount * 0.35) + 0.6);
+        const halfSector = sectorWidth / 2;
+        
+        if (Math.abs(angleDiff) > halfSector) {
+          // Soft corrective torque to bring node back into the allowed sector
+          const overshoot = Math.abs(angleDiff) - halfSector;
+          const strength = 0.2; 
+          const forceMag = overshoot * strength;
+          
+          // Apply a tangential force (perpendicular to parent-child axis)
+          const tangentAngle = anglePC + (angleDiff > 0 ? -Math.PI / 2 : Math.PI / 2);
+          
+          forces.get(id).x += Math.cos(tangentAngle) * forceMag * 12;
+          forces.get(id).y += Math.sin(tangentAngle) * forceMag * 12;
+        }
+      });
     });
 
     return forces;
