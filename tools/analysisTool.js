@@ -1889,8 +1889,8 @@ function selectSource(sourceId) {
     const currentL1 = l1Options.includes(layer1Select.value) ? layer1Select.value : l1Options[0];
     layer1Select.value = currentL1;
 
-    const updateLayerSelection = () => {
-      const selectedL1 = layer1Select.value || currentL1;
+const updateLayerSelection = () => {
+      const selectedL1 = layer1Select.value || l1Options[0];
       const entriesL1 = layerEntries.filter((e) => e.l1 === selectedL1);
 
       const l2Keys = Array.from(new Set(entriesL1.map((e) => e.l2 || DIRECT_KEY))).sort((a, b) => {
@@ -1902,7 +1902,9 @@ function selectSource(sourceId) {
 
       if (!hasNonDirectL2) {
         layer2Select.style.display = "none";
+        layer2Select.value = "";
         layer3Select.style.display = "none";
+        layer3Select.value = "";
 
         const sourcesForL1 = entriesL1.map((e) => e.source);
         renderSourceOptions(sourcesForL1);
@@ -1910,13 +1912,21 @@ function selectSource(sourceId) {
       }
 
       layer2Select.style.display = "inline-block";
+      
+      const savedL2Value = layer2Select.value;
       layer2Select.innerHTML = l2Keys.map((k) => {
         const label = k === DIRECT_KEY ? "(Direct)" : k;
         return `<option value="${escapeHtml(k)}">${escapeHtml(label)}</option>`;
       }).join("");
 
-      const currentL2 = l2Keys.includes(layer2Select.value) ? layer2Select.value : l2Keys[0];
-      layer2Select.value = currentL2;
+      let currentL2;
+      if (l2Keys.includes(savedL2Value)) {
+        currentL2 = savedL2Value;
+        layer2Select.value = currentL2;
+      } else {
+        currentL2 = l2Keys[0];
+        layer2Select.value = currentL2;
+      }
 
       const entriesL2 = entriesL1.filter((e) => (e.l2 || DIRECT_KEY) === currentL2);
 
@@ -1929,6 +1939,7 @@ function selectSource(sourceId) {
 
       if (!hasNonDirectL3) {
         layer3Select.style.display = "none";
+        layer3Select.value = "";
         renderSourceOptions(entriesL2.map((e) => e.source));
         return;
       }
@@ -1953,6 +1964,15 @@ function selectSource(sourceId) {
         sourceSelect.innerHTML = `<option value="">No sources</option>`;
         state.selectedSourceId = "";
         deleteSourceBtn.disabled = true;
+        sourceSelect.style.display = "none";
+        return;
+      }
+
+      if (list.length === 1) {
+        state.selectedSourceId = list[0].id;
+        sourceSelect.style.display = "none";
+        selectSource(state.selectedSourceId);
+        deleteSourceBtn.disabled = !state.selectedSourceId;
         return;
       }
 
@@ -2515,7 +2535,7 @@ function selectSource(sourceId) {
     });
   }
 
-  function selectSource(sourceId) {
+function selectSource(sourceId) {
     state.selectedSourceId = sourceId;
     state.focusedNodeId = null;
     state.focusedRangeKey = null;
