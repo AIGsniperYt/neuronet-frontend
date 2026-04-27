@@ -174,31 +174,156 @@ function enforceUserSelect() {
     return result;
   }
 
-  function convertInlineMarkdown() {
-    const textNodes = [];
-    const walker = document.createTreeWalker(sourceEditor, NodeFilter.SHOW_TEXT);
-    let node;
-    while (node = walker.nextNode()) {
-      if (node.textContent.includes("*") || node.textContent.includes("_") || node.textContent.includes("`")) {
-        textNodes.push(node);
-      }
+  // ========== MARKDOWN & FORMATTING SUPPORT ==========
+  // Supported inline markdown patterns (auto-converts as you type):
+  //   - *text* → italic (<em>)
+  //   - **text** → bold (<strong>)
+  //   - ***text*** → bold italic (<strong><em>)
+  //   - _text_ → italic (<em>)
+  //   - __text__ → bold (<strong>)
+  //   - ___text___ → bold italic (<strong><em>)
+  //   - ~~text~~ → strikethrough (<del>)
+  //   - `text` → inline code (<code>)
+  //
+  // Keyboard shortcuts:
+  //   - Ctrl/Cmd+B → bold
+  //   - Ctrl/Cmd+I → italic
+  //   - Ctrl/Cmd+U → underline
+  //   - Ctrl/Cmd+Shift+X → strikethrough
+  //   - Ctrl/Cmd+` → code block
+  //   - #, ##, ### at start of line + Enter → heading (H1, H2, H3)
+  //   - > at start of line + Enter → blockquote
+  //
+  // Block markdown patterns (on Enter):
+  //   - # Text → H1 heading
+  //   - ## Text → H2 heading
+  //   - ### Text → H3 heading
+  //   - > Text → blockquote
+  // ================================================
+
+  function saveCursorPosition() {
+    const selection = window.getSelection();
+    if (!selection.rangeCount) return null;
+    if (!sourceEditor.contains(selection.anchorNode)) return null;
+    
+    try {
+      const range = selection.getRangeAt(0);
+      const preRange = range.cloneRange();
+      preRange.selectNodeContents(sourceEditor);
+      preRange.setEnd(range.endContainer, range.endOffset);
+      return preRange.toString().length;
+    } catch (e) {
+      return null;
     }
-    textNodes.forEach(textNode => {
-      let text = textNode.textContent;
-      text = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-      text = text.replace(/_([^_]+)_/g, "<em>$1</em>");
-      text = text.replace(/`([^`]+)`/g, "<code>$1</code>");
-      if (text !== textNode.textContent) {
-        const parent = textNode.parentNode;
-        const temp = document.createElement("div");
-        temp.innerHTML = text;
-        parent.replaceChild(temp, textNode);
-        while (temp.firstChild) {
-          parent.insertBefore(temp.firstChild, temp);
+  }
+
+  function restoreCursorPosition(offset) {
+    if (offset === null || offset < 0) return;
+    if (!sourceEditor) return;
+    
+    try {
+      const selection = window.getSelection();
+      const range = document.createRange();
+      let charCount = 0;
+      let nodeStack = [sourceEditor];
+      let node, foundStart = false;
+
+      while (!foundStart && (node = nodeStack.pop())) {
+        if (node.nodeType === Node.TEXT_NODE) {
+          const nextCharCount = charCount + node.length;
+          if (offset <= nextCharCount) {
+            range.setStart(node, Math.max(0, offset - charCount));
+            foundStart = true;
+          }
+          charCount = nextCharCount;
+        } else {
+          let i = node.childNodes.length;
+          while (i--) {
+            nodeStack.push(node.childNodes[i]);
+          }
         }
-        parent.removeChild(temp);
       }
-    });
+
+      if (foundStart) {
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+    } catch (e) {
+      // Silently fail if cursor restoration fails
+    }
+  }
+
+  function convertInlineMarkdownInPlace() {
+    try {
+      const selection = window.getSelection();
+      const shouldRestoreCursor = selection.rangeCount > 0 && sourceEditor && sourceEditor.contains(selection.anchorNode);
+      const cursorPos = shouldRestoreCursor ? saveCursorPosition() : null;
+
+      const textNodes = [];
+      const walker = document.createTreeWalker(sourceEditor, NodeFilter.SHOW_TEXT);
+      let node;
+      
+      while (node = walker.nextNode()) {
+        const text = node.textContent;
+        // Only process text nodes with potential markdown
+        if (text.includes("*") || text.includes("_") || text.includes("`") || text.includes("~")) {
+          // Skip if already inside a formatting tag
+          let parent = node.parentNode;
+          if (parent && !["STRONG", "EM", "CODE", "DEL", "B", "I"].includes(parent.tagName)) {
+            textNodes.push(node);
+          }
+        }
+      }
+
+      let changed = false;
+
+      textNodes.forEach(textNode => {
+        try {
+          let text = textNode.textContent;
+          const originalText = text;
+
+          // Convert markdown patterns (order matters - do longest patterns first)
+          // ***bold italic*** or ___bold italic___
+          text = text.replace(/\*\*\*(\S+(?:\s+\S+)*)\*\*\*/g, "<strong><em>$1</em></strong>");
+          text = text.replace(/___(\S+(?:\s+\S+)*)___/g, "<strong><em>$1</em></strong>");
+          // **bold** or __bold__
+          text = text.replace(/\*\*(\S+(?:\s+\S+)*)\*\*/g, "<strong>$1</strong>");
+          text = text.replace(/__(\S+(?:\s+\S+)*)__/g, "<strong>$1</strong>");
+          // *italic* or _italic_ (only matches if surrounded by non-whitespace)
+          text = text.replace(/\*(\S+(?:\s+\S+)*)\*/g, "<em>$1</em>");
+          text = text.replace(/_(\S+(?:\s+\S+)*)_/g, "<em>$1</em>");
+          // ~~strikethrough~~
+          text = text.replace(/~~(\S+(?:\s+\S+)*)~~/g, "<del>$1</del>");
+          // `code`
+          text = text.replace(/`(\S+(?:\s+\S+)*)`/g, "<code>$1</code>");
+
+          if (text !== originalText) {
+            const parent = textNode.parentNode;
+            if (!parent || !parent.parentNode) return; // Safety check
+            
+            const temp = document.createElement("span");
+            temp.innerHTML = text;
+            
+            // Replace the text node with temp contents
+            while (temp.firstChild) {
+              parent.insertBefore(temp.firstChild, textNode);
+            }
+            parent.removeChild(textNode);
+            changed = true;
+          }
+        } catch (e) {
+          // Skip this node if there's an error
+        }
+      });
+
+      // Restore cursor position ONLY if we made changes AND had a valid selection
+      if (changed && shouldRestoreCursor && cursorPos !== null) {
+        requestAnimationFrame(() => restoreCursorPosition(cursorPos));
+      }
+    } catch (e) {
+      // Fail silently
+    }
   }
 
   function clampPriority(value) {
@@ -632,86 +757,136 @@ function selectSource(sourceId) {
 
   function clearAllHighlights(root) {
     if (!root) return;
-    // Find all highlight spans and unwrap them by moving children back to parent
+
     const highlights = root.querySelectorAll(".highlight-quote");
+
     for (const span of highlights) {
+      const parent = span.parentNode;
+      if (!parent) continue;
+
       while (span.firstChild) {
-        span.parentNode.insertBefore(span.firstChild, span);
+        parent.insertBefore(span.firstChild, span);
       }
-      span.parentNode.removeChild(span);
+
+      parent.removeChild(span);
     }
-    // Normalize text nodes (merge adjacent text nodes)
+
+    // CRITICAL for your system (keeps indexing consistent)
     root.normalize();
   }
 
   function wrapTextRange(root, start, end, className, dataFocusId, dataRangeKey) {
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
-    const textNodes = [];
-    while (walker.currentNode) {
-      textNodes.push(walker.currentNode);
-      walker.nextNode();
-    }
+    try {
+      // Validate inputs - prevent invalid array operations
+      if (!Number.isFinite(start) || !Number.isFinite(end)) return;
+      if (start < 0 || end < 0) return;
+      if (end <= start) return;
+      if (start > 1000000 || end > 1000000) return; // Sanity check for massive values
+      
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+      const textNodes = [];
 
-    const rangesToWrap = [];
-    let index = 0;
+      // FIXED traversal (prevents infinite loop / array explosion)
+      let currentNode;
+      while ((currentNode = walker.nextNode())) {
+        textNodes.push(currentNode);
+      }
 
-    for (const node of textNodes) {
-      const nodeText = node.nodeValue || "";
-      const originalLength = nodeText.length;
-      const nodeEnd = index + nodeText.length;
+      const rangesToWrap = [];
+      let index = 0;
 
-      if (nodeEnd <= start) {
+      for (const node of textNodes) {
+        const nodeText = node.nodeValue || "";
+        const originalLength = nodeText.length;
+        const nodeEnd = index + nodeText.length;
+
+        if (nodeEnd <= start) {
+          index = nodeEnd;
+          continue;
+        }
+        if (index >= end) break;
+
+        const localStart = Math.max(0, start - index);
+        const localEnd = Math.min(nodeText.length, end - index);
+
+        // Validate local range
+        if (localStart >= 0 && localEnd > localStart && localEnd <= nodeText.length) {
+          rangesToWrap.push({ node, localStart, localEnd, originalLength });
+        }
         index = nodeEnd;
-        continue;
-      }
-      if (index >= end) break;
-
-      const localStart = Math.max(0, start - index);
-      const localEnd = Math.min(nodeText.length, end - index);
-
-      rangesToWrap.push({ node, localStart, localEnd, originalLength });
-      index = nodeEnd;
-    }
-
-    for (const { node, localStart, localEnd, originalLength } of rangesToWrap) {
-      if (localEnd < originalLength) {
-        node.splitText(localEnd);
-      }
-      let target;
-      if (localStart > 0) {
-        target = node.splitText(localStart);
-      } else {
-        target = node;
       }
 
-      if (target && target.parentNode) {
-        const highlight = document.createElement("span");
-        highlight.className = className;
-        if (dataFocusId) highlight.dataset.focusId = dataFocusId;
-        if (dataRangeKey) highlight.dataset.rangeKey = dataRangeKey;
-        target.parentNode.replaceChild(highlight, target);
-        highlight.appendChild(target);
+      for (const { node, localStart, localEnd, originalLength } of rangesToWrap) {
+        try {
+          if (localEnd < originalLength) {
+            node.splitText(localEnd);
+          }
+          let target;
+          if (localStart > 0) {
+            target = node.splitText(localStart);
+          } else {
+            target = node;
+          }
+
+          if (target && target.parentNode) {
+            const highlight = document.createElement("span");
+            highlight.className = className;
+            if (dataFocusId) highlight.dataset.focusId = dataFocusId;
+            if (dataRangeKey) highlight.dataset.rangeKey = dataRangeKey;
+            target.parentNode.replaceChild(highlight, target);
+            highlight.appendChild(target);
+          }
+        } catch (e) {
+          // Skip this range if splitText fails
+          continue;
+        }
       }
+    } catch (e) {
+      // Silently fail if highlighting fails to prevent site freeze
+      console.warn("[HIGHLIGHT] Failed to wrap text range:", e.message);
     }
   }
 
   function highlightQuotedRanges(root, ranges) {
     if (!root || !ranges?.length) return;
-    // Clear existing highlights first to reset text node structure
+
     clearAllHighlights(root);
-    
-    // Sort by start position (ascending) to process left-to-right
+
     const sorted = [...ranges].sort((a, b) => a.start - b.start);
-    for (const range of sorted) {
-      if (Number.isFinite(range.start) && Number.isFinite(range.end) && range.end > range.start) {
-        const focusId = range.focusId ?? range.nodeId;
-        const rangeKey = `${range.start}-${range.end}`;
-        const isActive =
-          focusId === state.focusedNodeId &&
-          (!state.focusedRangeKey || state.focusedRangeKey === rangeKey);
-        const className = isActive ? "highlight-quote active" : "highlight-quote";
-        wrapTextRange(root, range.start, range.end, className, focusId, rangeKey);
+
+    // Merge overlaps (CRITICAL)
+    const merged = [];
+    for (const r of sorted) {
+      const last = merged[merged.length - 1];
+      if (last && r.start < last.end) {
+        last.end = Math.max(last.end, r.end);
+      } else {
+        merged.push({ ...r });
       }
+    }
+
+    const totalLength = root.textContent.length;
+
+    for (const range of merged) {
+      if (
+        !Number.isFinite(range.start) ||
+        !Number.isFinite(range.end) ||
+        range.end <= range.start ||
+        range.end > totalLength
+      ) continue;
+
+      const focusId = range.focusId ?? range.nodeId;
+      const rangeKey = `${range.start}-${range.end}`;
+
+      const isActive =
+        focusId === state.focusedNodeId &&
+        (!state.focusedRangeKey || state.focusedRangeKey === rangeKey);
+
+      const className = isActive
+        ? "highlight-quote active"
+        : "highlight-quote";
+
+      wrapTextRange(root, range.start, range.end, className, focusId, rangeKey);
     }
   }
 
@@ -743,11 +918,17 @@ function selectSource(sourceId) {
     const byPosition = new Map();
 
     const mergeRange = (start, end, focusId) => {
-      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
-      const key = `${start}-${end}`;
+      // Sanitize and validate range values
+      const safStart = Number.isFinite(start) ? Math.max(0, Math.floor(start)) : 0;
+      const safEnd = Number.isFinite(end) ? Math.max(0, Math.floor(end)) : 0;
+      
+      if (safEnd <= safStart) return;
+      if (safStart > 1000000 || safEnd > 1000000) return; // Sanity check
+      
+      const key = `${safStart}-${safEnd}`;
       byPosition.set(key, {
-        start,
-        end,
+        start: safStart,
+        end: safEnd,
         focusId,
         nodeId: focusId
       });
@@ -773,38 +954,58 @@ function selectSource(sourceId) {
         continue;
       }
 
-      const quoteText = q.quote || "";
-      let start = Number(q.link?.start ?? 0);
-      let end = Number(q.link?.end ?? 0);
-      if (!end && quoteText) {
-        const pos = resolvePositions(quoteText, start, start + quoteText.length);
-        start = pos.start;
-        end = pos.end;
-      } else if ((!Number.isFinite(end) || end <= start) && quoteText) {
-        const pos = resolvePositions(quoteText, start, start + quoteText.length);
-        start = pos.start;
-        end = pos.end;
-      }
+      try {
+        const quoteText = q.quote || "";
+        let start = Number(q.link?.start ?? 0);
+        let end = Number(q.link?.end ?? 0);
+        
+        // Sanitize NaN values
+        if (!Number.isFinite(start)) start = 0;
+        if (!Number.isFinite(end)) end = 0;
+        
+        if (!end && quoteText) {
+          const pos = resolvePositions(quoteText, start, start + quoteText.length);
+          start = Math.max(0, Number(pos.start) || 0);
+          end = Math.max(start, Number(pos.end) || 0);
+        } else if ((!Number.isFinite(end) || end <= start) && quoteText) {
+          const pos = resolvePositions(quoteText, start, start + quoteText.length);
+          start = Math.max(0, Number(pos.start) || 0);
+          end = Math.max(start, Number(pos.end) || 0);
+        }
 
-      const analysisIds = q.meta?.analysisNodeIds || [];
-      const focusId = analysisIds[0] || q.id;
-      mergeRange(start, end, focusId);
+        const analysisIds = q.meta?.analysisNodeIds || [];
+        const focusId = analysisIds[0] || q.id;
+        mergeRange(start, end, focusId);
+      } catch (e) {
+        // Skip this quote if there's an error
+        continue;
+      }
     }
 
     for (const node of state.analysisNodes) {
       if (node.subject !== state.selectedSubject) continue;
       if (node.link?.sourceId !== source.id) continue;
 
-      const quoteText = node.quote || "";
-      let start = Number(node?.link?.start ?? node?.meta?.sourceOrder ?? 0);
-      let end = Number(node?.link?.end ?? 0);
-      if (!quoteText && (!end || end <= start)) continue;
-      if (!end || end <= start) {
-        const pos = resolvePositions(quoteText, start, start + quoteText.length);
-        start = pos.start;
-        end = pos.end;
+      try {
+        const quoteText = node.quote || "";
+        let start = Number(node?.link?.start ?? node?.meta?.sourceOrder ?? 0);
+        let end = Number(node?.link?.end ?? 0);
+        
+        // Sanitize NaN values
+        if (!Number.isFinite(start)) start = 0;
+        if (!Number.isFinite(end)) end = 0;
+        
+        if (!quoteText && (!end || end <= start)) continue;
+        if (!end || end <= start) {
+          const pos = resolvePositions(quoteText, start, start + quoteText.length);
+          start = Math.max(0, Number(pos.start) || 0);
+          end = Math.max(start, Number(pos.end) || 0);
+        }
+        mergeRange(start, end, node.id);
+      } catch (e) {
+        // Skip this node if there's an error
+        continue;
       }
-      mergeRange(start, end, node.id);
     }
 
     for (const node of state.analysisNodes) {
@@ -2537,14 +2738,17 @@ const updateLayerSelection = () => {
             node.style.fontSize = "";
             if (node.hasAttribute("size")) node.removeAttribute("size");
           }
+          // Let the input event handle markdown conversion to avoid duplicate processing
         }, 0);
       } else if (text) {
         document.execCommand("insertText", false, text);
       }
     });
     
-    // Remove inline styles and clean garbage after paste, and convert inline markdown
+    // Remove inline styles, clean garbage after paste, and convert inline markdown
+    let markdownConversionTimeout;
     sourceEditor.addEventListener("input", () => {
+      // Clean up styles and elements immediately
       const walk = document.createTreeWalker(sourceEditor, NodeFilter.SHOW_ELEMENT);
       const toRemove = [];
       let node;
@@ -2608,6 +2812,12 @@ const updateLayerSelection = () => {
           p.remove();
         }
       });
+
+      // Debounce markdown conversion for performance (only convert when user pauses)
+      clearTimeout(markdownConversionTimeout);
+      markdownConversionTimeout = setTimeout(() => {
+        convertInlineMarkdownInPlace();
+      }, 300);
     });
   }
 
@@ -2917,12 +3127,35 @@ return document.execCommand(command, false, null);
     }
 
     sourceEditor.addEventListener("keydown", (e) => {
+      // Keyboard shortcuts for formatting (Ctrl/Cmd + modifier)
       if (e.ctrlKey || e.metaKey) {
         switch(e.key.toLowerCase()) {
-          case "b": e.preventDefault(); document.execCommand("bold", false, null); break;
-          case "i": e.preventDefault(); document.execCommand("italic", false, null); break;
-          case "u": e.preventDefault(); document.execCommand("underline", false, null); break;
+          case "b": 
+            e.preventDefault(); 
+            document.execCommand("bold", false, null); 
+            break;
+          case "i": 
+            e.preventDefault(); 
+            document.execCommand("italic", false, null); 
+            break;
+          case "u": 
+            e.preventDefault(); 
+            document.execCommand("underline", false, null); 
+            break;
+          case "`":
+            // Ctrl+` wraps selection or word in backticks/code
+            e.preventDefault();
+            const sel = window.getSelection();
+            if (sel.toString()) {
+              document.execCommand("formatBlock", false, "code");
+            }
+            break;
         }
+      }
+      // Strikethrough shortcut: Ctrl+Shift+X (or Alt+Shift+~)
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "x") {
+        e.preventDefault();
+        document.execCommand("strikethrough", false, null);
       }
       if (e.key === "Enter") {
         setTimeout(convertMdOnEnter, 50);
@@ -2930,25 +3163,64 @@ return document.execCommand(command, false, null);
     });
     
     function convertMdOnEnter() {
-      const sel = window.getSelection();
-      if (!sel || sel.rangeCount === 0) return;
-      const range = sel.getRangeAt(0);
-      const p = range.startContainer.parentNode;
-      if (!p || p.tagName !== "P") return;
-      const text = p.textContent || "";
-      let newTag = null;
-      if (text.startsWith("# ")) newTag = "h1";
-      else if (text.startsWith("## ")) newTag = "h2";
-      else if (text.startsWith("### ")) newTag = "h3";
-      else if (text.startsWith("> ")) newTag = "blockquote";
-      if (newTag) {
-        const el = document.createElement(newTag);
-        const content = newTag === "h1" ? text.substring(2) 
-                   : newTag === "h2" ? text.substring(3)
-                   : newTag === "h3" ? text.substring(4)
-                   : text.substring(2);
-        el.textContent = content;
-        p.parentNode.replaceChild(el, p);
+      try {
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0) return;
+        const range = sel.getRangeAt(0);
+        let container = range.startContainer;
+        
+        // Find the paragraph element
+        if (container.nodeType === Node.TEXT_NODE) {
+          container = container.parentNode;
+        }
+        
+        let p = null;
+        if (container && container.tagName === "P") {
+          p = container;
+        } else if (container && container.closest) {
+          p = container.closest("p");
+        }
+        
+        if (!p || p.tagName.toUpperCase() !== "P") return;
+        
+        const text = (p.textContent || "").trim();
+        let newTag = null;
+        let prefixLen = 0;
+        
+        if (text.startsWith("### ")) {
+          newTag = "h3";
+          prefixLen = 4;
+        } else if (text.startsWith("## ")) {
+          newTag = "h2";
+          prefixLen = 3;
+        } else if (text.startsWith("# ")) {
+          newTag = "h1";
+          prefixLen = 2;
+        } else if (text.startsWith("> ")) {
+          newTag = "blockquote";
+          prefixLen = 2;
+        }
+        
+        if (newTag && prefixLen > 0) {
+          const el = document.createElement(newTag);
+          const content = text.substring(prefixLen);
+          
+          // Copy child nodes while removing the markdown marker
+          while (p.firstChild) {
+            el.appendChild(p.firstChild);
+          }
+          
+          // Update text content to remove the markdown prefix
+          if (el.firstChild && el.firstChild.nodeType === Node.TEXT_NODE) {
+            el.firstChild.textContent = content;
+          } else if (el.textContent) {
+            el.textContent = content;
+          }
+          
+          p.parentNode.replaceChild(el, p);
+        }
+      } catch (e) {
+        // Silently fail if conversion fails
       }
     }
 
