@@ -12,7 +12,7 @@ const DEFAULT_PROFILE = {
   email: "local@device",
   picture: "https://via.placeholder.com/40"
 };
-
+const DEMO_MODE = true;
 let syncInProgress = false;
 
 const tools = {
@@ -310,7 +310,7 @@ async function fetchUser() {
 
 async function backupLocalNodesToCloud() {
   if (!window.currentUser || syncInProgress) return;
-
+  if (DEMO_MODE) return;
   syncInProgress = true;
 
   try {
@@ -446,7 +446,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   initCanvas();
   setProfileUI(null);
 
-  await initDB();
+  if (!DEMO_MODE) {
+    await initDB();
+  } else {
+    console.log("DEMO_MODE: DB disabled for v0");
+  }
   DB_READY = true;
   console.log("IndexedDB ready", { DB_READY, OFFLINE_MODE, DEV_MODE });
 
@@ -458,7 +462,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   const user = await fetchUser();
-  if (user) {
+  if (!DEMO_MODE && user) {
     await syncAfterLogin();
   }
 
