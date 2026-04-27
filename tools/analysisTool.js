@@ -51,7 +51,9 @@ export async function initAnalysisToolV2(deps, context = {}) {
   const sourceLevel2Input = document.getElementById("sourceLevel2");
   const sourceLevel3Input = document.getElementById("sourceLevel3");
   const sourceEditor = document.getElementById("sourceEditor");
+  const editorToolbar = document.getElementById("editorToolbar");
   const newSourceBtn = document.getElementById("newSourceBtn");
+  const studyGrid = document.querySelector(".study-grid");
   const analysisReader = document.getElementById("analysisReader");
   const analysisShell = document.querySelector(".analysis-shell");
   const resetAnalysisFormBtn = document.getElementById("resetAnalysisForm");
@@ -65,6 +67,21 @@ export async function initAnalysisToolV2(deps, context = {}) {
   const analysisCleanupClose = document.getElementById("analysisCleanupClose");
   const analysisCleanupKeepBtn = document.getElementById("analysisCleanupKeepBtn");
   const analysisCleanupDeleteBtn = document.getElementById("analysisCleanupDeleteBtn");
+  const analysisForm = document.getElementById("analysisForm");
+  const analysisFloatCard = document.getElementById("analysisFloatCard");
+  const cueFloatCard = document.getElementById("cueFloatCard");
+  const analysisNodeList = document.getElementById("analysisNodeList");
+  const readerWrapper = document.getElementById("readerWrapper");
+  const editorWrapper = document.getElementById("editorWrapper");
+  const quoteSelectionBtn = document.getElementById("quoteSelectionBtn");
+  const toggleSourceModeBtn = document.getElementById("toggleSourceModeBtn");
+  const cancelEditSourceBtn = document.getElementById("cancelEditSourceBtn");
+  const quoteRefsListContainerContainer = document.getElementById("quoteRefsListContainer");
+  const addQuoteRefBtn = document.getElementById("addQuoteRefBtn");
+  const currentHierarchy = document.getElementById("currentHierarchy");
+  const addAnalysisNodeBtn = document.getElementById("addAnalysisNodeBtn");
+  const analysisCardKicker = document.getElementById("analysisCardKicker");
+  const analysisSubmitBtn = document.getElementById("analysisSubmitBtn");
 
   if (!launchpadView || !studyView || !analysisForm || !analysisReader) {
     console.error("[ANALYSIS] Critical DOM elements missing. Analysis tool cannot initialize.", {
@@ -106,12 +123,82 @@ function enforceUserSelect() {
     focusedRangeKey: null,
     selectedQuoteRef: null, // NEW: for quote picker in analysis form
     cueEditMode: false,     // NEW: for editing cue nodes
-    analysisSessionCreatedQuoteIds: []
+    analysisSessionCreatedQuoteIds: [],
+    lastLayer1Value: null
   };
 
   // Handle context subject from global launchpad
   if (contextSubject) {
     state.selectedSubject = contextSubject;
+  }
+
+  function convertGoogleDocsHtml(html) {
+    let result = html;
+    result = result.replace(/<span[^>]*class="[^"]*Apple-style-span[^"]*"[^>]*>(.*?)<\/span>/gi, "$1");
+    result = result.replace(/<span[^>]*style="[^"]*font-family:[^;]*;?[^"]*">(.*?)<\/span>/gi, "$1");
+    result = result.replace(/<span[^>]*>(.*?)<\/span>/gi, "$1");
+    result = result.replace(/<font[^>]*>(.*?)<\/font>/gi, "$1");
+    result = result.replace(/<o:p>(.*?)<\/o:p>/gi, "$1");
+    result = result.replace(/<bdo[^>]*>(.*?)<\/bdo>/gi, "$1");
+    result = result.replace(/<span[^>]+>/gi, "");
+    return result;
+  }
+
+  function convertWordHtml(html) {
+    let result = html;
+    result = result.replace(/<xml[^>]*>.*?<\/xml>/gi, "");
+    result = result.replace(/<w:[^>]+>.*?<\/w:[^>]+>/gi, "");
+    result = result.replace(/<o:[^>]+>.*?<\/o:[^>]+>/gi, "");
+    result = result.replace(/<v:[^>]+>.*?<\/v:[^>]+>/gi, "");
+    result = result.replace(/<st1:[^>]+>.*?<\/st1:[^>]+>/gi, "");
+    result = result.replace(/class="Mso[^"]*"/gi, "");
+    result = result.replace(/style="[^"]*mso-[^"]*"/gi, "");
+    result = result.replace(/<!--\[if[^>]*>-->/gi, "");
+    result = result.replace(/<!--<!\[endif\]-->/gi, "");
+    return result;
+  }
+
+  function convertMarkdown(text) {
+    let result = escapeHtml(text);
+    result = result.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    result = result.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+    result = result.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+    result = result.replace(/_([^_]+)_/g, "<em>$1</em>");
+    result = result.replace(/^### (.+)$/gm, "<h3>$1</h3>");
+    result = result.replace(/^## (.+)$/gm, "<h2>$1</h2>");
+    result = result.replace(/^# (.+)$/gm, "<h1>$1</h1>");
+    result = result.replace(/^> (.+)$/gm, "<blockquote>$1</blockquote>");
+    result = result.replace(/^- (.+)$/gm, "<li>$1</li>");
+    result = result.replace(/^\d+\. (.+)$/gm, "<li>$1</li>");
+    result = result.replace(/\n/g, "<br>");
+    return result;
+  }
+
+  function convertInlineMarkdown() {
+    const textNodes = [];
+    const walker = document.createTreeWalker(sourceEditor, NodeFilter.SHOW_TEXT);
+    let node;
+    while (node = walker.nextNode()) {
+      if (node.textContent.includes("*") || node.textContent.includes("_") || node.textContent.includes("`")) {
+        textNodes.push(node);
+      }
+    }
+    textNodes.forEach(textNode => {
+      let text = textNode.textContent;
+      text = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+      text = text.replace(/_([^_]+)_/g, "<em>$1</em>");
+      text = text.replace(/`([^`]+)`/g, "<code>$1</code>");
+      if (text !== textNode.textContent) {
+        const parent = textNode.parentNode;
+        const temp = document.createElement("div");
+        temp.innerHTML = text;
+        parent.replaceChild(temp, textNode);
+        while (temp.firstChild) {
+          parent.insertBefore(temp.firstChild, temp);
+        }
+        parent.removeChild(temp);
+      }
+    });
   }
 
   function clampPriority(value) {
@@ -489,6 +576,10 @@ function htmlToPlainText(html) {
 
     if (toggleSourceModeBtn) {
       toggleSourceModeBtn.textContent = isEditor ? "View Source" : "Edit Source";
+    }
+
+    if (studyGrid) {
+      studyGrid.classList.toggle("editor-expanded", isEditor);
     }
 
     // Show/hide save and cancel buttons based on edit mode
@@ -1092,11 +1183,11 @@ function selectSource(sourceId) {
       }
       
       // Update quote references display when showing the card
-      if (quoteRefsList && state.selectedQuoteRef && state.selectedQuoteRef.length > 0) {
-        quoteRefsList.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
+      if (quoteRefsListContainer && state.selectedQuoteRef && state.selectedQuoteRef.length > 0) {
+        quoteRefsListContainer.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
         attachQuoteRefEventListeners();
-      } else if (quoteRefsList) {
-        quoteRefsList.innerHTML = "";
+      } else if (quoteRefsListContainer) {
+        quoteRefsListContainer.innerHTML = "";
       }
     }
   }
@@ -1116,7 +1207,7 @@ function selectSource(sourceId) {
     state.analysisEditMode = false;
     state.selectedQuoteRef = [];
     hideQuoteButton();
-    const list = document.getElementById("quoteRefsList");
+    const list = document.getElementById("quoteRefsListContainer");
     if (list) list.innerHTML = "";
     resetAnalysisSessionCreatedQuotes();
   }
@@ -1328,9 +1419,9 @@ function selectSource(sourceId) {
       
       // Refresh the analysis form if open
       if (state.analysisEditMode && state.selectedQuoteRef) {
-        const quoteRefsList = document.getElementById("quoteRefsList");
-        if (quoteRefsList) {
-          quoteRefsList.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
+        const quoteRefsListContainer = document.getElementById("quoteRefsListContainer");
+        if (quoteRefsListContainer) {
+          quoteRefsListContainer.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
           attachQuoteRefEventListeners();
         }
       }
@@ -1361,9 +1452,9 @@ function selectSource(sourceId) {
         
         // Refresh the analysis form if open
         if (state.analysisEditMode && state.selectedQuoteRef) {
-          const quoteRefsList = document.getElementById("quoteRefsList");
-          if (quoteRefsList) {
-            quoteRefsList.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
+          const quoteRefsListContainer = document.getElementById("quoteRefsListContainer");
+          if (quoteRefsListContainer) {
+            quoteRefsListContainer.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
             attachQuoteRefEventListeners();
           }
         }
@@ -1913,20 +2004,29 @@ const updateLayerSelection = () => {
 
       layer2Select.style.display = "inline-block";
       
-      const savedL2Value = layer2Select.value;
-      layer2Select.innerHTML = l2Keys.map((k) => {
-        const label = k === DIRECT_KEY ? "(Direct)" : k;
-        return `<option value="${escapeHtml(k)}">${escapeHtml(label)}</option>`;
-      }).join("");
-
-      let currentL2;
-      if (l2Keys.includes(savedL2Value)) {
-        currentL2 = savedL2Value;
-        layer2Select.value = currentL2;
+      const hasLayer1Changed = !state.lastLayer1Value || state.lastLayer1Value !== selectedL1;
+      state.lastLayer1Value = selectedL1;
+      
+      if (hasLayer1Changed) {
+        layer2Select.innerHTML = l2Keys.map((k) => {
+          const label = k === DIRECT_KEY ? "(Direct)" : k;
+          return `<option value="${escapeHtml(k)}">${escapeHtml(label)}</option>`;
+        }).join("");
+        layer2Select.value = l2Keys[0];
       } else {
-        currentL2 = l2Keys[0];
-        layer2Select.value = currentL2;
+        const savedL2Value = layer2Select.value;
+        layer2Select.innerHTML = l2Keys.map((k) => {
+          const label = k === DIRECT_KEY ? "(Direct)" : k;
+          return `<option value="${escapeHtml(k)}">${escapeHtml(label)}</option>`;
+        }).join("");
+        if (l2Keys.includes(savedL2Value)) {
+          layer2Select.value = savedL2Value;
+        } else {
+          layer2Select.value = l2Keys[0];
+        }
       }
+
+      const currentL2 = layer2Select.value;
 
       const entriesL2 = entriesL1.filter((e) => (e.l2 || DIRECT_KEY) === currentL2);
 
@@ -2355,7 +2455,6 @@ const updateLayerSelection = () => {
 
 
   // Add click handler for the new "+ Add Analysis Node" button
-  const addAnalysisNodeBtn = document.getElementById("addAnalysisNodeBtn");
   if (addAnalysisNodeBtn) {
     addAnalysisNodeBtn.addEventListener("click", () => {
       clearAnalysisDraft();
@@ -2392,30 +2491,52 @@ const updateLayerSelection = () => {
 
   if (sourceEditor) {
     sourceEditor.addEventListener("paste", (event) => {
+      const clipboardData = event.clipboardData;
+      if (!clipboardData) return;
+      
       event.preventDefault();
       event.stopPropagation();
-      const html = event.clipboardData?.getData("text/html");
-      const text = event.clipboardData?.getData("text/plain") || "";
       
-      let content = "";
-      if (html && html.includes("<!--StartFragment-->")) {
-        const start = html.indexOf("<!--StartFragment-->");
-        const end = html.indexOf("<!--EndFragment-->");
-        if (start !== -1 && end !== -1 && end > start) {
-          content = html.substring(start + 20, end);
+      const text = clipboardData.getData("text/plain") || "";
+      let html = clipboardData.getData("text/html");
+      let cleanHtml = null;
+      
+      if (html && html.trim()) {
+        const startFrag = html.indexOf("<!--StartFragment-->");
+        const endFrag = html.indexOf("<!--EndFragment-->");
+        if (startFrag !== -1 && endFrag !== -1 && endFrag > startFrag) {
+          cleanHtml = html.substring(startFrag + 20, endFrag);
+        } else if (!html.includes("<!DOCTYPE") && !html.includes("<html")) {
+          cleanHtml = html;
+        }
+        
+        if (cleanHtml && cleanHtml.trim()) {
+          cleanHtml = convertGoogleDocsHtml(cleanHtml);
+          cleanHtml = convertWordHtml(cleanHtml);
+        } else {
+          cleanHtml = null;
         }
       }
       
-      if (!content && text) {
-        content = text.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
-      }
+      let useMarkdown = !cleanHtml || !cleanHtml.trim();
+      let content = useMarkdown ? convertMarkdown(text) : cleanHtml;
       
-      if (content) {
+      if (content && content.trim()) {
         document.execCommand("insertHTML", false, content);
+        setTimeout(() => {
+          const walk = document.createTreeWalker(sourceEditor, NodeFilter.SHOW_ELEMENT);
+          let node;
+          while (node = walk.nextNode()) {
+            node.style.fontSize = "";
+            if (node.hasAttribute("size")) node.removeAttribute("size");
+          }
+        }, 0);
+      } else if (text) {
+        document.execCommand("insertText", false, text);
       }
     });
     
-    // Remove inline styles and clean garbage after paste
+    // Remove inline styles and clean garbage after paste, and convert inline markdown
     sourceEditor.addEventListener("input", () => {
       const walk = document.createTreeWalker(sourceEditor, NodeFilter.SHOW_ELEMENT);
       const toRemove = [];
@@ -2587,6 +2708,251 @@ function selectSource(sourceId) {
     });
   }
 
+  if (sourceEditor && editorToolbar) {
+    let lastSelectionRange = null;
+
+    function saveSelection() {
+      const sel = window.getSelection();
+      if (sel.rangeCount > 0) {
+        const r = sel.getRangeAt(0);
+        if (sourceEditor.contains(r.commonAncestorContainer)) {
+          lastSelectionRange = r.cloneRange();
+        }
+      }
+    }
+
+    sourceEditor.addEventListener("blur", saveSelection);
+    sourceEditor.addEventListener("mouseup", saveSelection);
+
+    function execFormat(command, value) {
+      if (command === "removeFormat") {
+        // Use native removeFormat first
+        document.execCommand("removeFormat", false, null);
+        
+        // Then clean up any remaining formatting elements that native removeFormat misses
+        const tagsToRemove = ["STRONG", "B", "EM", "I", "U", "S", "STRIKE", "CODE", "SPAN"];
+        const tagsToConvert = {
+          "H1": "p",
+          "H2": "p", 
+          "H3": "p",
+          "BLOCKQUOTE": "p",
+          "UL": "p",
+          "OL": "p"
+        };
+        
+        const walker = document.createTreeWalker(sourceEditor, NodeFilter.SHOW_ELEMENT, null, false);
+        const elements = [];
+        let node;
+        while (node = walker.nextNode()) {
+          elements.push(node);
+        }
+        
+        for (const el of elements) {
+          const tag = el.tagName.toUpperCase();
+          
+          // Convert block elements to paragraphs
+          if (tagsToConvert[tag]) {
+            const newTag = document.createElement(tagsToConvert[tag]);
+            while (el.firstChild) newTag.appendChild(el.firstChild);
+            el.parentNode.replaceChild(newTag, el);
+            continue;
+          }
+          
+          // Remove inline formatting wrappers
+          if (tagsToRemove.includes(tag)) {
+            const parent = el.parentNode;
+            while (el.firstChild) parent.insertBefore(el.firstChild, el);
+            parent.removeChild(el);
+          }
+        }
+        
+        // Clear any remaining inline styles
+        const styleWalker = document.createTreeWalker(sourceEditor, NodeFilter.SHOW_ELEMENT, null, false);
+        let styleNode;
+        while (styleNode = styleWalker.nextNode()) {
+          if (styleNode.style) {
+            styleNode.style.textDecoration = "";
+            styleNode.style.fontWeight = "";
+            styleNode.style.fontStyle = "";
+          }
+        }
+        
+        return;
+      }
+      if (command === "h1" || command === "h2" || command === "h3") {
+        return document.execCommand("formatBlock", false, "<" + command + ">");
+      }
+      if (command === "formatBlock" && value) {
+        return document.execCommand("formatBlock", false, value);
+      }
+      if (value) {
+        return document.execCommand(command, false, value);
+      }
+      return document.execCommand(command, false, null);
+    }
+
+    editorToolbar.querySelectorAll(".toolbar-btn:not(.drag-handle)").forEach(btn => {
+      btn.addEventListener("mousedown", (e) => { e.preventDefault(); });
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const sel = window.getSelection();
+        if (!sel.rangeCount || !sourceEditor.contains(sel.commonAncestorContainer)) {
+          if (lastSelectionRange) {
+            sel.removeAllRanges();
+            sel.addRange(lastSelectionRange);
+          }
+        }
+        const command = btn.dataset.command;
+        const value = btn.dataset.value || null;
+        execFormat(command, value);
+        saveSelection();
+        sourceEditor.focus();
+      });
+    });
+    
+    const dragHandle = editorToolbar.querySelector(".drag-handle");
+    let isDragging = false;
+    let toolbarInOriginalPos = true;
+    let snapSlot = null;
+    let editorWrapper = null;
+    
+    if (dragHandle) {
+      editorWrapper = document.getElementById("editorWrapper");
+      if (editorWrapper) {
+        snapSlot = document.createElement("div");
+        snapSlot.className = "toolbar-snap-slot";
+        snapSlot.style.cssText = `
+          display: none; height: 44px; border: 2px dashed rgba(44,255,179,0.4);
+          border-radius: 8px; margin-bottom: 10px; align-items: center;
+          justify-content: center; color: rgba(44,255,179,0.6); font-size: 0.8rem;
+          transition: all 0.15s ease;
+        `;
+        snapSlot.textContent = "Drop to slot back";
+        editorWrapper.insertBefore(snapSlot, editorWrapper.firstChild);
+      }
+      
+      dragHandle.addEventListener("mousedown", (e) => {
+        isDragging = true;
+        snapSlot = document.querySelector(".toolbar-snap-slot");
+        document.body.appendChild(editorToolbar);
+        editorToolbar.style.position = "fixed";
+        editorToolbar.style.zIndex = "9999";
+        e.preventDefault();
+        e.stopPropagation();
+      });
+      
+      window.addEventListener("mousemove", (e) => {
+        if (!isDragging) return;
+        editorToolbar.style.left = e.clientX + "px";
+        editorToolbar.style.top = e.clientY + "px";
+        editorToolbar.style.transform = "none";
+        
+        // Check if near the drop zone
+        if (editorWrapper && snapSlot) {
+          const wrapperRect = editorWrapper.getBoundingClientRect();
+          const toolbarRect = editorToolbar.getBoundingClientRect();
+          
+          // Check if toolbar center is near editorWrapper top
+          const toolbarCenterY = toolbarRect.top + toolbarRect.height / 2;
+          const isNearWrapper = (
+            e.clientX >= wrapperRect.left - 50 &&
+            e.clientX <= wrapperRect.right + 50 &&
+            toolbarCenterY <= wrapperRect.top + 100
+          );
+          
+          if (isNearWrapper) {
+            snapSlot.style.display = "flex";
+            snapSlot.style.borderColor = "rgba(44,255,179,0.8)";
+            snapSlot.style.backgroundColor = "rgba(44,255,179,0.1)";
+          } else {
+            snapSlot.style.display = "none";
+          }
+        }
+      });
+      
+      window.addEventListener("mouseup", (e) => {
+        if (!isDragging) return;
+        isDragging = false;
+        
+        if (editorWrapper && snapSlot && snapSlot.style.display === "flex") {
+          // Snap back to original position
+          editorWrapper.insertBefore(editorToolbar, editorWrapper.firstChild);
+          editorToolbar.style.position = "";
+          editorToolbar.style.zIndex = "100";
+          editorToolbar.style.left = "";
+          editorToolbar.style.top = "";
+          editorToolbar.style.transform = "";
+          toolbarInOriginalPos = true;
+          snapSlot.style.display = "none";
+        } else {
+          // Stay where dropped, but ensure it's visible (not behind other elements)
+          editorToolbar.style.position = "fixed";
+          editorToolbar.style.zIndex = "9999";
+        }
+      });
+    }
+
+    sourceEditor.addEventListener("keydown", (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        switch(e.key.toLowerCase()) {
+          case "b": e.preventDefault(); document.execCommand("bold", false, null); break;
+          case "i": e.preventDefault(); document.execCommand("italic", false, null); break;
+          case "u": e.preventDefault(); document.execCommand("underline", false, null); break;
+        }
+      }
+      if (e.key === "Enter") {
+        setTimeout(convertMdOnEnter, 50);
+      }
+    });
+    
+    function convertMdOnEnter() {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return;
+      const range = sel.getRangeAt(0);
+      const p = range.startContainer.parentNode;
+      if (!p || p.tagName !== "P") return;
+      const text = p.textContent || "";
+      let newTag = null;
+      if (text.startsWith("# ")) newTag = "h1";
+      else if (text.startsWith("## ")) newTag = "h2";
+      else if (text.startsWith("### ")) newTag = "h3";
+      else if (text.startsWith("> ")) newTag = "blockquote";
+      if (newTag) {
+        const el = document.createElement(newTag);
+        const content = newTag === "h1" ? text.substring(2) 
+                   : newTag === "h2" ? text.substring(3)
+                   : newTag === "h3" ? text.substring(4)
+                   : text.substring(2);
+        el.textContent = content;
+        p.parentNode.replaceChild(el, p);
+      }
+    }
+
+    function updateToolbarVisibility() {
+      if (editorToolbar) {
+        editorToolbar.classList.toggle("visible", state.viewMode === "editor");
+        editorToolbar.style.display = state.viewMode === "editor" ? "flex" : "none";
+        if (state.viewMode === "editor" && !toolbarInOriginalPos) {
+          const editorWrapper = document.getElementById("editorWrapper");
+          if (editorWrapper) {
+            editorWrapper.insertBefore(editorToolbar, editorWrapper.firstChild);
+          }
+          editorToolbar.style.position = "";
+          toolbarInOriginalPos = true;
+        }
+      }
+    }
+    
+    updateToolbarVisibility();
+    
+    const originalSetSourceViewMode = setSourceViewMode;
+    setSourceViewMode = function(mode) {
+      originalSetSourceViewMode(mode);
+      updateToolbarVisibility();
+    };
+  }
+
   function captureSelection() {
     state.selectedRange = getSelectionFromReader();
     if (state.selectedRange?.range && state.viewMode === "reader") {
@@ -2632,8 +2998,8 @@ function selectSource(sourceId) {
           state.selectedQuoteRef.push(quoteRef);
         }
 
-        if (quoteRefsList) {
-          quoteRefsList.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
+        if (quoteRefsListContainer) {
+          quoteRefsListContainer.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
           attachQuoteRefEventListeners();
         }
 
@@ -2729,9 +3095,6 @@ function selectSource(sourceId) {
   }
 
   // NEW: Add click listener for "+ Add Quote Reference" button
-  const addQuoteRefBtn = document.getElementById("addQuoteRefBtn");
-  const quoteRefsList = document.getElementById("quoteRefsList");
-
   if (addQuoteRefBtn) {
     addQuoteRefBtn.addEventListener("click", (event) => {
       event.preventDefault();
@@ -2772,8 +3135,8 @@ function selectSource(sourceId) {
     }
 
     // Render quote refs in form
-    if (quoteRefsList) {
-      quoteRefsList.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
+    if (quoteRefsListContainer) {
+      quoteRefsListContainer.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
       attachQuoteRefEventListeners();
     }
   };
@@ -2789,8 +3152,8 @@ function selectSource(sourceId) {
         await refreshData();
       }
       
-      if (quoteRefsList) {
-        quoteRefsList.innerHTML = state.selectedQuoteRef.length
+      if (quoteRefsListContainer) {
+        quoteRefsListContainer.innerHTML = state.selectedQuoteRef.length
           ? renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100)
           : "";
         attachQuoteRefEventListeners();
@@ -2801,8 +3164,8 @@ function selectSource(sourceId) {
   window.setQuotePriorityForAnalysis = function(idx, priority) {
     if (!state.selectedQuoteRef?.[idx]) return;
     state.selectedQuoteRef[idx].priority = clampPriority(priority);
-    if (quoteRefsList) {
-      quoteRefsList.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
+    if (quoteRefsListContainer) {
+      quoteRefsListContainer.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
       attachQuoteRefEventListeners();
     }
   };
@@ -2922,8 +3285,8 @@ function selectSource(sourceId) {
         });
         
         // Render the existing quote references in the form
-        if (quoteRefsList) {
-          quoteRefsList.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
+        if (quoteRefsListContainer) {
+          quoteRefsListContainer.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
           attachQuoteRefEventListeners();
         }
         
