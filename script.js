@@ -3,6 +3,8 @@ import { syncLocalWithCloud, syncToCloud, deleteCloudNode } from "./sync.js";
 import { initAnalysisToolV2 } from "./analysisTool.js";
 import { performMigration } from "./migrations.js";
 
+window.APP_VERSION = "v0";
+window.DEMO_MODE = DEMO_MODE;
 const BACKEND = "https://neuronet-backend.onrender.com";
 const DEV_MODE = false;
 let DB_READY = false;
