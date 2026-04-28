@@ -449,11 +449,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   initCanvas();
   setProfileUI(null);
 
-  if (!DEMO_MODE) {
-    await initDB();
-  } else {
-    console.log("DEMO_MODE: DB disabled for v0");
-  }
+  await initDB();
   DB_READY = true;
   console.log("IndexedDB ready", { DB_READY, OFFLINE_MODE, DEV_MODE });
 
