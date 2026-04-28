@@ -22,6 +22,8 @@ export async function initAnalysisToolV2(deps, context = {}) {
     removeCueEverywhere
   } = deps;
 
+  let textMap = null;
+
   const { subject: contextSubject, nodeId: contextNodeId } = context;
 
   if (typeof window.__neuronetAnalysisCleanup === "function") {
@@ -126,6 +128,20 @@ function enforceUserSelect() {
     analysisSessionCreatedQuoteIds: [],
     lastLayer1Value: null
   };
+
+  function rebuildTextMap(root) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const map = [];
+    let index = 0, node;
+
+    while ((node = walker.nextNode())) {
+      const length = node.nodeValue.length;
+      map.push({ node, start: index, end: index + length });
+      index += length;
+    }
+
+    textMap = map;
+  }
 
   // Handle context subject from global launchpad
   if (contextSubject) {
@@ -782,38 +798,29 @@ function selectSource(sourceId) {
       if (start < 0 || end < 0) return;
       if (end <= start) return;
       if (start > 1000000 || end > 1000000) return; // Sanity check for massive values
-      
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
-      const textNodes = [];
 
-      // FIXED traversal (prevents infinite loop / array explosion)
-      let currentNode;
-      while ((currentNode = walker.nextNode())) {
-        textNodes.push(currentNode);
-      }
+      if (!textMap) rebuildTextMap(root);
 
       const rangesToWrap = [];
-      let index = 0;
 
-      for (const node of textNodes) {
-        const nodeText = node.nodeValue || "";
+      for (const entry of textMap) {
+        if (entry.end <= start) continue;
+        if (entry.start >= end) break;
+
+        const nodeText = entry.node.nodeValue;
         const originalLength = nodeText.length;
-        const nodeEnd = index + nodeText.length;
 
-        if (nodeEnd <= start) {
-          index = nodeEnd;
-          continue;
+        const localStart = Math.max(0, start - entry.start);
+        const localEnd = Math.min(originalLength, end - entry.start);
+
+        if (localEnd > localStart) {
+          rangesToWrap.push({
+            node: entry.node,
+            localStart,
+            localEnd,
+            originalLength
+          });
         }
-        if (index >= end) break;
-
-        const localStart = Math.max(0, start - index);
-        const localEnd = Math.min(nodeText.length, end - index);
-
-        // Validate local range
-        if (localStart >= 0 && localEnd > localStart && localEnd <= nodeText.length) {
-          rangesToWrap.push({ node, localStart, localEnd, originalLength });
-        }
-        index = nodeEnd;
       }
 
       for (const { node, localStart, localEnd, originalLength } of rangesToWrap) {
@@ -851,6 +858,7 @@ function selectSource(sourceId) {
     if (!root || !ranges?.length) return;
 
     clearAllHighlights(root);
+    rebuildTextMap(root);
 
     const sorted = [...ranges].sort((a, b) => a.start - b.start);
 
@@ -2748,6 +2756,8 @@ const updateLayerSelection = () => {
     // Remove inline styles, clean garbage after paste, and convert inline markdown
     let markdownConversionTimeout;
     sourceEditor.addEventListener("input", () => {
+      textMap = null; // invalidate cache
+      
       // Clean up styles and elements immediately
       const walk = document.createTreeWalker(sourceEditor, NodeFilter.SHOW_ELEMENT);
       const toRemove = [];
