@@ -83,7 +83,7 @@ export async function initAnalysisToolV2(deps, context = {}) {
   const quoteSelectionBtn = document.getElementById("quoteSelectionBtn");
   const toggleSourceModeBtn = document.getElementById("toggleSourceModeBtn");
   const cancelEditSourceBtn = document.getElementById("cancelEditSourceBtn");
-  const quoteRefsListContainer = document.getElementById("quoteRefsListContainer");
+  const quoteRefsListContainer = document.getElementById("quoteRefsList");
   const addQuoteRefBtn = document.getElementById("addQuoteRefBtn");
   const currentHierarchy = document.getElementById("currentHierarchy");
   const addAnalysisNodeBtn = document.getElementById("addAnalysisNodeBtn");
@@ -1453,7 +1453,7 @@ function selectSource(sourceId) {
     state.analysisEditMode = false;
     state.selectedQuoteRef = [];
     hideQuoteButton();
-    const list = document.getElementById("quoteRefsListContainer");
+    const list = document.getElementById("quoteRefsList");
     if (list) list.innerHTML = "";
     resetAnalysisSessionCreatedQuotes();
   }
@@ -1665,7 +1665,7 @@ function selectSource(sourceId) {
       
       // Refresh the analysis form if open
       if (state.analysisEditMode && state.selectedQuoteRef) {
-        const quoteRefsListContainer = document.getElementById("quoteRefsListContainer");
+        const quoteRefsListContainer = document.getElementById("quoteRefsList");
         if (quoteRefsListContainer) {
           quoteRefsListContainer.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
           attachQuoteRefEventListeners();
@@ -1698,7 +1698,7 @@ function selectSource(sourceId) {
         
         // Refresh the analysis form if open
         if (state.analysisEditMode && state.selectedQuoteRef) {
-          const quoteRefsListContainer = document.getElementById("quoteRefsListContainer");
+          const quoteRefsListContainer = document.getElementById("quoteRefsList");
           if (quoteRefsListContainer) {
             quoteRefsListContainer.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
             attachQuoteRefEventListeners();
