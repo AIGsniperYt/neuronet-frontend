@@ -1,4 +1,8 @@
-const DB_NAME = "neuronet";
+function getDBName() {
+  return window.DEMO_MODE
+    ? `neuronet-${window.APP_VERSION}`
+    : "neuronet";
+}
 const DB_VERSION = 2; // Updated for new quote/analysis separation
 
 let db;
