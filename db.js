@@ -15,8 +15,7 @@ function emitDBChange(detail) {
 
 export function initDB() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
+  const request = indexedDB.open(getDBName(), DB_VERSION);
     request.onupgradeneeded = (e) => {
       db = e.target.result;
 
