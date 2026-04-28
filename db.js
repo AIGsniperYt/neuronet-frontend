@@ -15,41 +15,25 @@ function emitDBChange(detail) {
 
 export function initDB() {
   return new Promise((resolve, reject) => {
-  const request = indexedDB.open(getDBName(), DB_VERSION);
+    const request = indexedDB.open(getDBName(), DB_VERSION);
+
     request.onupgradeneeded = (e) => {
       db = e.target.result;
 
-      // Clear old data during migration
-      const stores = Array.from(db.objectStoreNames);
-      
-      // Create nodes store (for all node types: source, analysis)
-      if (!db.objectStoreNames.contains("nodes")) {
-        db.createObjectStore("nodes", { keyPath: "id" });
-      }
-
-      // Create separate quotes store
-      if (!db.objectStoreNames.contains("quotes")) {
-        const quoteStore = db.createObjectStore("quotes", { keyPath: "id" });
-        quoteStore.createIndex("subject", "subject", { unique: false });
-        quoteStore.createIndex("sourceId", "link.sourceId", { unique: false });
-        quoteStore.createIndex("subjectSource", ["subject", "link.sourceId"], { unique: false });
-      }
-
-      // Add indices to nodes store for better querying
+      // ========== NODES STORE ==========
       if (!db.objectStoreNames.contains("nodes")) {
         const nodeStore = db.createObjectStore("nodes", { keyPath: "id" });
         nodeStore.createIndex("type", "type", { unique: false });
         nodeStore.createIndex("subject", "subject", { unique: false });
         nodeStore.createIndex("subjectType", ["subject", "type"], { unique: false });
-      } else {
-        // If nodes already exists, try to add indices if they don't exist
-        try {
-          if (!db.objectStoreNames.contains("nodes").indices?.contains("type")) {
-            // This will fail in onupgradeneeded but that's okay
-          }
-        } catch (e) {
-          // Indices already exist or can't be added
-        }
+      }
+
+      // ========== QUOTES STORE ==========
+      if (!db.objectStoreNames.contains("quotes")) {
+        const quoteStore = db.createObjectStore("quotes", { keyPath: "id" });
+        quoteStore.createIndex("subject", "subject", { unique: false });
+        quoteStore.createIndex("sourceId", "link.sourceId", { unique: false });
+        quoteStore.createIndex("subjectSource", ["subject", "link.sourceId"], { unique: false });
       }
     };
 
@@ -59,8 +43,8 @@ export function initDB() {
     };
 
     request.onerror = (e) => {
-        console.error("IndexedDB failed:", e);
-        reject(e);
+      console.error("IndexedDB failed:", e);
+      reject(e);
     };
   });
 }
