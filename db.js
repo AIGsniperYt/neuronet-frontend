@@ -253,6 +253,10 @@ export function getNode(id) {
       reject(new Error("IndexedDB is not initialized"));
       return;
     }
+    if (id == null || id === "") {
+      resolve(null);
+      return;
+    }
 
     const tx = db.transaction("nodes", "readonly");
     const req = tx.objectStore("nodes").get(id);
@@ -486,6 +490,32 @@ export function clearQuotes() {
   });
 }
 
+// ========== QUOTE SEARCH & DUPLICATE DETECTION ==========
+
+/**
+ * Find an existing quote by sourceId + start + end position
+ * Used to prevent duplicate quote nodes for the same text position
+ */
+export async function findExistingQuote(sourceId, start, end) {
+  const quotes = await getQuotesForSource(sourceId);
+  return quotes.find(q => 
+    Number(q.link?.start) === Number(start) && 
+    Number(q.link?.end) === Number(end)
+  ) || null;
+}
+
+/**
+ * Find an existing quote by its text content and source (fuzzy match)
+ */
+export async function findExistingQuoteByText(sourceId, quoteText) {
+  if (!quoteText) return null;
+  const quotes = await getQuotesForSource(sourceId);
+  const normalized = (text) => text?.toLowerCase().replace(/\s+/g, " ").trim() || "";
+  const target = normalized(quoteText);
+  
+  return quotes.find(q => normalized(q.quote) === target) || null;
+}
+
 // ========== ANALYSIS NODES (stored in nodes) ==========
 
 /**
@@ -536,6 +566,27 @@ export async function linkAnalysisToQuote(quoteId, analysisId) {
   }
   quote.updatedAt = Date.now();
   
+  // Also update analysis.quoteRefs to maintain bidirectional consistency
+  const analysis = await getNode(analysisId);
+  if (analysis) {
+    if (!analysis.quoteRefs) analysis.quoteRefs = [];
+    if (!analysis.quoteRefs.some(ref => ref.quoteId === quoteId)) {
+      // FIX: Include all necessary fields from quote node, not just basic info
+      const priority = quote.priority ? Math.min(5, Math.max(1, Math.round(Number(quote.priority)))) : 3;
+      analysis.quoteRefs.push({
+        quoteId: quote.id,
+        section: quote.section || "",
+        quote: quote.quote || "",
+        sourceId: quote.link?.sourceId,
+        start: Number.isFinite(Number(quote.link?.start)) ? Number(quote.link.start) : undefined,
+        end: Number.isFinite(Number(quote.link?.end)) ? Number(quote.link.end) : undefined,
+        priority
+      });
+      analysis.updatedAt = Date.now();
+      await addNode(analysis);
+    }
+  }
+  
   return addQuote(quote);
 }
 
@@ -551,6 +602,14 @@ export async function unlinkAnalysisFromQuote(quoteId, analysisId) {
   }
   quote.updatedAt = Date.now();
   
+  // Also update analysis.quoteRefs to maintain bidirectional consistency
+  const analysis = await getNode(analysisId);
+  if (analysis && analysis.quoteRefs) {
+    analysis.quoteRefs = analysis.quoteRefs.filter(ref => ref.quoteId !== quoteId);
+    analysis.updatedAt = Date.now();
+    await addNode(analysis);
+  }
+  
   return addQuote(quote);
 }
 
@@ -559,9 +618,30 @@ export async function unlinkAnalysisFromQuote(quoteId, analysisId) {
  */
 export async function getAnalysesReferencingQuote(quoteId) {
   const allNodes = await getAllNodes();
-  return allNodes.filter(node => 
+  const quote = await getQuote(quoteId);
+  
+  // Get analysis IDs from both sides of the relationship
+  const idsFromQuoteMeta = new Set(quote?.meta?.analysisNodeIds || []);
+  
+  // Check quoteRefs in analysis nodes
+  const idsFromQuoteRefs = new Set();
+  const analysesWithRefs = allNodes.filter(node => 
     node.type === "analysis" && 
-    node.quoteRefs?.some(ref => ref.quoteId === quoteId)
+    node.quoteRefs?.some(ref => {
+      if (ref.quoteId === quoteId) {
+        idsFromQuoteRefs.add(node.id);
+        return true;
+      }
+      return false;
+    })
+  );
+  
+  // Merge both sets of IDs
+  const allAnalysisIds = new Set([...idsFromQuoteMeta, ...idsFromQuoteRefs]);
+  
+  // Return full analysis nodes
+  return allNodes.filter(node => 
+    node.type === "analysis" && allAnalysisIds.has(node.id)
   );
 }
 

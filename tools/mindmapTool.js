@@ -15,6 +15,8 @@ export async function initMindmapTool(deps, context = {}) {
     removeNodeEverywhere,
     removeQuoteEverywhere,
     removeCueEverywhere,
+    linkAnalysisToQuote,
+    unlinkAnalysisFromQuote,
     escapeHtml
   } = deps;
 
@@ -1329,18 +1331,17 @@ const state = {
     const item2 = findItemById(id2);
     if (!item1 || !item2) return;
 
-    // Special logic for existing link structures
+    // Use proper bidirectional linking for analysis-quote connections
     if (item1.type === "analysis" && item2.type === "quote") {
-      if (!item1.quoteRefs) item1.quoteRefs = [];
-      if (!item1.quoteRefs.find(r => r.quoteId === item2.id)) {
-        item1.quoteRefs.push({ quoteId: item2.id, quote: item2.quote });
-        await addNode(item1);
-      }
+      // FIX: Use correct parameter order (quoteId, analysisId)
+      await linkAnalysisToQuote(item2.id, item1.id);
       return;
     }
     
     if (item1.type === "quote" && item2.type === "analysis") {
-      return linkNodes(id2, id1);
+      // FIX: Use correct parameter order (quoteId, analysisId)
+      await linkAnalysisToQuote(item1.id, item2.id);
+      return;
     }
 
     if (item1.type === "cue") {
@@ -1359,7 +1360,7 @@ const state = {
       return linkNodes(id2, id1);
     }
 
-    // Generic bidirectional manual link
+    // Generic bidirectional manual link (for non-analysis-quote connections)
     const updateManualLink = async (item, targetId) => {
       if (!item.meta) item.meta = {};
       if (!item.meta.manualLinks) item.meta.manualLinks = [];
@@ -1380,6 +1381,22 @@ const state = {
     const item2 = findItemById(id2);
     if (!item1 || !item2) return;
 
+    // Use proper bidirectional unlinking for analysis-quote connections
+    if (item1.type === "analysis" && item2.type === "quote") {
+      // FIX: Use correct parameter order (quoteId, analysisId)
+      await unlinkAnalysisFromQuote(item2.id, item1.id);
+      await refreshData();
+      if (state.selectedNodeId === id1) renderSidebar(item1);
+      return;
+    } else if (item1.type === "quote" && item2.type === "analysis") {
+      // FIX: Use correct parameter order (quoteId, analysisId)
+      await unlinkAnalysisFromQuote(item1.id, item2.id);
+      await refreshData();
+      if (state.selectedNodeId === id1) renderSidebar(item1);
+      return;
+    }
+
+    // Handle manual links (non-analysis-quote connections)
     const removeFromMeta = async (item, targetId) => {
       if (item.meta && item.meta.manualLinks) {
         item.meta.manualLinks = item.meta.manualLinks.filter(id => id !== targetId);
@@ -1389,19 +1406,8 @@ const state = {
       }
     };
 
-    // Remove from manual links
     await removeFromMeta(item1, id2);
     await removeFromMeta(item2, id1);
-
-    // Specific structural breaks
-    if (item1.type === "analysis" && item2.type === "quote") {
-      if (item1.quoteRefs) {
-        item1.quoteRefs = item1.quoteRefs.filter(r => r.quoteId !== id2);
-        await addNode(item1);
-      }
-    } else if (item1.type === "quote" && item2.type === "analysis") {
-      await breakLink(id2, id1);
-    }
 
     if (item1.type === "cue") {
       if (item1.quoteId === id2) {

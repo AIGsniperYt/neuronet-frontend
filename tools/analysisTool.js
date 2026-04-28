@@ -3,6 +3,7 @@ export async function initAnalysisToolV2(deps, context = {}) {
     getAllNodes,
     getAllQuotes,
     getAllCues,
+    getNode,
     addNode,
     addQuote,
     getQuote,
@@ -19,7 +20,11 @@ export async function initAnalysisToolV2(deps, context = {}) {
     isSourceNode,
     addCue,
     getCuesForQuote,
-    removeCueEverywhere
+    removeCueEverywhere,
+    findExistingQuote,
+    findExistingQuoteByText,
+    linkAnalysisToQuote,
+    unlinkAnalysisFromQuote
   } = deps;
 
   let textMap = null;
@@ -78,7 +83,7 @@ export async function initAnalysisToolV2(deps, context = {}) {
   const quoteSelectionBtn = document.getElementById("quoteSelectionBtn");
   const toggleSourceModeBtn = document.getElementById("toggleSourceModeBtn");
   const cancelEditSourceBtn = document.getElementById("cancelEditSourceBtn");
-  const quoteRefsListContainerContainer = document.getElementById("quoteRefsListContainer");
+  const quoteRefsListContainer = document.getElementById("quoteRefsListContainer");
   const addQuoteRefBtn = document.getElementById("addQuoteRefBtn");
   const currentHierarchy = document.getElementById("currentHierarchy");
   const addAnalysisNodeBtn = document.getElementById("addAnalysisNodeBtn");
@@ -372,13 +377,22 @@ function enforceUserSelect() {
   }
 
   function buildQuoteRefFromQuoteNode(quoteNode) {
+    const quote = quoteNode.quote || "";
+    const sourceId = quoteNode.link?.sourceId || quoteNode.sourceId;
+    const start = Number.isFinite(Number(quoteNode.link?.start)) ? Number(quoteNode.link.start) : undefined;
+    const end = Number.isFinite(Number(quoteNode.link?.end)) ? Number(quoteNode.link.end) : undefined;
+    // Skip building ref if critical data is missing
+    if (!quote || !sourceId || start == null || end == null) {
+      console.warn("buildQuoteRefFromQuoteNode: skipping broken quote node", quoteNode.id, { quote, sourceId, start, end });
+      return null;
+    }
     return {
       quoteId: quoteNode.id,
       section: quoteNode.section || "",
-      quote: quoteNode.quote || "",
-      sourceId: quoteNode.link?.sourceId,
-      start: Number.isFinite(Number(quoteNode.link?.start)) ? Number(quoteNode.link.start) : undefined,
-      end: Number.isFinite(Number(quoteNode.link?.end)) ? Number(quoteNode.link.end) : undefined,
+      quote,
+      sourceId,
+      start,
+      end,
       priority: clampPriority(quoteNode.priority)
     };
   }
@@ -856,7 +870,7 @@ function selectSource(sourceId) {
 
   function highlightQuotedRanges(root, ranges) {
     if (!root || !ranges?.length) return;
-
+    
     clearAllHighlights(root);
     rebuildTextMap(root);
 
@@ -868,6 +882,11 @@ function selectSource(sourceId) {
       const last = merged[merged.length - 1];
       if (last && r.start < last.end) {
         last.end = Math.max(last.end, r.end);
+        // Merge focusIds (comma-separated)
+        const lastIds = new Set((last.focusId || "").split(",").map(s => s.trim()).filter(Boolean));
+        const newIds = new Set((r.focusId || r.nodeId || "").split(",").map(s => s.trim()).filter(Boolean));
+        const mergedIds = new Set([...lastIds, ...newIds]);
+        last.focusId = Array.from(mergedIds).join(",");
       } else {
         merged.push({ ...r });
       }
@@ -886,8 +905,10 @@ function selectSource(sourceId) {
       const focusId = range.focusId ?? range.nodeId;
       const rangeKey = `${range.start}-${range.end}`;
 
+      // Check if ANY of the focusIds match the currently focused node
+      const focusIds = focusId.split(",").map(s => s.trim()).filter(Boolean);
       const isActive =
-        focusId === state.focusedNodeId &&
+        focusIds.includes(state.focusedNodeId) &&
         (!state.focusedRangeKey || state.focusedRangeKey === rangeKey);
 
       const className = isActive
@@ -913,7 +934,13 @@ function selectSource(sourceId) {
 
   function resolveAnalysisIdForSidebar(focusId) {
     if (!focusId) return null;
-    if (state.analysisNodes.some((n) => n.id === focusId)) return focusId;
+    // Handle comma-separated analysis IDs (from manual links)
+    const ids = focusId.split(",");
+    for (const id of ids) {
+      const trimmed = id.trim();
+      if (state.analysisNodes.some((n) => n.id === trimmed)) return trimmed;
+    }
+    // Fallback: check if it's a quote node
     const qNode = state.quotes.find((n) => n.id === focusId);
     const aid = qNode?.meta?.analysisNodeIds?.[0];
     return aid || null;
@@ -982,7 +1009,9 @@ function selectSource(sourceId) {
         }
 
         const analysisIds = q.meta?.analysisNodeIds || [];
-        const focusId = analysisIds[0] || q.id;
+        // Store ALL analysis IDs for this quote (not just first one)
+        // Use a special format to encode multiple IDs: "id1,id2,id3"
+        const focusId = analysisIds.length > 0 ? analysisIds.join(",") : q.id;
         mergeRange(start, end, focusId);
       } catch (e) {
         // Skip this quote if there's an error
@@ -1383,6 +1412,7 @@ function selectSource(sourceId) {
       end: Math.min(end, sourceText.length),
       quote,
       quoteHtml: rawQuoteHtml,
+      sourceId: source.id,
       range
     };
   }
@@ -1783,12 +1813,22 @@ function selectSource(sourceId) {
 
   // ========== NEW: QUOTE AND ANALYSIS LINKING FUNCTIONS ==========
 
-  function findExistingQuoteForSelection({ sourceId, start, end, quote }) {
+  async function findExistingQuoteForSelection({ sourceId, start, end, quote }) {
+    // First try exact position match using db.js function
+    let existing = await findExistingQuote(sourceId, start, end);
+    if (existing) return existing;
+    
+    // Fallback: try text match using db.js function
+    if (quote) {
+      existing = await findExistingQuoteByText(sourceId, quote);
+      if (existing) return existing;
+    }
+    
+    // Fallback to local state check
     return state.quotes.find((item) =>
       item.link?.sourceId === sourceId &&
       Number(item.link?.start) === Number(start) &&
-      Number(item.link?.end) === Number(end) &&
-      item.quote === quote
+      Number(item.link?.end) === Number(end)
     ) || null;
   }
 
@@ -1881,7 +1921,14 @@ function selectSource(sourceId) {
    * NEW: Path 1 - Create Quote Node from source
    */
   async function createQuoteNode(quoteText, sourceId, start, end) {
-    const source = getSourceById(sourceId);
+    if (!sourceId) {
+      console.warn("Missing sourceId, skipping quote creation");
+      return null;
+    }
+    let source = getSourceById(sourceId);
+    if (!source) {
+      source = await getNode(sourceId);
+    }
     if (!source) throw new Error("Source not found");
 
     const now = Date.now();
@@ -1914,79 +1961,67 @@ function selectSource(sourceId) {
     return quoteNode;
   }
 
-  /**
-   * Link an analysis node to a quote (create bidirectional reference)
-   * NEW: Updates both quote and analysis nodes
-   */
-  async function linkAnalysisToQuote(analysisId, quoteId) {
-    // Get the quote node
-    const quoteNode = state.quotes.find(q => q.id === quoteId);
-    if (!quoteNode) throw new Error("Quote not found");
-
-    // Get the analysis node
-    const analysisNode = state.analysisNodes.find(n => n.id === analysisId);
-    if (!analysisNode) throw new Error("Analysis not found");
-
-    // 1. Add analysisId to quote's analysisNodeIds
-    if (!quoteNode.meta) quoteNode.meta = {};
-    if (!quoteNode.meta.analysisNodeIds) quoteNode.meta.analysisNodeIds = [];
-    if (!quoteNode.meta.analysisNodeIds.includes(analysisId)) {
-      quoteNode.meta.analysisNodeIds.push(analysisId);
-      quoteNode.updatedAt = Date.now();
-      await addQuote(quoteNode);
-    }
-
-    // 2. Add quoteRef to analysis's quoteRefs array
-    if (!analysisNode.quoteRefs) analysisNode.quoteRefs = [];
-    if (!analysisNode.quoteRefs.some(ref => ref.quoteId === quoteId)) {
-      analysisNode.quoteRefs.push({
-        quoteId: quoteId,
-        section: quoteNode.section,
-        quote: quoteNode.quote
-      });
-      analysisNode.updatedAt = Date.now();
-      await addNode(analysisNode);
-    }
-  }
-
-  /**
-   * Unlink an analysis node from a quote
-   * NEW: Remove bidirectional reference
-   */
-  async function unlinkAnalysisFromQuote(analysisId, quoteId) {
-    const quoteNode = state.quotes.find(q => q.id === quoteId);
-    if (!quoteNode) return;
-
-    // 1. Remove analysisId from quote
-    if (quoteNode.meta?.analysisNodeIds) {
-      quoteNode.meta.analysisNodeIds = quoteNode.meta.analysisNodeIds.filter(id => id !== analysisId);
-      quoteNode.updatedAt = Date.now();
-      await addQuote(quoteNode);
-    }
-  }
+  // NOTE: linkAnalysisToQuote and unlinkAnalysisFromQuote should be imported from db.js
+  // They are called with parameter order: (quoteId, analysisId)
+  // This is handled via reconcileAnalysisQuoteLinks below
 
   async function ensureQuoteRecord(ref) {
+    // Validate ref before processing
+    if (!ref?.quote || ref.start == null || ref.end == null) {
+      console.warn("Skipping invalid ref:", ref);
+      return null;
+    }
+    if (!ref.sourceId) {
+      console.warn("BROKEN REF:", ref, "falling back to selectedSourceId:", state.selectedSourceId);
+      ref.sourceId = state.selectedSourceId;
+    }
     const priority = clampPriority(ref.priority);
-    const existingQuote = ref.quoteId ? (state.quotes.find((quote) => quote.id === ref.quoteId) || await getQuote(ref.quoteId)) : null;
-
-    if (existingQuote) {
-      const updatedQuote = {
-        ...existingQuote,
-        quote: ref.quote || existingQuote.quote,
-        section: ref.section || existingQuote.section,
-        priority,
-        link: {
-          ...(existingQuote.link || {}),
-          sourceId: ref.sourceId || existingQuote.link?.sourceId,
-          start: Number.isFinite(Number(ref.start)) ? Number(ref.start) : existingQuote.link?.start,
-          end: Number.isFinite(Number(ref.end)) ? Number(ref.end) : existingQuote.link?.end
-        },
-        updatedAt: Date.now()
-      };
-      await addQuote(updatedQuote);
-      return updatedQuote;
+    
+    // If quoteId is provided, use that reference
+    if (ref.quoteId) {
+      const existingQuote = state.quotes.find((quote) => quote.id === ref.quoteId) || await getQuote(ref.quoteId);
+      if (existingQuote) {
+        const updatedQuote = {
+          ...existingQuote,
+          quote: ref.quote || existingQuote.quote,
+          section: ref.section || existingQuote.section,
+          priority,
+          link: {
+            ...(existingQuote.link || {}),
+            sourceId: ref.sourceId || existingQuote.link?.sourceId,
+            start: Number.isFinite(Number(ref.start)) ? Number(ref.start) : existingQuote.link?.start,
+            end: Number.isFinite(Number(ref.end)) ? Number(ref.end) : existingQuote.link?.end
+          },
+          updatedAt: Date.now()
+        };
+        await addQuote(updatedQuote);
+        return updatedQuote;
+      }
     }
 
+    // NEW: Try to find existing quote by text before creating new one
+    // This prevents duplicate quote nodes for the same text
+    if (ref.quote && ref.sourceId) {
+      const existingByText = await findExistingQuoteByText(ref.sourceId, ref.quote);
+      if (existingByText) {
+        // Found existing quote with same text - update priority if needed
+        const updatedQuote = {
+          ...existingByText,
+          priority: Math.max(priority, existingByText.priority || 1),
+          link: {
+            ...(existingByText.link || {}),
+            sourceId: ref.sourceId,
+            start: Number.isFinite(Number(ref.start)) ? Number(ref.start) : existingByText.link?.start,
+            end: Number.isFinite(Number(ref.end)) ? Number(ref.end) : existingByText.link?.end
+          },
+          updatedAt: Date.now()
+        };
+        await addQuote(updatedQuote);
+        return updatedQuote;
+      }
+    }
+
+    // Create new quote only if no existing one found
     const createdQuote = await createQuoteNode(ref.quote || "", ref.sourceId, ref.start, ref.end);
     const savedQuote = {
       ...createdQuote,
@@ -2003,7 +2038,8 @@ function selectSource(sourceId) {
 
     for (const quoteId of previousIds) {
       if (nextIds.has(quoteId)) continue;
-      await unlinkAnalysisFromQuote(analysisId, quoteId);
+      // FIX: Use correct parameter order (quoteId, analysisId)
+      await unlinkAnalysisFromQuote(quoteId, analysisId);
       if (canDeleteQuoteAsPrivateDependency(quoteId, [analysisId])) {
         await removeQuoteAndLinkedCuesEverywhere(quoteId);
       }
@@ -2011,7 +2047,8 @@ function selectSource(sourceId) {
 
     for (const ref of nextRefs || []) {
       if (!ref.quoteId) continue;
-      await linkAnalysisToQuote(analysisId, ref.quoteId);
+      // FIX: Use correct parameter order (quoteId, analysisId)
+      await linkAnalysisToQuote(ref.quoteId, analysisId);
     }
   }
 
@@ -2023,7 +2060,10 @@ function selectSource(sourceId) {
 
     for (const ref of draftRefs) {
       const quoteNode = await ensureQuoteRecord(ref);
-      savedQuoteRefs.push(buildQuoteRefFromQuoteNode(quoteNode));
+      if (!quoteNode) continue;
+      const quoteRef = buildQuoteRefFromQuoteNode(quoteNode);
+      if (!quoteRef) continue;
+      savedQuoteRefs.push(quoteRef);
     }
 
     const analysisNode = {
@@ -2056,7 +2096,8 @@ function selectSource(sourceId) {
     const removeDetachedQuotes = options.removeDetachedQuotes !== false;
     for (const ref of node?.quoteRefs || []) {
       if (!ref.quoteId) continue;
-      await unlinkAnalysisFromQuote(node.id, ref.quoteId);
+      // FIX: Use correct parameter order (quoteId, analysisId)
+      await unlinkAnalysisFromQuote(ref.quoteId, node.id);
       if (removeDetachedQuotes && canDeleteQuoteAsPrivateDependency(ref.quoteId, [node.id])) {
         await removeQuoteAndLinkedCuesEverywhere(ref.quoteId);
       }
@@ -3274,43 +3315,54 @@ return document.execCommand(command, false, null);
 
   if (quoteSelectionBtn) {
     quoteSelectionBtn.addEventListener("click", async () => {
-      if (state.selectedRange?.quote) {
-        const selection = {
-          sourceId: state.selectedSourceId,
-          start: state.selectedRange.start,
-          end: state.selectedRange.end,
-          quote: state.selectedRange.quote
-        };
-        const existingQuote = findExistingQuoteForSelection(selection);
-        const quoteNode = existingQuote || await createQuoteNode(
-          selection.quote,
-          selection.sourceId,
-          selection.start,
-          selection.end
-        );
-
-        if (!existingQuote) {
-          markQuoteCreatedForAnalysisSession(quoteNode.id);
-          state.quotes = [...state.quotes.filter((quote) => quote.id !== quoteNode.id), quoteNode];
-        }
-
-        if (!state.selectedQuoteRef) {
-          state.selectedQuoteRef = [];
-        }
-
-        const quoteRef = buildQuoteRefFromQuoteNode(quoteNode);
-        if (!state.selectedQuoteRef.some((ref) => ref.quoteId === quoteRef.quoteId)) {
-          state.selectedQuoteRef.push(quoteRef);
-        }
-
-        if (quoteRefsListContainer) {
-          quoteRefsListContainer.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
-          attachQuoteRefEventListeners();
-        }
-
-        showAnalysisCard();
-        analysisNotesInput.focus();
+      if (!state.selectedRange?.quote) return;
+      const selection = {
+        sourceId: state.selectedSourceId,
+        start: state.selectedRange.start,
+        end: state.selectedRange.end,
+        quote: state.selectedRange.quote
+      };
+      if (!selection.sourceId) {
+        console.warn("quoteSelectionBtn: missing sourceId, cannot create quote");
+        hideQuoteButton();
+        return;
       }
+
+      const existingQuote = await findExistingQuoteForSelection(selection);
+      const quoteNode = existingQuote || await createQuoteNode(
+        selection.quote,
+        selection.sourceId,
+        selection.start,
+        selection.end
+      );
+
+      if (!quoteNode) {
+        console.warn("quoteSelectionBtn: quoteNode is null, cannot proceed");
+        hideQuoteButton();
+        return;
+      }
+
+      if (!existingQuote) {
+        markQuoteCreatedForAnalysisSession(quoteNode.id);
+        state.quotes = [...state.quotes.filter((quote) => quote.id !== quoteNode.id), quoteNode];
+      }
+
+      if (!state.selectedQuoteRef) {
+        state.selectedQuoteRef = [];
+      }
+
+      const quoteRef = buildQuoteRefFromQuoteNode(quoteNode);
+      if (!state.selectedQuoteRef.some((ref) => ref.quoteId === quoteRef.quoteId)) {
+        state.selectedQuoteRef.push(quoteRef);
+      }
+
+      if (quoteRefsListContainer) {
+        quoteRefsListContainer.innerHTML = renderModalQuoteRefsListHtml(state.selectedQuoteRef, 100);
+        attachQuoteRefEventListeners();
+      }
+
+      showAnalysisCard();
+      analysisNotesInput.focus();
       hideQuoteButton();
     });
   }
@@ -3581,13 +3633,21 @@ return document.execCommand(command, false, null);
           quote: node.quote || ""
         };
         
-        state.selectedQuoteRef = (node.quoteRefs || []).map((ref) => {
-          const quoteNode = state.quotes.find((quote) => quote.id === ref.quoteId);
-          return cloneQuoteRef({
-            ...ref,
-            priority: quoteNode?.priority ?? ref.priority ?? 3
-          });
-        });
+        state.selectedQuoteRef = (node.quoteRefs || [])
+          .map((ref) => {
+            const quoteNode = state.quotes.find((quote) => quote.id === ref.quoteId);
+            // Skip refs with no usable data
+            if (!ref.quote && !quoteNode?.quote) return null;
+            return cloneQuoteRef({
+              ...ref,
+              quote: ref.quote || quoteNode?.quote || "",
+              sourceId: ref.sourceId || quoteNode?.link?.sourceId || quoteNode?.sourceId,
+              start: ref.start ?? quoteNode?.link?.start,
+              end: ref.end ?? quoteNode?.link?.end,
+              priority: quoteNode?.priority ?? ref.priority ?? 3
+            });
+          })
+          .filter(Boolean);
         
         // Render the existing quote references in the form
         if (quoteRefsListContainer) {
@@ -3662,105 +3722,131 @@ return document.execCommand(command, false, null);
     }
   });
 
-  // Click on highlighted text in reader to jump to corresponding analysis node AND highlight EXACT quote
-  analysisReader.addEventListener("click", (event) => {
-    const highlight = event.target.closest(".highlight-quote");
-    if (!highlight) {
-      event.stopPropagation();
-      return;
-    }
-
-    event.stopPropagation();
-    const focusId = highlight.dataset.focusId;
-    const rangeKey = highlight.dataset.rangeKey || null;
-    if (!focusId) return;
-
-    let analysisNode = state.analysisNodes.find((n) => n.id === focusId);
-    if (!analysisNode) {
-      const qNode = state.quotes.find((n) => n.id === focusId);
-      const aid = qNode?.meta?.analysisNodeIds?.[0];
-      if (aid) {
-        analysisNode = state.analysisNodes.find((n) => n.id === aid);
+    // Click on highlighted text in reader to jump to corresponding analysis node AND highlight EXACT quote
+    analysisReader.addEventListener("click", (event) => {
+      const highlight = event.target.closest(".highlight-quote");
+      if (!highlight) {
+        event.stopPropagation();
+        return;
       }
-    }
-    if (!analysisNode) return;
 
-    // Find the exact quote ref that matches this highlight's position
-    let exactStart = 0, exactEnd = 0, foundExact = false;
-    if (rangeKey && analysisNode.quoteRefs) {
-      for (const ref of analysisNode.quoteRefs) {
-        const refKey = `${ref.start}-${ref.end}`;
-        if (refKey === rangeKey) {
-          exactStart = ref.start;
-          exactEnd = ref.end;
-          foundExact = true;
+      event.stopPropagation();
+      const focusId = highlight.dataset.focusId;
+      const rangeKey = highlight.dataset.rangeKey || null;
+      if (!focusId) return;
+
+      // Handle multiple analysis IDs (comma-separated from manual links)
+      const analysisIds = focusId.split(",");
+      let analysisNode = null;
+      
+      // Try to find first valid analysis node
+      for (const aid of analysisIds) {
+        const node = state.analysisNodes.find((n) => n.id === aid.trim());
+        if (node) {
+          analysisNode = node;
           break;
         }
       }
-    }
-
-    // Fallback to main link if exact not found
-    if (!foundExact) {
-      exactStart = Number(analysisNode?.link?.start || 0);
-      exactEnd = Number(analysisNode?.link?.end || 0);
-    }
-
-    state.focusedNodeId = analysisNode.id;
-    state.focusedRangeKey = rangeKey;
-    state.selectedRange = {
-      start: exactStart,
-      end: exactEnd,
-      quote: analysisNode.quote || ""
-    };
-
-    renderReaderAndNodes();
-
-    const card = analysisNodeList.querySelector(`[data-node-id="${analysisNode.id}"]`);
-    if (card && analysisNodeList) {
-      const cardRect = card.getBoundingClientRect();
-      const listRect = analysisNodeList.getBoundingClientRect();
-      const offset = cardRect.top - listRect.top - (listRect.height / 2 - cardRect.height / 2);
-      analysisNodeList.scrollBy({
-        top: offset,
-        behavior: "smooth"
-      });
-    }
-  });
-
-  // Hover on highlighted text to show corresponding analysis node
-  analysisReader.addEventListener("mouseover", (event) => {
-    const highlight = event.target.closest(".highlight-quote");
-    if (!highlight) return;
-
-    const focusId = highlight.dataset.focusId;
-    if (!focusId) return;
-
-    let analysisNode = state.analysisNodes.find((n) => n.id === focusId);
-    if (!analysisNode) {
-      const qNode = state.quotes.find((n) => n.id === focusId);
-      const aid = qNode?.meta?.analysisNodeIds?.[0];
-      if (aid) {
-        analysisNode = state.analysisNodes.find((n) => n.id === aid);
-      }
-    }
-    if (!analysisNode) return;
-
-    const card = analysisNodeList.querySelector(`[data-node-id="${analysisNode.id}"]`);
-    if (card && analysisNodeList) {
-      // Check if card is in view
-      const cardRect = card.getBoundingClientRect();
-      const listRect = analysisNodeList.getBoundingClientRect();
       
-      if (cardRect.bottom > listRect.bottom || cardRect.top < listRect.top) {
-        // Card is out of view, scroll it into view
-        const offset = cardRect.top - listRect.top - (listRect.height / 4);
+      // Fallback: if first ID is a quote, find its linked analysis
+      if (!analysisNode && analysisIds[0]) {
+        const qNode = state.quotes.find((n) => n.id === analysisIds[0].trim());
+        if (qNode?.meta?.analysisNodeIds?.length > 0) {
+          const aid = qNode.meta.analysisNodeIds[0];
+          analysisNode = state.analysisNodes.find((n) => n.id === aid);
+        }
+      }
+      if (!analysisNode) return;
+
+      // Find the exact quote ref that matches this highlight's position
+      let exactStart = 0, exactEnd = 0, foundExact = false;
+      if (rangeKey && analysisNode.quoteRefs) {
+        for (const ref of analysisNode.quoteRefs) {
+          const refKey = `${ref.start}-${ref.end}`;
+          if (refKey === rangeKey) {
+            exactStart = ref.start;
+            exactEnd = ref.end;
+            foundExact = true;
+            break;
+          }
+        }
+      }
+
+      // Fallback to main link if exact not found
+      if (!foundExact) {
+        exactStart = Number(analysisNode?.link?.start || 0);
+        exactEnd = Number(analysisNode?.link?.end || 0);
+      }
+
+      state.focusedNodeId = analysisNode.id;
+      state.focusedRangeKey = rangeKey;
+      state.selectedRange = {
+        start: exactStart,
+        end: exactEnd,
+        quote: analysisNode.quote || ""
+      };
+
+      renderReaderAndNodes();
+
+      const card = analysisNodeList.querySelector(`[data-node-id="${analysisNode.id}"]`);
+      if (card && analysisNodeList) {
+        const cardRect = card.getBoundingClientRect();
+        const listRect = analysisNodeList.getBoundingClientRect();
+        const offset = cardRect.top - listRect.top - (listRect.height / 2 - cardRect.height / 2);
         analysisNodeList.scrollBy({
           top: offset,
           behavior: "smooth"
         });
       }
-    }
-  });
+    });
+
+    // Hover on highlighted text to show corresponding analysis node
+    analysisReader.addEventListener("mouseover", (event) => {
+      const highlight = event.target.closest(".highlight-quote");
+      if (!highlight) return;
+
+      const focusId = highlight.dataset.focusId;
+      if (!focusId) return;
+
+      // Handle multiple analysis IDs (comma-separated from manual links)
+      const analysisIds = focusId.split(",");
+      let analysisNode = null;
+      
+      // Try to find first valid analysis node
+      for (const aid of analysisIds) {
+        const node = state.analysisNodes.find((n) => n.id === aid.trim());
+        if (node) {
+          analysisNode = node;
+          break;
+        }
+      }
+      
+      // Fallback: if first ID is a quote, find its linked analysis
+      if (!analysisNode && analysisIds[0]) {
+        const qNode = state.quotes.find((n) => n.id === analysisIds[0].trim());
+        if (qNode?.meta?.analysisNodeIds?.length > 0) {
+          const aid = qNode.meta.analysisNodeIds[0];
+          analysisNode = state.analysisNodes.find((n) => n.id === aid);
+        }
+      }
+      if (!analysisNode) return;
+
+      const card = analysisNodeList.querySelector(`[data-node-id="${analysisNode.id}"]`);
+      if (card && analysisNodeList) {
+        // Check if card is in view
+        const cardRect = card.getBoundingClientRect();
+        const listRect = analysisNodeList.getBoundingClientRect();
+        
+        if (cardRect.bottom > listRect.bottom || cardRect.top < listRect.top) {
+          // Card is out of view, scroll it into view
+          const offset = cardRect.top - listRect.top - (listRect.height / 4);
+          analysisNodeList.scrollBy({
+            top: offset,
+            behavior: "smooth"
+          });
+        }
+      }
+    });
 
   // Right-click context menu on quote highlights to add cue
   analysisReader.addEventListener("contextmenu", (event) => {
