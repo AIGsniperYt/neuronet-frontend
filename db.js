@@ -1,7 +1,10 @@
-const DB_NAME = "neuronet";
-const DB_VERSION = 8; // Added tags store
-
 let db;
+
+const DB_VERSION = 8;
+
+function getDBName() {
+  return window.DEMO_MODE ? `neuronet-${window.APP_VERSION}` : "neuronet";
+}
 
 function emitDBChange(detail) {
   if (typeof document !== "undefined") {
@@ -9,9 +12,23 @@ function emitDBChange(detail) {
   }
 }
 
+export async function cleanupOldDemoDatabases() {
+  if (window.DEMO_MODE) return;
+  if (!indexedDB.databases) return;
+
+  const dbs = await indexedDB.databases();
+  for (const db of dbs) {
+    if (!db.name) continue;
+    if (db.name.startsWith("neuronet-")) {
+      console.log("Deleting old demo DB:", db.name);
+      indexedDB.deleteDatabase(db.name);
+    }
+  }
+}
+
 export function initDB() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    const request = indexedDB.open(getDBName(), DB_VERSION);
 
     request.onupgradeneeded = (e) => {
       db = e.target.result;

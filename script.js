@@ -1,11 +1,15 @@
-import { initDB, addNode, addNodes, getAllNodes, getNode, deleteNode, addQuote, addQuotes, getAllQuotes, getQuote, deleteQuote, clearNodes, clearQuotes, clearCues, addCues, getQuotesForSubject, getAnalysisNodesForSubject, getDueQuotesForSubject, getDueAnalysisNodesForSubject, getQuotesReferencedByAnalysis, getAnalysesReferencingQuote, getPinnedTools, pinTool, unpinTool, isToolPinned, setPinnedToolsOrder, getSubjects, addSubject, deleteSubject, renameSubject, addCue, getAllCues, getCue, deleteCue, getCuesForQuote, getCuesForAnalysis, getCuesForSubject, updateCueLinks, getAllTags, addTag, deleteTag, findExistingQuote, findExistingQuoteByText, linkAnalysisToQuote, unlinkAnalysisFromQuote } from "./db.js";
+import { cleanupOldDemoDatabases, initDB, addNode, addNodes, getAllNodes, getNode, deleteNode, addQuote, addQuotes, getAllQuotes, getQuote, deleteQuote, clearNodes, clearQuotes, clearCues, addCues, getQuotesForSubject, getAnalysisNodesForSubject, getDueQuotesForSubject, getDueAnalysisNodesForSubject, getQuotesReferencedByAnalysis, getAnalysesReferencingQuote, getPinnedTools, pinTool, unpinTool, isToolPinned, setPinnedToolsOrder, getSubjects, addSubject, deleteSubject, renameSubject, addCue, getAllCues, getCue, deleteCue, getCuesForQuote, getCuesForAnalysis, getCuesForSubject, updateCueLinks, getAllTags, addTag, deleteTag, findExistingQuote, findExistingQuoteByText, linkAnalysisToQuote, unlinkAnalysisFromQuote } from "./db.js";
 import { syncLocalWithCloud, syncToCloud, deleteCloudNode, deleteCloudQuote, deleteCloudCue, fetchCloudNodes, fetchCloudQuotes, fetchCloudCues } from "./sync.js";
 import { initAnalysisToolV2 } from "./tools/analysisTool.js";
 import { initMemoryTool } from "./tools/memoryTool.js";
 import { initMindmapTool } from "./tools/mindmapTool.js";
+import { performMigration } from "./migrations.js";
 
 const BACKEND = "https://neuronet-backend.onrender.com";
 let DB_READY = false;
+window.APP_VERSION = "v9"; // change per branch
+window.DEMO_MODE = false; // true for old versions
+const USE_BACKEND = !window.DEMO_MODE;
 const DEFAULT_PROFILE = {
   name: "Offline Mode",
   email: "local@device",
@@ -130,6 +134,11 @@ function setProfileUI(user) {
 }
 
 async function fetchUser() {
+  if (!USE_BACKEND) {
+    window.currentUser = null;
+    setProfileUI(null);
+    return null;
+  }
   try {
     const res = await fetch(`${BACKEND}/auth/user`, { credentials: "include" });
     if (!res.ok) throw new Error("Not logged in");
@@ -146,7 +155,7 @@ async function fetchUser() {
 }
 
 async function backupLocalNodesToCloud() {
-  if (!window.currentUser || syncInProgress) return;
+  if (!USE_BACKEND || !window.currentUser || syncInProgress) return;
   syncInProgress = true;
   try {
     const [localNodes, localQuotes] = await Promise.all([getAllNodes(), getAllQuotes()]);
@@ -159,7 +168,7 @@ async function backupLocalNodesToCloud() {
 }
 
 async function syncAfterLogin() {
-  if (!window.currentUser || syncInProgress) return;
+  if (!USE_BACKEND || !window.currentUser || syncInProgress) return;
   syncInProgress = true;
   try {
     await syncLocalWithCloud();
@@ -171,6 +180,7 @@ async function syncAfterLogin() {
 }
 
 function startGoogleLogin() {
+  if (!USE_BACKEND) return;
   window.location.href = `${BACKEND}/auth/google`;
 }
 
@@ -265,7 +275,7 @@ async function removeNodeEverywhere(id) {
 
   await deleteNode(id);
 
-  if (!window.currentUser) return;
+  if (!USE_BACKEND || !window.currentUser) return;
 
   try {
     await deleteCloudNode(id);
@@ -278,7 +288,7 @@ async function removeQuoteEverywhere(id) {
   await deleteQuoteCascadeLocal(id);
   await deleteQuote(id);
 
-  if (!window.currentUser) return;
+  if (!USE_BACKEND || !window.currentUser) return;
 
   try {
     await deleteCloudQuote(id);
@@ -381,7 +391,7 @@ async function deleteSubjectCascadeEverywhere(subjectName) {
   for (const node of relatedNodes) {
     if (!node?.id) continue;
     await deleteNode(node.id);
-    if (window.currentUser) {
+    if (USE_BACKEND && window.currentUser) {
       try { await deleteCloudNode(node.id); } catch (error) { console.log("Cloud delete skipped", error); }
     }
   }
@@ -404,7 +414,7 @@ async function deleteSubjectCascadeEverywhere(subjectName) {
 async function removeCueEverywhere(id) {
   await deleteCue(id);
 
-  if (!window.currentUser) return;
+  if (!USE_BACKEND || !window.currentUser) return;
 
   try {
     await deleteCloudCue(id);
@@ -446,7 +456,7 @@ async function importDatabaseJson(file) {
   await addQuotes(quotes);
   await addCues(cues);
 
-  if (window.currentUser) {
+  if (USE_BACKEND && window.currentUser) {
     const [cloudNodes, cloudQuotes, cloudCues] = await Promise.all([
       fetchCloudNodes(),
       fetchCloudQuotes(),
@@ -925,26 +935,39 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (sidebarEl) sidebarEl.classList.add("entering");
   if (launchpadEl) launchpadEl.classList.add("entering");
 
+  await cleanupOldDemoDatabases();
   await initDB();
   DB_READY = true;
 
-  loadingMessage.textContent = "Authenticating with the cloud...";
-  let user;
-  try {
-    user = await fetchUser();
-  } finally {
-    loadingMessage.textContent = "Loading page content complete!";
-    loadingCheckmark.classList.add("show");
+  if (!window.DEMO_MODE) {
+    await performMigration(getAllNodes, addNode, addQuote);
   }
 
-  await new Promise(r => setTimeout(r, 800));
+  loadingMessage.textContent = "Authenticating with the cloud...";
+  let user;
+  if (USE_BACKEND) {
+    try {
+      user = await fetchUser();
+    } finally {
+      loadingMessage.textContent = "Loading page content complete!";
+      loadingCheckmark.classList.add("show");
+    }
 
-  loadingOverlay.classList.add("fade-out");
+    await new Promise(r => setTimeout(r, 800));
 
-  await new Promise(r => setTimeout(r, 800));
+    loadingOverlay.classList.add("fade-out");
 
-  if (user) {
-    await syncAfterLogin();
+    await new Promise(r => setTimeout(r, 800));
+
+    if (user) {
+      await syncAfterLogin();
+    }
+  } else {
+    loadingMessage.textContent = "Loading page content complete!";
+    loadingCheckmark.classList.add("show");
+    await new Promise(r => setTimeout(r, 800));
+    loadingOverlay.classList.add("fade-out");
+    await new Promise(r => setTimeout(r, 800));
   }
 
   loadingOverlay.classList.add("completed");
@@ -1051,12 +1074,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     logoutBtn.addEventListener("click", async (e) => {
       e.stopPropagation();
 
-      try {
-        await fetch(`${BACKEND}/auth/logout`, {
-          credentials: "include",
-        });
-      } catch (error) {
-        console.log("Logout request failed, staying offline locally", error);
+      if (USE_BACKEND) {
+        try {
+          await fetch(`${BACKEND}/auth/logout`, {
+            credentials: "include",
+          });
+        } catch (error) {
+          console.log("Logout request failed, staying offline locally", error);
+        }
       }
 
       window.currentUser = null;
