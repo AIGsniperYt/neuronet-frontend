@@ -3,6 +3,7 @@ import { syncLocalWithCloud, syncToCloud, deleteCloudNode } from "./sync.js";
 import { initAnalysisToolV2 } from "./analysisTool.js";
 import { performMigration } from "./migrations.js";
 
+const DEMO_MODE = true;
 window.APP_VERSION = "v0";
 window.DEMO_MODE = DEMO_MODE;
 const BACKEND = "https://neuronet-backend.onrender.com";
@@ -14,7 +15,7 @@ const DEFAULT_PROFILE = {
   email: "local@device",
   picture: "https://via.placeholder.com/40"
 };
-const DEMO_MODE = true;
+
 let syncInProgress = false;
 
 const tools = {
