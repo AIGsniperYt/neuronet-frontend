@@ -7,8 +7,9 @@ import { performMigration } from "./migrations.js";
 
 const BACKEND = "https://neuronet-backend.onrender.com";
 let DB_READY = false;
+const DEMO_MODE = true;
 window.APP_VERSION = "v9"; // change per branch
-window.DEMO_MODE = false; // true for old versions
+window.DEMO_MODE = DEMO_MODE; // true for old versions
 const USE_BACKEND = !window.DEMO_MODE;
 const DEFAULT_PROFILE = {
   name: "Offline Mode",
