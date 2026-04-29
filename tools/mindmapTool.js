@@ -87,11 +87,22 @@ const state = {
     labelOffset: 18,
     minZoom: 0.25,
     maxZoom: 3,
+    labelZoomThresholds: {
+      "subject": 0.3,
+      "layer 1": 0.45,
+      "layer 2": 0.55,
+      "layer 3": 0.65,
+      "source": 0.75,
+      "tag": 0.6, // tag grouping is for many quotes with same tag, so show earlier
+      "quote": 1.0,
+      "analysis": 1.0,
+      "cue": 1.1
+    },
     colors: {
       subject: "#ff6b6b",
-      "layer 1": "#b388ff",
-      "layer 2": "#9966ff",
-      "layer 3": "#7e57c2",
+      "layer 1": "#b992fc",
+      "layer 2": "#9560ff",
+      "layer 3": "#7539dd",
       source: "#4da6ff",
       quote: "#ff9b39",
       analysis: "#2cffb3",
@@ -99,6 +110,114 @@ const state = {
       tag: "#f1fa8c"
     }
   };
+
+  // QuadTree implementation for efficient spatial indexing
+  class QuadTree {
+    constructor(boundary, capacity = 4) {
+      this.boundary = boundary;
+      this.capacity = capacity;
+      this.points = [];
+      this.divided = false;
+      this.northeast = null;
+      this.northwest = null;
+      this.southeast = null;
+      this.southwest = null;
+    }
+
+    insert(point) {
+      if (!this.contains(this.boundary, point)) return false;
+      if (this.points.length < this.capacity) {
+        this.points.push(point);
+        return true;
+      }
+      if (!this.divided) this.subdivide();
+      if (this.northeast.insert(point)) return true;
+      if (this.northwest.insert(point)) return true;
+      if (this.southeast.insert(point)) return true;
+      if (this.southwest.insert(point)) return true;
+      return false;
+    }
+
+    contains(boundary, point) {
+      return (
+        point.x >= boundary.x &&
+        point.x < boundary.x + boundary.w &&
+        point.y >= boundary.y &&
+        point.y < boundary.y + boundary.h
+      );
+    }
+
+    subdivide() {
+      const { x, y, w, h } = this.boundary;
+      const halfW = w / 2;
+      const halfH = h / 2;
+      const ne = { x: x + halfW, y: y, w: halfW, h: halfH };
+      this.northeast = new QuadTree(ne, this.capacity);
+      const nw = { x: x, y: y, w: halfW, h: halfH };
+      this.northwest = new QuadTree(nw, this.capacity);
+      const se = { x: x + halfW, y: y + halfH, w: halfW, h: halfH };
+      this.southeast = new QuadTree(se, this.capacity);
+      const sw = { x: x, y: y + halfH, w: halfW, h: halfH };
+      this.southwest = new QuadTree(sw, this.capacity);
+      this.divided = true;
+    }
+
+    query(range, found = []) {
+      if (!this.intersects(this.boundary, range)) return found;
+      for (const p of this.points) {
+        if (this.contains(range, p)) found.push(p);
+      }
+      if (this.divided) {
+        this.northeast.query(range, found);
+        this.northwest.query(range, found);
+        this.southeast.query(range, found);
+        this.southwest.query(range, found);
+      }
+      return found;
+    }
+
+    intersects(boundary, range) {
+      return !(
+        range.x > boundary.x + boundary.w ||
+        range.x + range.w < boundary.x ||
+        range.y > boundary.y + boundary.h ||
+        range.y + range.h < boundary.y
+      );
+    }
+  }
+
+  // Profiler functions
+  const perf = { enabled: true, lastLog: 0 };
+
+  function profileStart(label) {
+    if (!perf.enabled) return;
+    performance.mark(label + "-start");
+  }
+
+  function profileEnd(label) {
+    if (!perf.enabled) return;
+    performance.mark(label + "-end");
+    performance.measure(label, label + "-start", label + "-end");
+  }
+
+  function logPerf() {
+    if (!perf.enabled) return;
+    const now = performance.now();
+    if (now - perf.lastLog < 1000) return;
+    const entries = performance.getEntriesByType("measure");
+    const grouped = {};
+    entries.forEach(e => {
+      if (!grouped[e.name]) grouped[e.name] = [];
+      grouped[e.name].push(e.duration);
+    });
+    console.clear();
+    Object.entries(grouped).forEach(([name, arr]) => {
+      const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
+      console.log(`${name}: ${avg.toFixed(2)}ms`);
+    });
+    performance.clearMeasures();
+    perf.lastLog = now;
+  }
 
   function makeLayerId(subject, l1 = "", l2 = "", l3 = "") {
     return `layer|${String(subject || "").trim()}|${String(l1 || "").trim()}|${String(l2 || "").trim()}|${String(l3 || "").trim()}`;
@@ -615,6 +734,7 @@ const state = {
   }
 
   function computeForces() {
+    profileStart("physics");
     const forces = new Map();
     const positions = state.nodePositions;
     const graph = state.graph;
@@ -635,13 +755,14 @@ const state = {
       nodeParents.set(id, parents);
     });
 
-    // 1. Global Repulsion & Angular Placement
+    // 1. Global Repulsion & Angular Placement - Full O(n²) needed for fractal structure
     const nodesArr = Array.from(graph.nodes.entries());
+
     for (let i = 0; i < nodesArr.length; i++) {
       const [idA, nodeA] = nodesArr[i];
       const posA = positions.get(idA);
       if (!posA) continue;
-      
+
       const parentsA = nodeParents.get(idA);
 
       for (let j = i + 1; j < nodesArr.length; j++) {
@@ -657,13 +778,13 @@ const state = {
         if (distSq < 1) distSq = 1;
         
         const dist = Math.sqrt(distSq);
-        
+
         const weightA = Math.max(1, nodeA.connections.size);
         const weightB = Math.max(1, nodeB.connections.size);
         let repStrength = 15000 + (weightA * weightB) * 5000;
-        
+
         const parentsB = nodeParents.get(idB);
-        
+
         let isSibling = false;
         let commonParentId = null;
         if (parentsA && parentsB) {
@@ -696,7 +817,7 @@ const state = {
           const parentNode = graph.nodes.get(commonParentId);
           // Children count is connections minus the parent link
           const siblingCount = parentNode ? Math.max(1, parentNode.connections.size - 1) : 1;
-          
+
           // Boost repulsion if there are many siblings to prevent clumping
           // The more siblings, the stronger they push each other apart
           let siblingRepMultiplier = 0.35;
@@ -707,7 +828,7 @@ const state = {
           // Also increase the ideal distance between siblings when they are numerous
           // This ensures the "mesh" of siblings doesn't collapse too tightly in a circle
           const siblingIdeal = 100 + (Math.max(weightA, weightB) * 10) + (siblingCount > 4 ? (siblingCount - 4) * 20 : 0);
-          
+
           const siblingSpring = 0.008; // Softer sibling attraction
           const attractForce = (dist - siblingIdeal) * siblingSpring;
 
@@ -725,7 +846,7 @@ const state = {
         } else {
           forceMag = repStrength / distSq;
         }
-        
+
         const fx = (dx / dist) * forceMag;
         const fy = (dy / dist) * forceMag;
 
@@ -849,6 +970,7 @@ const state = {
       });
     });
 
+    profileEnd("physics");
     return forces;
   }
 
@@ -1003,6 +1125,7 @@ const state = {
     }
     fitCameraToGraph();
     render();
+    logPerf();
     requestAnimationFrame(tick);
   }
 
@@ -1098,6 +1221,10 @@ const state = {
       ctx.strokeStyle = color;
       ctx.lineWidth = isSelected ? 3 : 2;
       ctx.stroke();
+
+      // Hierarchical label visibility based on zoom level
+      const threshold = config.labelZoomThresholds[item.type] || 1.0;
+      if (state.zoom < threshold) return;
 
       ctx.font = `${12 * state.zoom}px Inter, system-ui, sans-serif`;
       ctx.fillStyle = "rgba(230, 255, 245, 0.8)";
