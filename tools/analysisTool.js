@@ -738,24 +738,7 @@ function htmlToPlainText(html) {
     }
 
     // Show/hide save and cancel buttons based on edit mode
-function selectSource(sourceId) {
-    state.selectedSourceId = sourceId;
-    state.focusedNodeId = null;
-    state.focusedRangeKey = null;
-
-    if (sourceSelect) sourceSelect.value = sourceId;
-
-    if (state.viewMode === "editor") {
-      const source = getSourceById(sourceId);
-      if (source) {
-        hydrateSourceForm(source);
-      }
-    } else {
-      renderReaderAndNodes();
-    }
-  }
-
-  if (saveSourceBtn) {
+    if (saveSourceBtn) {
       saveSourceBtn.classList.toggle("visible", isEditor);
     }
     if (cancelEditSourceBtn) {
@@ -905,10 +888,11 @@ function selectSource(sourceId) {
       const focusId = range.focusId ?? range.nodeId;
       const rangeKey = `${range.start}-${range.end}`;
 
-      // Check if ANY of the focusIds match the currently focused node
+      // Check if ANY of the focusIds match ANY of the currently focused nodes
       const focusIds = focusId.split(",").map(s => s.trim()).filter(Boolean);
+      const focusedIds = (state.focusedNodeId || "").split(",").map(s => s.trim()).filter(Boolean);
       const isActive =
-        focusIds.includes(state.focusedNodeId) &&
+        focusedIds.some(id => focusIds.includes(id)) &&
         (!state.focusedRangeKey || state.focusedRangeKey === rangeKey);
 
       const className = isActive
@@ -934,16 +918,18 @@ function selectSource(sourceId) {
 
   function resolveAnalysisIdForSidebar(focusId) {
     if (!focusId) return null;
-    // Handle comma-separated analysis IDs (from manual links)
-    const ids = focusId.split(",");
-    for (const id of ids) {
-      const trimmed = id.trim();
-      if (state.analysisNodes.some((n) => n.id === trimmed)) return trimmed;
+    // Return ALL matching analysis IDs (comma-separated)
+    const ids = focusId.split(",").map(s => s.trim()).filter(Boolean);
+    const analysisIds = ids.filter(id => state.analysisNodes.some((n) => n.id === id));
+    if (analysisIds.length > 0) {
+      return analysisIds.join(",");
     }
     // Fallback: check if it's a quote node
     const qNode = state.quotes.find((n) => n.id === focusId);
-    const aid = qNode?.meta?.analysisNodeIds?.[0];
-    return aid || null;
+    if (qNode?.meta?.analysisNodeIds?.length > 0) {
+      return qNode.meta.analysisNodeIds.join(",");
+    }
+    return null;
   }
 
   function buildHighlightRangesForSource(source, domText) {
@@ -956,17 +942,30 @@ function selectSource(sourceId) {
       // Sanitize and validate range values
       const safStart = Number.isFinite(start) ? Math.max(0, Math.floor(start)) : 0;
       const safEnd = Number.isFinite(end) ? Math.max(0, Math.floor(end)) : 0;
-      
+
       if (safEnd <= safStart) return;
       if (safStart > 1000000 || safEnd > 1000000) return; // Sanity check
-      
+
       const key = `${safStart}-${safEnd}`;
-      byPosition.set(key, {
-        start: safStart,
-        end: safEnd,
-        focusId,
-        nodeId: focusId
-      });
+      const existing = byPosition.get(key);
+
+      if (existing) {
+        // Merge focusIds: combine existing and new, avoid duplicates
+        const existingIds = new Set(existing.focusId.split(",").map(s => s.trim()).filter(Boolean));
+        const newIds = focusId.split(",").map(s => s.trim()).filter(Boolean);
+        for (const id of newIds) {
+          existingIds.add(id);
+        }
+        existing.focusId = Array.from(existingIds).join(",");
+        existing.nodeId = existing.focusId;
+      } else {
+        byPosition.set(key, {
+          start: safStart,
+          end: safEnd,
+          focusId,
+          nodeId: focusId
+        });
+      }
     };
 
     const resolvePositions = (quoteText, fallbackStart, fallbackEnd) => {
@@ -2410,10 +2409,13 @@ const updateLayerSelection = () => {
       return;
     }
 
+    // Parse focused node IDs into a Set for quick lookup
+    const focusedIds = new Set((state.focusedNodeId || "").split(",").map(s => s.trim()).filter(Boolean));
+
     analysisNodeList.innerHTML = analysesForSource
       .map((node, index) => {
         const tags = node?.meta?.tags || [];
-        const isActive = state.focusedNodeId === node.id;
+        const isActive = focusedIds.has(node.id);
         const quotesHtml = (() => {
           if (node.quoteRefs?.length) {
             return node.quoteRefs
@@ -2423,7 +2425,8 @@ const updateLayerSelection = () => {
                 if (!text) return "";
                 // Check if this quote is the exactly selected one
                 const refRangeKey = `${ref.start}-${ref.end}`;
-                const isExactQuote = state.focusedNodeId === node.id && state.focusedRangeKey === refRangeKey;
+                // Fix: check if node is in focused set AND rangeKey matches
+                const isExactQuote = focusedIds.has(node.id) && state.focusedRangeKey === refRangeKey;
                 const quoteClass = isExactQuote ? "analysis-quote-jump active-quote" : "analysis-quote-jump";
                 const origin = quoteRefOriginLineHtml(ref);
                 const priority = clampPriority(ref.priority);
@@ -2925,23 +2928,27 @@ const updateLayerSelection = () => {
   }
 
 function selectSource(sourceId) {
-    state.selectedSourceId = sourceId;
+  const sourceChanged = state.selectedSourceId !== sourceId;
+  // Only reset focus if source is actually changing and not from a quote click
+  if (sourceChanged) {
     state.focusedNodeId = null;
     state.focusedRangeKey = null;
-
-    if (sourceSelect) sourceSelect.value = sourceId;
-
-    if (state.viewMode === "editor") {
-      const source = getSourceById(sourceId);
-      if (source) {
-        hydrateSourceForm(source);
-      }
-    } else {
-      renderReaderAndNodes();
-    }
   }
+  state.selectedSourceId = sourceId;
 
-  if (saveSourceBtn) {
+  if (sourceSelect) sourceSelect.value = sourceId;
+
+  if (state.viewMode === "editor") {
+    const source = getSourceById(sourceId);
+    if (source) {
+      hydrateSourceForm(source);
+    }
+  } else {
+    renderReaderAndNodes();
+  }
+}
+
+if (saveSourceBtn) {
     saveSourceBtn.addEventListener("click", () => {
       sourceForm.dispatchEvent(new Event("submit"));
     });
@@ -3736,26 +3743,28 @@ return document.execCommand(command, false, null);
       if (!focusId) return;
 
       // Handle multiple analysis IDs (comma-separated from manual links)
-      const analysisIds = focusId.split(",");
-      let analysisNode = null;
-      
-      // Try to find first valid analysis node
-      for (const aid of analysisIds) {
-        const node = state.analysisNodes.find((n) => n.id === aid.trim());
-        if (node) {
-          analysisNode = node;
-          break;
+      const analysisIds = focusId.split(",").map(s => s.trim()).filter(Boolean);
+
+      // Store ALL analysis IDs that match this highlight
+      const validAnalysisIds = analysisIds.filter(aid =>
+        state.analysisNodes.some((n) => n.id === aid)
+      );
+
+      if (validAnalysisIds.length === 0) {
+        // Fallback: if first ID is a quote, find its linked analysis
+        if (analysisIds[0]) {
+          const qNode = state.quotes.find((n) => n.id === analysisIds[0]);
+          if (qNode?.meta?.analysisNodeIds?.length > 0) {
+            validAnalysisIds.push(...qNode.meta.analysisNodeIds);
+          }
         }
       }
-      
-      // Fallback: if first ID is a quote, find its linked analysis
-      if (!analysisNode && analysisIds[0]) {
-        const qNode = state.quotes.find((n) => n.id === analysisIds[0].trim());
-        if (qNode?.meta?.analysisNodeIds?.length > 0) {
-          const aid = qNode.meta.analysisNodeIds[0];
-          analysisNode = state.analysisNodes.find((n) => n.id === aid);
-        }
-      }
+
+      if (validAnalysisIds.length === 0) return;
+
+      // Use the first valid node for range calculation
+      const firstNodeId = validAnalysisIds[0];
+      const analysisNode = state.analysisNodes.find((n) => n.id === firstNodeId);
       if (!analysisNode) return;
 
       // Find the exact quote ref that matches this highlight's position
@@ -3778,7 +3787,8 @@ return document.execCommand(command, false, null);
         exactEnd = Number(analysisNode?.link?.end || 0);
       }
 
-      state.focusedNodeId = analysisNode.id;
+      // Store ALL focused node IDs as comma-separated string
+      state.focusedNodeId = validAnalysisIds.join(",");
       state.focusedRangeKey = rangeKey;
       state.selectedRange = {
         start: exactStart,
@@ -3788,7 +3798,8 @@ return document.execCommand(command, false, null);
 
       renderReaderAndNodes();
 
-      const card = analysisNodeList.querySelector(`[data-node-id="${analysisNode.id}"]`);
+      // Scroll to first matched node in sidebar
+      const card = analysisNodeList.querySelector(`[data-node-id="${firstNodeId}"]`);
       if (card && analysisNodeList) {
         const cardRect = card.getBoundingClientRect();
         const listRect = analysisNodeList.getBoundingClientRect();
@@ -3800,7 +3811,8 @@ return document.execCommand(command, false, null);
       }
     });
 
-    // Hover on highlighted text to show corresponding analysis node
+    // Hover on highlighted text - visual feedback only (no scrolling)
+    // Scrolling is now handled by the smart scroll syncer only
     analysisReader.addEventListener("mouseover", (event) => {
       const highlight = event.target.closest(".highlight-quote");
       if (!highlight) return;
@@ -3809,43 +3821,35 @@ return document.execCommand(command, false, null);
       if (!focusId) return;
 
       // Handle multiple analysis IDs (comma-separated from manual links)
-      const analysisIds = focusId.split(",");
-      let analysisNode = null;
-      
-      // Try to find first valid analysis node
-      for (const aid of analysisIds) {
-        const node = state.analysisNodes.find((n) => n.id === aid.trim());
-        if (node) {
-          analysisNode = node;
-          break;
-        }
-      }
-      
+      const analysisIds = focusId.split(",").map(s => s.trim()).filter(Boolean);
+      const validAnalysisIds = analysisIds.filter(aid =>
+        state.analysisNodes.some((n) => n.id === aid)
+      );
+
       // Fallback: if first ID is a quote, find its linked analysis
-      if (!analysisNode && analysisIds[0]) {
+      if (validAnalysisIds.length === 0 && analysisIds[0]) {
         const qNode = state.quotes.find((n) => n.id === analysisIds[0].trim());
         if (qNode?.meta?.analysisNodeIds?.length > 0) {
-          const aid = qNode.meta.analysisNodeIds[0];
-          analysisNode = state.analysisNodes.find((n) => n.id === aid);
+          validAnalysisIds.push(...qNode.meta.analysisNodeIds);
         }
       }
-      if (!analysisNode) return;
+      if (validAnalysisIds.length === 0) return;
 
-      const card = analysisNodeList.querySelector(`[data-node-id="${analysisNode.id}"]`);
-      if (card && analysisNodeList) {
-        // Check if card is in view
-        const cardRect = card.getBoundingClientRect();
-        const listRect = analysisNodeList.getBoundingClientRect();
-        
-        if (cardRect.bottom > listRect.bottom || cardRect.top < listRect.top) {
-          // Card is out of view, scroll it into view
-          const offset = cardRect.top - listRect.top - (listRect.height / 4);
-          analysisNodeList.scrollBy({
-            top: offset,
-            behavior: "smooth"
-          });
-        }
-      }
+      // Just add a temporary visual class to show which nodes are related
+      // Clear previous hover states
+      analysisNodeList.querySelectorAll(".hover-highlight").forEach(el => el.classList.remove("hover-highlight"));
+      
+      // Add hover highlight to matching cards
+      validAnalysisIds.forEach(aid => {
+        const card = analysisNodeList.querySelector(`[data-node-id="${aid}"]`);
+        if (card) card.classList.add("hover-highlight");
+      });
+    });
+
+    // Remove hover highlight on mouseout
+    analysisReader.addEventListener("mouseout", (event) => {
+      if (!event.target.closest(".highlight-quote")) return;
+      analysisNodeList.querySelectorAll(".hover-highlight").forEach(el => el.classList.remove("hover-highlight"));
     });
 
   // Right-click context menu on quote highlights to add cue

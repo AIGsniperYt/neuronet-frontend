@@ -545,6 +545,11 @@ const state = {
       if (quote.link?.sourceId) {
         addEdge(quote.link.sourceId, quote.id, "source-quote", 2.5);
       }
+      // Only connect quote to subject directly if it has NO source (orphan prevention for flashcard-builder quotes)
+      if (quote.subject && !quote.link?.sourceId) {
+        const subjectNode = subjectNodes.find(s => s.subject === quote.subject);
+        if (subjectNode) addEdge(subjectNode.id, quote.id, "subject-quote", 2.3);
+      }
     });
 
     analyses.forEach(analysis => {
@@ -1508,18 +1513,30 @@ const state = {
             };
           }
           e.preventDefault();
+        } else {
+          // Pan with left-click on empty space
+          state.isPanning = true;
+          state.panStartPos = { x: e.clientX, y: e.clientY };
+          canvas.style.cursor = "grabbing";
+          e.preventDefault();
         }
       });
 
-      canvas.addEventListener("mouseup", () => {
+      canvas.addEventListener("mouseup", (e) => {
         const dragged = state.draggingNodeId;
         state.draggingNodeId = null;
-        state.isPanning = false;
+        if (state.isPanning) {
+          state.isPanning = false;
+          // Only reset cursor if we're not hovering over a node
+          const rect = canvas.getBoundingClientRect();
+          const pos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+          const node = findNodeAtPosition(pos.x, pos.y);
+          canvas.style.cursor = node ? "pointer" : "default";
+        }
         // Keep locked for 2 seconds after release
         if (dragged) {
           setTimeout(() => state.lockedNodes.delete(dragged), 2000);
         }
-        canvas.style.cursor = "default";
       });
 
       canvas.addEventListener("mouseleave", () => {

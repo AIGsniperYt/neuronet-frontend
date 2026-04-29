@@ -17,9 +17,89 @@
     </div>
     <div class="launchpad-controls">
       <button id="studyAllBtn" class="memory-btn primary" disabled title="Coming soon">Study All Subjects (WIP)</button>
+      <button id="createDeckBtn" class="memory-btn primary">Create New +</button>
     </div>
     <div id="deckList" class="deck-list">
       <!-- Deck cards will be dynamically inserted here -->
+    </div>
+  </div>
+
+  <!-- Deck Builder Modal -->
+  <div id="deckBuilderModal" class="deck-builder-modal" style="display: none;">
+    <div class="deck-builder-overlay"></div>
+    <div class="deck-builder-container">
+      <div class="deck-builder-header">
+        <h2 id="builderTitle">Create New Deck</h2>
+        <button id="closeDeckBuilderBtn" class="close-btn">&times;</button>
+      </div>
+      
+      <div id="deckBuilderContent" class="deck-builder-content">
+        <!-- Steps will be shown conditionally -->
+        
+        <!-- Step 1: Deck Info -->
+        <div id="step1-deckInfo" class="builder-step active">
+          <h3>Deck Information</h3>
+          <div class="form-group">
+            <label for="deckNameInput">Deck Name</label>
+            <input type="text" id="deckNameInput" class="builder-input" placeholder="e.g., French Vocabulary, Biology Concepts">
+          </div>
+          <div class="form-group">
+            <label for="deckDescriptionInput">Description (Optional)</label>
+            <textarea id="deckDescriptionInput" class="builder-input" placeholder="Add a brief description..."></textarea>
+          </div>
+          <div class="builder-actions">
+            <button id="nextToDeckBtn" class="memory-btn primary">Next: Add Cards</button>
+          </div>
+        </div>
+
+        <!-- Step 2: Flashcard Builder -->
+        <div id="step2-flashcards" class="builder-step" style="display: none;">
+          <h3>Add Flashcards</h3>
+          <div class="flashcard-builder-list" id="flashcardList"></div>
+          
+          <div class="flashcard-editor" id="currentCardEditor" style="display: none;">
+            <div class="form-group">
+              <label for="cueInput">Front of Card (Question/Cue)</label>
+              <textarea id="cueInput" class="builder-input" placeholder="Enter the question or prompt..."></textarea>
+            </div>
+            <div class="form-group">
+              <label for="quoteInput">Back of Card (Answer)</label>
+              <textarea id="quoteInput" class="builder-input" placeholder="Enter the answer or explanation..."></textarea>
+            </div>
+            <div class="form-group">
+              <label for="priorityInput">Priority</label>
+              <select id="priorityInput" class="builder-select">
+                <option value="5">Very High</option>
+                <option value="4" selected>High</option>
+                <option value="3">Medium</option>
+                <option value="2">Low</option>
+                <option value="1">Very Low</option>
+              </select>
+            </div>
+            <div class="builder-actions">
+              <button id="saveCardBtn" class="memory-btn primary">Save Card</button>
+              <button id="cancelCardBtn" class="memory-btn">Cancel</button>
+            </div>
+          </div>
+
+          <div class="builder-actions" id="cardBuilderActions">
+            <button id="addNewCardBtn" class="memory-btn primary">+ Add Card</button>
+            <button id="backToDeckInfoBtn" class="memory-btn">Back</button>
+            <button id="finishDeckBtn" class="memory-btn primary">Finish Deck</button>
+          </div>
+        </div>
+
+        <!-- Step 3: Success -->
+        <div id="step3-success" class="builder-step" style="display: none;">
+          <div class="success-message">
+            <div class="success-icon">✓</div>
+            <h3>Deck Created!</h3>
+            <p id="successMessage">Your deck "<span id="deckNameDisplay"></span>" has been created with <span id="cardCountDisplay">0</span> cards.</p>
+            <button id="studyNewDeckBtn" class="memory-btn primary">Study New Deck</button>
+            <button id="backToLaunchpadBtn" class="memory-btn">Back to Decks</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -123,27 +203,51 @@
   
   .memory-btn {
     width: auto;
-    padding: 8px 12px;
-    background: transparent;
-    border: 1px solid rgba(255,255,255,0.08);
+    padding: 8px 14px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.12);
     color: #e6fff5;
-    border-radius: 8px;
+    border-radius: 999px;
     cursor: pointer;
-    font-size: 0.9rem;
-    font-weight: 500;
+    font: inherit;
+    font-size: 0.85rem;
     transition: all 0.2s ease;
   }
   
   .memory-btn:hover {
-    background: rgba(44,255,179,0.1);
-    border-color: var(--accent-soft);
-    transform: translateX(2px);
+    border-color: rgba(44,255,179,0.45);
+    background: rgba(44,255,179,0.08);
   }
   
   .memory-btn.active {
     background: rgba(44,255,179,0.15);
     border-color: var(--accent);
     color: var(--accent);
+  }
+  
+  .memory-btn.primary {
+    background: linear-gradient(130deg, rgba(44,255,179,0.24), rgba(44,255,179,0.11));
+    border-color: rgba(44,255,179,0.45);
+    color: #e6fff5;
+    font-weight: 500;
+  }
+  
+  .memory-btn.primary:hover {
+    background: linear-gradient(130deg, rgba(44,255,179,0.32), rgba(44,255,179,0.18));
+    transform: translateY(-1px);
+  }
+  
+  .memory-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+    background: rgba(255,255,255,0.03);
+    border-color: rgba(255,255,255,0.08);
+  }
+  
+  .memory-btn:disabled:hover {
+    border-color: rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.03);
+    transform: none;
   }
   
   #memoryContent {
@@ -733,6 +837,16 @@
     color: var(--text-muted);
     margin-bottom: 16px;
   }
+
+  .custom-deck-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--accent, #4a9eff);
+    margin-bottom: 12px;
+    opacity: 0.8;
+  }
   
   .stat-item {
     flex: 1;
@@ -777,32 +891,354 @@
   }
   .deck-list {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 20px;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 24px;
+    padding: 20px 0;
   }
   .deck-card {
-    background: var(--panel-strong);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 16px;
+    position: relative;
+    height: 200px;
+    background: linear-gradient(135deg, var(--panel-strong), #1a1a1a);
+    border: 1px solid var(--accent-soft);
+    border-radius: 24px;
+    padding: 40px;
+    box-sizing: border-box;
+    cursor: pointer;
+    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease, border-color 0.3s ease;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3), 
+                inset 0 0 0 1px rgba(255,255,255,0.05);
+    overflow: hidden;
+  }
+  .deck-card:hover {
+    transform: translateY(-4px) scale(1.02);
+    border-color: var(--accent);
+    box-shadow: 0 20px 40px rgba(0,0,0,0.4), 
+                0 0 30px rgba(44,255,179,0.15),
+                inset 0 0 0 1px rgba(44,255,179,0.1);
+  }
+  .deck-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(44,255,179,0.3), transparent);
+  }
+  .deck-title {
+    font-size: 1.4rem;
+    font-weight: 600;
+    color: var(--text-main);
+    margin-bottom: 12px;
+    line-height: 1.3;
+  }
+  .deck-stats {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    padding: 6px 16px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+
+  /* Deck Builder Modal Styles */
+  .deck-builder-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: fadeIn 0.3s ease;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  .deck-builder-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
+  }
+
+  .deck-builder-container {
+    position: relative;
+    z-index: 10001;
+    background: var(--panel-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 20px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 
+                inset 0 0 0 1px rgba(255,255,255,0.05);
+    max-width: 700px;
+    width: 90vw;
+    max-height: 85vh;
+    overflow-y: auto;
+    animation: slideUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(30px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .deck-builder-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     padding: 24px;
+    border-bottom: 1px solid var(--glass-border);
+    background: linear-gradient(135deg, rgba(44,255,179,0.1), rgba(100,200,200,0.05));
+  }
+
+  .deck-builder-header h2 {
+    margin: 0;
+    color: var(--accent);
+    font-size: 1.4rem;
+    font-weight: 600;
+  }
+
+  .close-btn {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.2);
+    color: var(--text-main);
+    font-size: 1.5rem;
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+  }
+
+  .close-btn:hover {
+    background: rgba(255,77,77,0.1);
+    border-color: rgba(255,77,77,0.4);
+    color: #ff4d4d;
+  }
+
+  .deck-builder-content {
+    padding: 24px;
+  }
+
+  .builder-step {
+    animation: fadeIn 0.3s ease;
+  }
+
+  .builder-step h3 {
+    color: var(--accent);
+    margin: 0 0 20px 0;
+    font-size: 1.2rem;
+  }
+
+  .form-group {
+    margin-bottom: 20px;
+  }
+
+  .form-group label {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--text-main);
+    font-weight: 500;
+    font-size: 0.95rem;
+  }
+
+  .builder-input,
+  .builder-select {
+    width: 100%;
+    padding: 12px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    color: var(--text-main);
+    font-family: inherit;
+    font-size: 0.95rem;
+    transition: all 0.2s ease;
+    box-sizing: border-box;
+  }
+
+  .builder-input:focus,
+  .builder-select:focus {
+    outline: none;
+    background: rgba(44,255,179,0.08);
+    border-color: var(--accent-soft);
+    box-shadow: 0 0 0 2px rgba(44,255,179,0.2);
+  }
+
+  .builder-input::placeholder {
+    color: var(--text-muted);
+  }
+
+  .builder-select option {
+    background: var(--panel-bg);
+    color: var(--text-main);
+  }
+
+  textarea.builder-input {
+    resize: vertical;
+    min-height: 100px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  }
+
+  .flashcard-builder-list {
+    margin-bottom: 20px;
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    padding: 8px;
+  }
+
+  .flashcard-item {
+    background: rgba(44,255,179,0.08);
+    border: 1px solid rgba(44,255,179,0.2);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 8px;
     cursor: pointer;
     transition: all 0.2s ease;
     display: flex;
-    flex-direction: column;
-    gap: 8px;
+    justify-content: space-between;
+    align-items: center;
   }
-  .deck-card:hover {
+
+  .flashcard-item:hover {
+    background: rgba(44,255,179,0.15);
     border-color: var(--accent-soft);
-    background: rgba(44,255,179,0.05);
-    transform: translateY(-2px);
   }
-  .deck-title {
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: #fff;
+
+  .flashcard-item.active {
+    background: rgba(44,255,179,0.2);
+    border-color: var(--accent);
+    box-shadow: 0 0 10px rgba(44,255,179,0.3);
   }
-  .deck-stats {
-    font-size: 0.85rem;
+
+  .flashcard-item-title {
+    flex: 1;
+    color: var(--text-main);
+    font-weight: 500;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .flashcard-item-actions {
+    display: flex;
+    gap: 8px;
+    margin-left: 12px;
+  }
+
+  .flashcard-item-btn {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.2);
     color: var(--text-muted);
+    padding: 4px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: all 0.2s ease;
+  }
+
+  .flashcard-item-btn:hover {
+    background: rgba(255,77,77,0.1);
+    border-color: rgba(255,77,77,0.4);
+    color: #ff4d4d;
+  }
+
+  .flashcard-editor {
+    background: rgba(44,255,179,0.08);
+    border: 1px solid var(--accent-soft);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+
+  .builder-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+    margin-top: 20px;
+  }
+
+  .builder-actions .memory-btn {
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-weight: 500;
+  }
+
+  .builder-actions .memory-btn.primary {
+    background: linear-gradient(135deg, var(--accent), #2fc9a3);
+    border-color: var(--accent);
+    color: #000;
+  }
+
+  .builder-actions .memory-btn.primary:hover {
+    background: linear-gradient(135deg, #2fc9a3, var(--accent));
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(44,255,179,0.3);
+  }
+
+  .success-message {
+    text-align: center;
+    padding: 40px 20px;
+    animation: slideUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  .success-icon {
+    font-size: 4rem;
+    color: var(--accent);
+    margin-bottom: 16px;
+    animation: scaleIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  @keyframes scaleIn {
+    from {
+      transform: scale(0.8);
+      opacity: 0;
+    }
+    to {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  .success-message h3 {
+    color: var(--accent);
+    font-size: 1.5rem;
+    margin: 0 0 12px 0;
+  }
+
+  .success-message p {
+    color: var(--text-muted);
+    margin: 0 0 24px 0;
+    font-size: 0.95rem;
+  }
+
+  .launchpad-controls {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
   }
 </style>

@@ -9,9 +9,13 @@ export async function initMemoryTool(deps, context = {}) {
     getDueAnalysisNodesForSubject,
     addQuote,
     addNode,
+    addCue,
+    addSubject,
     getQuotesReferencedByAnalysis,
     getAnalysesReferencingQuote,
     getCuesForQuote,
+    getCuesForSubject,
+    deleteCue,
     getNode,
     getNodeTimestamp,
     getSubjects,
@@ -63,6 +67,22 @@ export async function initMemoryTool(deps, context = {}) {
   let evidenceMatchingContainer, evidencePrompt, quoteOptions, evidenceFeedback;
   let memoryStats, statsContent, closeStatsBtn, roundProgress, resetMemoryBtn;
   let systemThinkingText;
+  // Deck builder elements
+  let deckBuilderModal, deckNameInput, deckDescriptionInput, createDeckBtn, closeDeckBuilderBtn;
+  let step1DeckInfo, step2Flashcards, step3Success, currentCardEditor;
+  let cueInput, quoteInput, priorityInput, saveCardBtn, cancelCardBtn;
+  let nextToDeckBtn, addNewCardBtn, backToDeckInfoBtn, finishDeckBtn;
+  let studyNewDeckBtn, backToLaunchpadBtn, flashcardList, cardBuilderActions;
+  let deckNameDisplay, cardCountDisplay, builderTitle;
+  
+  // Deck builder state
+  const deckBuilderState = {
+    cards: [], // Array of {cueId, cueFront, quoteId, quoteBack, priority}
+    deckName: "",
+    deckDescription: "",
+    currentCardIndex: -1,
+    isEditingCard: false
+  };
   
   function getDOMElements() {
     memoryTool = document.getElementById("memoryTool");
@@ -79,7 +99,6 @@ export async function initMemoryTool(deps, context = {}) {
     flashcardContent = document.getElementById("flashcardContent");
     flashcardBackContent = document.getElementById("flashcardBackContent");
 
-
     gradingControls = document.getElementById("gradingControls");
     gradeDidntKnowBtn = document.getElementById("gradeDidntKnowBtn");
     gradeKindaBtn = document.getElementById("gradeKindaBtn");
@@ -94,6 +113,33 @@ export async function initMemoryTool(deps, context = {}) {
     roundProgress = document.getElementById("roundProgress");
     resetMemoryBtn = document.getElementById("resetMemoryBtn");
     systemThinkingText = document.getElementById("systemThinkingText");
+    
+    // Deck builder elements
+    deckBuilderModal = document.getElementById("deckBuilderModal");
+    deckNameInput = document.getElementById("deckNameInput");
+    deckDescriptionInput = document.getElementById("deckDescriptionInput");
+    createDeckBtn = document.getElementById("createDeckBtn");
+    closeDeckBuilderBtn = document.getElementById("closeDeckBuilderBtn");
+    step1DeckInfo = document.getElementById("step1-deckInfo");
+    step2Flashcards = document.getElementById("step2-flashcards");
+    step3Success = document.getElementById("step3-success");
+    currentCardEditor = document.getElementById("currentCardEditor");
+    cueInput = document.getElementById("cueInput");
+    quoteInput = document.getElementById("quoteInput");
+    priorityInput = document.getElementById("priorityInput");
+    saveCardBtn = document.getElementById("saveCardBtn");
+    cancelCardBtn = document.getElementById("cancelCardBtn");
+    nextToDeckBtn = document.getElementById("nextToDeckBtn");
+    addNewCardBtn = document.getElementById("addNewCardBtn");
+    backToDeckInfoBtn = document.getElementById("backToDeckInfoBtn");
+    finishDeckBtn = document.getElementById("finishDeckBtn");
+    studyNewDeckBtn = document.getElementById("studyNewDeckBtn");
+    backToLaunchpadBtn = document.getElementById("backToLaunchpadBtn");
+    flashcardList = document.getElementById("flashcardList");
+    cardBuilderActions = document.getElementById("cardBuilderActions");
+    deckNameDisplay = document.getElementById("deckNameDisplay");
+    cardCountDisplay = document.getElementById("cardCountDisplay");
+    builderTitle = document.getElementById("builderTitle");
   }
 
   async function initialize() {
@@ -231,6 +277,94 @@ export async function initMemoryTool(deps, context = {}) {
       flashcard.addEventListener("click", (e) => {
         if (e.target.closest(".memory-btn") || e.target.closest(".grade-btn")) return;
         flipCard();
+      });
+    }
+
+    // Deck Builder Event Listeners
+    if (createDeckBtn) {
+      createDeckBtn.addEventListener("click", openDeckBuilder);
+    }
+
+    if (closeDeckBuilderBtn) {
+      closeDeckBuilderBtn.addEventListener("click", closeDeckBuilder);
+    }
+
+    if (deckBuilderModal) {
+      deckBuilderModal.addEventListener("click", (e) => {
+        if (e.target === deckBuilderModal) {
+          closeDeckBuilder();
+        }
+      });
+    }
+
+    if (nextToDeckBtn) {
+      nextToDeckBtn.addEventListener("click", () => {
+        deckBuilderState.deckName = deckNameInput?.value?.trim() || "";
+        deckBuilderState.deckDescription = deckDescriptionInput?.value?.trim() || "";
+        if (!deckBuilderState.deckName) {
+          alert("Please enter a deck name");
+          return;
+        }
+        showDeckBuilderStep(2);
+      });
+    }
+
+    if (addNewCardBtn) {
+      addNewCardBtn.addEventListener("click", () => {
+        startEditingCard(-1);
+      });
+    }
+
+    if (saveCardBtn) {
+      saveCardBtn.addEventListener("click", () => {
+        const cueFront = cueInput?.value?.trim() || "";
+        const quoteBack = quoteInput?.value?.trim() || "";
+        if (!cueFront || !quoteBack) {
+          alert("Please enter both front and back of the card");
+          return;
+        }
+        const priority = parseInt(priorityInput?.value) || 3;
+        saveFlashcard(cueFront, quoteBack, priority);
+      });
+    }
+
+    if (cancelCardBtn) {
+      cancelCardBtn.addEventListener("click", () => {
+        finishEditingCard();
+      });
+    }
+
+    if (backToDeckInfoBtn) {
+      backToDeckInfoBtn.addEventListener("click", () => {
+        showDeckBuilderStep(1);
+      });
+    }
+
+    if (finishDeckBtn) {
+      finishDeckBtn.addEventListener("click", async () => {
+        if (deckBuilderState.cards.length === 0) {
+          alert("Please add at least one card to the deck");
+          return;
+        }
+        await saveDeckToDB();
+      });
+    }
+
+    if (studyNewDeckBtn) {
+      studyNewDeckBtn.addEventListener("click", async () => {
+        state.currentSubject = deckBuilderState.deckName;
+        state.view = "study";
+        await loadFlashcards();
+        renderUI();
+        closeDeckBuilder();
+      });
+    }
+
+    if (backToLaunchpadBtn) {
+      backToLaunchpadBtn.addEventListener("click", async () => {
+        await loadLaunchpad();
+        renderUI();
+        closeDeckBuilder();
       });
     }
   }
@@ -804,20 +938,34 @@ async function loadLaunchpad() {
       getAllCues()
     ]);
 
+    // Build cue map: quoteId -> cue
     const cuesByQuoteId = new Map();
     (allCues || [])
       .filter((c) => c?.subject === state.currentSubject && c?.quoteId)
       .forEach((cue) => {
-        if (!cuesByQuoteId.has(cue.quoteId)) cuesByQuoteId.set(cue.quoteId, cue);
+        if (!cuesByQuoteId.has(cue.quoteId)) {
+          cuesByQuoteId.set(cue.quoteId, cue);
+        }
       });
 
     state.session.surprisePool = [];
+
+    const isCustomDeck = (quote) => quote?.meta?.tags?.includes("custom-deck");
 
     const cards = await Promise.all(
       (allQuotes || []).map(async (quote) => {
         const analyses = await getAnalysesReferencingQuote(quote.id);
         const cueNode = cuesByQuoteId.get(quote.id) || null;
         const memoryState = getMemoryStateFromMeta(quote.meta || {}, "quote");
+        
+        // For custom decks, display cue on front, quote on back
+        let frontContent;
+        if (isCustomDeck(quote) && cueNode?.cue) {
+          frontContent = cueNode.cue;
+        } else {
+          frontContent = getCueForQuote(quote, cueNode);
+        }
+        
         return {
           id: quote.id,
           memoryKind: "quote",
@@ -825,9 +973,10 @@ async function loadLaunchpad() {
           record: quote,
           review: { required: true, graded: false, grade: null, responseTimeMs: null },
           front: {
-            content: getCueForQuote(quote, cueNode),
-            isCue: true,
-            cueNode
+            content: frontContent,
+            isCue: !isCustomDeck(quote),
+            cueNode,
+            isCustomDeck: isCustomDeck(quote)
           },
           back: {
             content: quote.quote,
@@ -846,14 +995,16 @@ async function loadLaunchpad() {
     });
   }
 
-  function getCueForQuote(quote, cueNode = null) {
-    if (cueNode?.cue) {
-      return cueNode.cue;
-    }
-    const words = quote.quote.split(' ');
-    if (words.length <= 4) return quote.quote;
-    return `${words[0]} ... ${words[words.length - 1]}`;
-  }
+   function getCueForQuote(quote, cueNode = null) {
+     // Check for custom cue (from deck builder or manually added)
+     if (cueNode?.cue) {
+       return cueNode.cue;
+     }
+     // Fallback: show truncated quote as cue
+     const words = quote.quote.split(' ');
+     if (words.length <= 4) return quote.quote;
+     return `${words[0]} ... ${words[words.length - 1]}`;
+   }
 
   async function buildAnalysisLearningQueue() {
     const nowMs = Date.now();
@@ -1285,6 +1436,8 @@ async function loadLaunchpad() {
        // For blurt cards pointing at a quote, render the cue more prominently
        const isBlurtQuoteCard = flashcardData.type === "blurt" && flashcardData.targetKind === "quote";
        const isBlurtAnalysisCard = flashcardData.type === "blurt" && flashcardData.targetKind === "analysis";
+       const isCustomDeckCard = front.isCustomDeck;
+       
        if (isBlurtQuoteCard) {
          flashcardContent.innerHTML = `
            <div class="blurt-prompt-label">Recall the quote:</div>
@@ -1293,6 +1446,12 @@ async function loadLaunchpad() {
        } else if (isBlurtAnalysisCard) {
          flashcardContent.innerHTML = `
            <div class="blurt-prompt-label">Recall the analysis:</div>
+           <div class="cue">${escapeHtml(front.content || "")}</div>
+         `;
+       } else if (isCustomDeckCard) {
+         // Custom deck: show cue prominently on front
+         flashcardContent.innerHTML = `
+           <div class="custom-deck-label">${escapeHtml(flashcardData.record?.subject || "Custom Deck")}</div>
            <div class="cue">${escapeHtml(front.content || "")}</div>
          `;
        } else {
@@ -1313,12 +1472,13 @@ async function loadLaunchpad() {
        }
      } else if (front.isAnalysis) {
        flashcardContent.innerHTML = `<div class="analysis-preview">${formatAnalysisForDisplay(front.content || "")}</div>`;
-     } else if (front.isQuote) {
-       flashcardContent.innerHTML = `<div class="quote">${escapeHtml(front.content || "")}</div>`;
-       if (flashcardData.front?.quoteData) {
-         flashcardContent.innerHTML += `<div class="quote-meta">From: ${escapeHtml(flashcardData.front.quoteData.section || "unknown source")}</div>`;
-       }
-     } else {
+      } else if (front.isQuote) {
+        flashcardContent.innerHTML = `<div class="quote">${escapeHtml(front.content || "")}</div>`;
+        const quoteData = flashcardData.front?.quoteData;
+        if (quoteData && !quoteData.meta?.tags?.includes("custom-deck")) {
+          flashcardContent.innerHTML += `<div class="quote-meta">From: ${escapeHtml(quoteData.section || "unknown source")}</div>`;
+        }
+      } else {
        flashcardContent.textContent = front.content || "";
      }
 
@@ -1326,7 +1486,7 @@ async function loadLaunchpad() {
     if (state.isFlipped) {
       if (back.isQuote) {
         flashcardBackContent.innerHTML = `<div class="quote">${escapeHtml(back.content || "")}</div>`;
-        if (back.quoteData) {
+        if (back.quoteData && !back.quoteData.meta?.tags?.includes("custom-deck")) {
           flashcardBackContent.innerHTML += `<div class="quote-meta">From: ${escapeHtml(back.quoteData.section || "unknown source")}</div>`;
         }
         if (back.analyses && back.analyses.length > 0) {
@@ -1382,7 +1542,7 @@ async function loadLaunchpad() {
           const targetText = back.targetContent || "";
           const isQuoteTarget = back.targetKind === "quote";
           const formattedTarget = isQuoteTarget
-            ? `<div class="quote">${escapeHtml(targetText)}</div>${back.targetRecord?.section ? `<div class="quote-meta">From: ${escapeHtml(back.targetRecord.section)}</div>` : ""}`
+            ? `<div class="quote">${escapeHtml(targetText)}</div>            ${back.targetRecord?.meta?.tags?.includes("custom-deck") ? "" : `<div class="quote-meta">From: ${escapeHtml(back.targetRecord.section || "unknown source")}</div>`}`
             : `<div class="analysis">${formatAnalysisForDisplay(targetText)}</div>`;
           flashcardBackContent.innerHTML = `
             <div class="blurt-comparison">
@@ -1749,6 +1909,207 @@ async function loadLaunchpad() {
         // General observation / new card - subtle random nodes
         window.__neuronetCanvas.triggerRandomNodes(3, 0.4);
       }
+    }
+  }
+
+  // ========== DECK BUILDER FUNCTIONS ==========
+  
+  function openDeckBuilder() {
+    resetDeckBuilderState();
+    if (deckBuilderModal) deckBuilderModal.style.display = "flex";
+    showDeckBuilderStep(1);
+  }
+
+  function closeDeckBuilder() {
+    if (deckBuilderModal) deckBuilderModal.style.display = "none";
+    resetDeckBuilderState();
+  }
+
+  function resetDeckBuilderState() {
+    deckBuilderState.cards = [];
+    deckBuilderState.deckName = "";
+    deckBuilderState.deckDescription = "";
+    deckBuilderState.currentCardIndex = -1;
+    deckBuilderState.isEditingCard = false;
+    if (deckNameInput) deckNameInput.value = "";
+    if (deckDescriptionInput) deckDescriptionInput.value = "";
+  }
+
+  function showDeckBuilderStep(step) {
+    if (step1DeckInfo) step1DeckInfo.style.display = step === 1 ? "block" : "none";
+    if (step2Flashcards) step2Flashcards.style.display = step === 2 ? "block" : "none";
+    if (step3Success) step3Success.style.display = step === 3 ? "block" : "none";
+  }
+
+  function startEditingCard(index) {
+    deckBuilderState.currentCardIndex = index;
+    deckBuilderState.isEditingCard = true;
+    
+    if (currentCardEditor) currentCardEditor.style.display = "block";
+    if (cardBuilderActions) cardBuilderActions.style.display = "none";
+
+    if (index >= 0 && index < deckBuilderState.cards.length) {
+      const card = deckBuilderState.cards[index];
+      if (cueInput) cueInput.value = card.cueFront;
+      if (quoteInput) quoteInput.value = card.quoteBack;
+      if (priorityInput) priorityInput.value = card.priority;
+    } else {
+      if (cueInput) cueInput.value = "";
+      if (quoteInput) quoteInput.value = "";
+      if (priorityInput) priorityInput.value = "4";
+    }
+    
+    if (cueInput) cueInput.focus();
+  }
+
+  function finishEditingCard() {
+    deckBuilderState.isEditingCard = false;
+    deckBuilderState.currentCardIndex = -1;
+    if (currentCardEditor) currentCardEditor.style.display = "none";
+    if (cardBuilderActions) cardBuilderActions.style.display = "flex";
+    renderFlashcardList();
+  }
+
+  function saveFlashcard(cueFront, quoteBack, priority) {
+    const card = {
+      cueId: crypto.randomUUID(),
+      cueFront,
+      quoteId: crypto.randomUUID(),
+      quoteBack,
+      priority
+    };
+
+    if (deckBuilderState.currentCardIndex >= 0) {
+      // Update existing card
+      deckBuilderState.cards[deckBuilderState.currentCardIndex] = card;
+    } else {
+      // Add new card
+      deckBuilderState.cards.push(card);
+    }
+
+    finishEditingCard();
+  }
+
+  function deleteFlashcard(index) {
+    if (index >= 0 && index < deckBuilderState.cards.length) {
+      deckBuilderState.cards.splice(index, 1);
+      renderFlashcardList();
+    }
+  }
+
+  function renderFlashcardList() {
+    if (!flashcardList) return;
+    
+    flashcardList.innerHTML = "";
+    
+    deckBuilderState.cards.forEach((card, index) => {
+      const item = document.createElement("div");
+      item.className = "flashcard-item";
+      if (index === deckBuilderState.currentCardIndex) {
+        item.classList.add("active");
+      }
+      
+      const title = document.createElement("div");
+      title.className = "flashcard-item-title";
+      title.textContent = `${index + 1}. ${card.cueFront.substring(0, 50)}...`;
+      
+      const actions = document.createElement("div");
+      actions.className = "flashcard-item-actions";
+      
+      const editBtn = document.createElement("button");
+      editBtn.className = "flashcard-item-btn";
+      editBtn.textContent = "Edit";
+      editBtn.addEventListener("click", () => startEditingCard(index));
+      
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "flashcard-item-btn";
+      deleteBtn.textContent = "Delete";
+      deleteBtn.addEventListener("click", () => deleteFlashcard(index));
+      
+      actions.appendChild(editBtn);
+      actions.appendChild(deleteBtn);
+      
+      item.appendChild(title);
+      item.appendChild(actions);
+      flashcardList.appendChild(item);
+    });
+  }
+
+  async function saveDeckToDB() {
+    if (!deckBuilderState.deckName) {
+      alert("Deck name is required");
+      return;
+    }
+
+    if (deckBuilderState.cards.length === 0) {
+      alert("Add at least one card to the deck");
+      return;
+    }
+
+     try {
+       // Create the deck (subject) first
+       const subjectName = deckBuilderState.deckName;
+
+       // Create a subject node for this custom deck
+       await addSubject(subjectName);
+       
+       // Add all quotes for this deck
+      const quotes = [];
+      for (const card of deckBuilderState.cards) {
+         const quote = {
+           id: card.quoteId,
+           type: "quote",
+           subject: subjectName,
+           quote: card.quoteBack,
+           title: subjectName,
+           priority: card.priority,
+          meta: {
+            tags: ["custom-deck"],
+            confidence: 0.8,
+            nextReview: Date.now(),
+            interval: 1,
+            ease: 2.5,
+            repetitions: 0
+          }
+        };
+        quotes.push(quote);
+      }
+
+      // Add all quotes
+      for (const quote of quotes) {
+        await addQuote(quote);
+      }
+
+       // Add all cues (flashcard fronts) linked to quotes
+       for (let i = 0; i < deckBuilderState.cards.length; i++) {
+         const card = deckBuilderState.cards[i];
+         const cue = {
+           id: card.cueId,
+           subject: subjectName,
+           quoteId: card.quoteId,
+           cue: card.cueFront,
+           priority: card.priority,
+           type: "cue",
+           createdAt: Date.now(),
+           updatedAt: Date.now(),
+           meta: {
+             nextReview: Date.now(),
+             interval: 1,
+             ease: 2.5,
+             repetitions: 0
+           }
+         };
+         await addCue(cue);
+       }
+
+      // Show success screen
+      if (deckNameDisplay) deckNameDisplay.textContent = deckBuilderState.deckName;
+      if (cardCountDisplay) cardCountDisplay.textContent = deckBuilderState.cards.length;
+      showDeckBuilderStep(3);
+      
+    } catch (error) {
+      console.error("Error saving deck:", error);
+      alert("Error saving deck: " + error.message);
     }
   }
 
