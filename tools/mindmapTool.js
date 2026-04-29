@@ -210,10 +210,8 @@ const state = {
       if (!grouped[e.name]) grouped[e.name] = [];
       grouped[e.name].push(e.duration);
     });
-    console.clear();
     Object.entries(grouped).forEach(([name, arr]) => {
       const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
-      console.log(`${name}: ${avg.toFixed(2)}ms`);
     });
     performance.clearMeasures();
     perf.lastLog = now;

@@ -76,8 +76,12 @@ const tools = {
       getCuesForQuote,
       getCuesForSubject,
       deleteCue,
+      deleteQuote,
+      renameSubject,
       getNode,
       getNodeTimestamp,
+      getCue,
+      getQuote,
       getSubjects,
       escapeHtml
     }, context)
@@ -475,6 +479,13 @@ async function importDatabaseJson(file) {
     await syncToCloud(nodes, quotes, cues);
   }
 
+  // Refresh global launchpad with fresh data
+  await updateGlobalStats();
+  await renderSubjectList();
+
+  // Notify tools that DB has changed so they can refresh
+  document.dispatchEvent(new Event("db-change"));
+
   if (currentToolName) {
     await loadTool(currentToolName);
   }
@@ -493,6 +504,7 @@ function showLaunchpad() {
     setTimeout(() => {
       tc.style.display = "none";
       tc.classList.remove("exiting");
+      tc.innerHTML = "";
     }, 350);
   }
   
