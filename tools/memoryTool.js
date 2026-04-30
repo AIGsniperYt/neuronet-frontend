@@ -68,7 +68,7 @@ export async function initMemoryTool(deps, context = {}) {
   let memoryTool, modeSelect, newSessionBtn, statsBtn, backToDecksBtn;
    let memoryLaunchpad, deckList, memoryContent, editDecksBtn;
   let flashcardContainer, flashcard, flashcardContent, flashcardBackContent;
-  let gradingControls, gradeDidntKnowBtn, gradeKindaBtn, gradeEasyBtn;
+   let gradingControls, gradeDidntKnowBtn, gradeKindaBtn, gradeEasyBtn, priorityControls, priorityToggle;
   let evidenceMatchingContainer, evidencePrompt, quoteOptions, evidenceFeedback;
   let memoryStats, statsContent, closeStatsBtn, roundProgress, resetMemoryBtn;
   let systemThinkingText;
@@ -109,6 +109,8 @@ export async function initMemoryTool(deps, context = {}) {
     gradeDidntKnowBtn = document.getElementById("gradeDidntKnowBtn");
     gradeKindaBtn = document.getElementById("gradeKindaBtn");
     gradeEasyBtn = document.getElementById("gradeEasyBtn");
+    priorityControls = document.getElementById("priorityControls");
+    priorityToggle = document.getElementById("priorityToggle");
     evidenceMatchingContainer = document.getElementById("evidenceMatchingContainer");
     evidencePrompt = document.getElementById("evidencePrompt");
     quoteOptions = document.getElementById("quoteOptions");
@@ -280,6 +282,44 @@ export async function initMemoryTool(deps, context = {}) {
       });
     }
 
+    // Priority toggle button (bottom-right)
+    const priorityToggle = document.getElementById("priorityToggle");
+    if (priorityToggle) {
+      priorityToggle.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const controls = document.getElementById("priorityControls");
+        if (controls) {
+          const isVisible = controls.style.display !== "none";
+          if (!isVisible) {
+            // Populate priority buttons when showing
+            const currentCard = state.flashcards[state.currentIndex];
+            if (currentCard?.record?.priority !== undefined) {
+              controls.innerHTML = `
+                <span class="priority-label">Priority:</span>
+                ${[1,2,3,4,5].map(v => {
+                  const active = v <= currentCard.record.priority;
+                  const color = getPriorityColor(v);
+                  return `<button type="button" class="priority-btn ${active ? 'active' : ''}" 
+                    style="color:${active ? color : 'rgba(230,255,245,0.3)'};" 
+                    data-value="${v}" title="Set priority to ${v}">${active ? '★' : '☆'}</button>`;
+                }).join("")}
+              `;
+              controls.querySelectorAll(".priority-btn").forEach(btn => {
+                btn.addEventListener("click", async (e) => {
+                  const newPriority = parseInt(e.target.dataset.value);
+                  const card = state.flashcards[state.currentIndex];
+                  if (card?.record?.id) {
+                    await updateQuotePriority(card.record.id, newPriority);
+                  }
+                });
+              });
+            }
+          }
+          controls.style.display = isVisible ? "none" : "flex";
+        }
+      });
+    }
+
     if (closeStatsBtn && !closeStatsBtn.dataset.bound) {
       // closeStats is wired up inside the statsBtn block above when statsBtn exists
       // Fallback binding if statsBtn is absent
@@ -391,6 +431,16 @@ export async function initMemoryTool(deps, context = {}) {
 
   async function handleKeyDown(e) {
     if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+    
+    // Priority shortcut: Ctrl+1-5 to set quote priority
+    if (e.ctrlKey && e.key >= "1" && e.key <= "5") {
+      const currentCard = state.flashcards[state.currentIndex];
+      if (currentCard?.record?.priority !== undefined) {
+        e.preventDefault();
+        await updateQuotePriority(currentCard.record.id, parseInt(e.key));
+        return;
+      }
+    }
     
     if (state.currentMode === "evidence-matching") {
       if (!state.evidenceMatching.answered) {
@@ -511,18 +561,19 @@ export async function initMemoryTool(deps, context = {}) {
 
     await maybeEnqueueSurpriseCard();
     
-    // Re-enqueue the card into the continuous heap with its newly calculated priority
-    const nextPriority = computePriority(updatedMemoryState, nowMs);
-    const recycledCard = {
+    // Build recycled card for re-queueing
+    const cardForHeap = {
       ...currentCard,
       review: { required: true, graded: false, grade: null, responseTimeMs: null },
       memoryState: updatedMemoryState
     };
     if (isBlurt) {
-      recycledCard.blurt = { submitted: false, text: "" };
+      cardForHeap.blurt = { submitted: false, text: "" };
     }
+    const quotePriority = cardForHeap.memoryKind === "quote" ? (cardForHeap.record?.priority ?? null) : null;
+    const nextPriority = computePriority(updatedMemoryState, nowMs, quotePriority);
     if (state.session.heap) {
-      state.session.heap.push({ priority: nextPriority, card: recycledCard });
+      state.session.heap.push({ priority: nextPriority, card: cardForHeap });
     }
 
     renderUI();
@@ -764,6 +815,18 @@ export async function initMemoryTool(deps, context = {}) {
     return Math.min(max, Math.max(min, value));
   }
 
+  function getPriorityColor(priority) {
+    const p = clampNumber(Number(priority), 1, 5);
+    switch (p) {
+      case 1: return "#9aa4ad";
+      case 2: return "#4ba3ff";
+      case 3: return "#3fd07d";
+      case 4: return "#ff9b39";
+      case 5: return "#ff4d4d";
+      default: return "#3fd07d";
+    }
+  }
+
   function getExpectedTimeMs(kind) {
     if (kind === "analysis") return 8000;
     if (kind === "blurt") return 15000;
@@ -866,7 +929,7 @@ export async function initMemoryTool(deps, context = {}) {
     };
   }
 
-  function computePriority(memoryState, nowMs) {
+  function computePriority(memoryState, nowMs, quotePriority = null) {
     let overdueDays;
     if (Number.isFinite(Number(memoryState.nextReview)) && memoryState.nextReview > 0) {
       overdueDays = (nowMs - Number(memoryState.nextReview)) / 86400000;
@@ -875,7 +938,15 @@ export async function initMemoryTool(deps, context = {}) {
       overdueDays = 0;
     }
     const U = clampNumber(Number(memoryState.U ?? 0.5), 0, 1);
-    return 1 + overdueDays + U * 0.8;
+    let result = 1 + overdueDays + U * 0.8;
+
+    // Factor in quote priority (1-5 scale, 5 = highest user priority)
+    if (quotePriority !== null && quotePriority !== undefined) {
+      const p = clampNumber(Number(quotePriority), 1, 5);
+      result += (p - 1) * 2; // Priority 5 adds 8.0 boost, Priority 1 adds 0
+    }
+
+    return result;
   }
 
   async function maybeEnqueueSurpriseCard() {
@@ -941,7 +1012,8 @@ export async function initMemoryTool(deps, context = {}) {
     }
 
     if (!card) return;
-    const priority = computePriority(card.memoryState, nowMs) + 0.7;
+    const quotePriority = card.memoryKind === "quote" ? (card.record?.priority ?? null) : null;
+    const priority = computePriority(card.memoryState, nowMs, quotePriority) + 0.7;
     state.session.heap.push({ priority, card });
   }
 
@@ -1017,7 +1089,8 @@ export async function initMemoryTool(deps, context = {}) {
     );
 
     cards.forEach((card) => {
-      const priority = computePriority(card.memoryState, nowMs);
+      const quotePriority = card.record?.priority ?? null;
+      const priority = computePriority(card.memoryState, nowMs, quotePriority);
       state.session.heap.push({ priority, card });
     });
   }
@@ -1065,6 +1138,7 @@ export async function initMemoryTool(deps, context = {}) {
     );
 
     cards.forEach((card) => {
+      // Analysis nodes don't have quote priority, but we could compute from referenced quotes
       const priority = computePriority(card.memoryState, nowMs);
       state.session.heap.push({ priority, card });
     });
@@ -1181,7 +1255,7 @@ export async function initMemoryTool(deps, context = {}) {
         memoryState
       };
 
-      const priority = computePriority(memoryState, nowMs);
+      const priority = computePriority(memoryState, nowMs, cue.quoteId ? (quotesById.get(cue.quoteId)?.priority ?? null) : null);
       state.session.heap.push({ priority, card });
     });
   }
@@ -1368,6 +1442,20 @@ export async function initMemoryTool(deps, context = {}) {
       }
     }
 
+    // Show/hide priority toggle button (bottom-right)
+    const priorityToggle = document.getElementById("priorityToggle");
+    const priorityControls = document.getElementById("priorityControls");
+    if (priorityToggle) {
+      const isQuoteCard = currentCard?.memoryKind === "quote" || currentCard?.type === "quote-learning";
+      if (isQuoteCard && currentCard?.record?.priority !== undefined) {
+        priorityToggle.style.display = "block";
+        priorityToggle.textContent = `${"★".repeat(currentCard.record.priority)}${"☆".repeat(5 - currentCard.record.priority)}`;
+      } else {
+        priorityToggle.style.display = "none";
+        if (priorityControls) priorityControls.style.display = "none";
+      }
+    }
+
     if (state.currentMode === "evidence-matching") {
       renderEvidenceMatchingUI();
     }
@@ -1489,12 +1577,17 @@ export async function initMemoryTool(deps, context = {}) {
        }
      } else if (front.isAnalysis) {
        flashcardContent.innerHTML = `<div class="analysis-preview">${formatAnalysisForDisplay(front.content || "")}</div>`;
-      } else if (front.isQuote) {
-        flashcardContent.innerHTML = `<div class="quote">${escapeHtml(front.content || "")}</div>`;
-        const quoteData = flashcardData.front?.quoteData;
-        if (quoteData && !quoteData.meta?.tags?.includes("custom-deck")) {
-          flashcardContent.innerHTML += `<div class="quote-meta">From: ${escapeHtml(quoteData.section || "unknown source")}</div>`;
-        }
+        } else if (front.isQuote) {
+          flashcardContent.innerHTML = `<div class="quote">${escapeHtml(front.content || "")}</div>`;
+          const quoteData = flashcardData.front?.quoteData;
+          if (quoteData && !quoteData.meta?.tags?.includes("custom-deck")) {
+            flashcardContent.innerHTML += `<div class="quote-meta">From: ${escapeHtml(quoteData.section || "unknown source")}</div>`;
+          }
+          // Show priority subtly in corner
+          if (quoteData?.priority) {
+            const stars = [1,2,3,4,5].map(v => v <= quoteData.priority ? "★" : "☆").join("");
+            flashcardContent.innerHTML += `<div class="quote-priority-subtle">${stars}</div>`;
+          }
       } else {
        flashcardContent.textContent = front.content || "";
      }
@@ -1596,6 +1689,33 @@ export async function initMemoryTool(deps, context = {}) {
     const hasNextInHeap = !!state.session.heap && state.session.heap.size() > 0;
 
 
+  }
+
+  async function updateQuotePriority(quoteId, newPriority) {
+    if (!quoteId || !addQuote) return;
+    const quote = await getQuote(quoteId);
+    if (!quote) return;
+
+    quote.priority = clampNumber(newPriority, 1, 5);
+    quote.updatedAt = Date.now();
+
+    state.session.suppressDBChange++;
+    await addQuote(quote);
+
+    // Update the current card if it's the same quote
+    const currentCard = state.flashcards[state.currentIndex];
+    if (currentCard?.record?.id === quoteId) {
+      currentCard.record.priority = quote.priority;
+    }
+
+    // Update toggle button text
+    const priorityToggle = document.getElementById("priorityToggle");
+    if (priorityToggle && currentCard?.record?.id === quoteId) {
+      priorityToggle.textContent = `Priority: ${"★".repeat(quote.priority)}${"☆".repeat(5 - quote.priority)}`;
+    }
+
+    renderUI();
+    console.log(`Quote ${quoteId} priority updated to ${newPriority}`);
   }
 
   function formatAnalysisForDisplay(text) {
@@ -1715,6 +1835,10 @@ export async function initMemoryTool(deps, context = {}) {
       const label = cardLabel(card);
       const due = ms.nextReview ? fmtDate(ms.nextReview) : "new";
       const grade = gradeIcon(ms.lastGrade);
+      // Get quote priority if available
+      const quotePriority = card?.record?.priority ?? card?.targetRecord?.priority ?? null;
+      const priorityStars = quotePriority ? [1,2,3,4,5].map(v => v <= quotePriority ? "★" : "☆").join("") : null;
+
       return `
         <div class="heap-item${isCurrent ? " heap-item-current" : ""}">
           <div class="heap-item-rank">${isCurrent ? "▶" : `#${rank}`}</div>
@@ -1722,6 +1846,7 @@ export async function initMemoryTool(deps, context = {}) {
             <div class="heap-item-label">${escapeHtml(label)}${isCurrent ? " <span class=\"heap-current-tag\">on screen</span>" : ""}</div>
             <div class="heap-item-meta">
               <span title="Priority">⬆ ${fmtPriority(priority)}</span>
+              ${priorityStars ? `<span title="Quote Priority" style="color:${getPriorityColor(quotePriority)};">${priorityStars}</span>` : ""}
               <span title="Next review">📅 ${due}</span>
               <span title="Interval">⏱ ${fmtInterval((ms.interval || 0) * 86400000)}</span>
               <span title="Last grade">${grade} ${ms.lastGrade || "new"}</span>
@@ -1732,10 +1857,37 @@ export async function initMemoryTool(deps, context = {}) {
     };
 
     const currentCard = state.flashcards[state.currentIndex];
-    const currentPriority = currentCard ? computePriority(currentCard.memoryState || {}, nowMs) : null;
+    const currentQuotePriority = currentCard?.record?.priority ?? null;
+    const currentPriority = currentCard ? computePriority(currentCard.memoryState || {}, nowMs, currentQuotePriority) : null;
     const currentCardHTML = currentCard
       ? renderCardRow(currentCard, currentPriority, 0, true)
       : "";
+
+    // Priority distribution summary
+    const allCards = [...state.flashcards, ...heapItems.map(i => i.card)];
+    const priorityCounts = {1:0, 2:0, 3:0, 4:0, 5:0};
+    let totalQuotes = 0;
+    allCards.forEach(c => {
+      const p = c?.record?.priority ?? c?.targetRecord?.priority ?? null;
+      if (p !== null && p !== undefined) {
+        priorityCounts[p] = (priorityCounts[p] || 0) + 1;
+        totalQuotes++;
+      }
+    });
+
+    const prioritySummary = totalQuotes > 0 ? `
+      <div class="heap-section" style="margin-bottom: 12px;">
+        <div class="heap-section-title">Priority Distribution</div>
+        <div class="priority-distribution" style="display:flex; gap:8px; flex-wrap:wrap;">
+          ${[1,2,3,4,5].map(p => `
+            <div style="flex:1; min-width:40px; text-align:center; padding:6px; background:rgba(255,255,255,0.03); border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
+              <div style="font-size:0.65rem; color:var(--text-muted); margin-bottom:4px;">P${p}</div>
+              <div style="font-size:1rem; font-weight:700; color:${getPriorityColor(p)};">${priorityCounts[p] || 0}</div>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+    ` : "";
 
     const heapHTML = heapItems.length === 0 && !currentCard
       ? `<div style="color:var(--text-muted);padding:12px 0;">Heap is empty — all cards are in history.</div>`
@@ -1749,6 +1901,7 @@ export async function initMemoryTool(deps, context = {}) {
         <div class="stat-item"><span class="stat-label">Best</span><span class="stat-value">${state.stats.bestStreak}</span></div>
         <div class="stat-item"><span class="stat-label">Accuracy</span><span class="stat-value">${state.stats.totalStudied > 0 ? Math.round((state.stats.correctAnswers / state.stats.totalStudied) * 100) : 0}%</span></div>
       </div>
+      ${prioritySummary}
       <div class="heap-section">
         <div class="heap-section-title">Heap Queue (${heapItems.length} cards)</div>
         <div class="heap-list">${heapHTML}</div>
