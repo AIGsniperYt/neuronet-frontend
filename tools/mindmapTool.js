@@ -88,15 +88,15 @@ const state = {
     minZoom: 0.25,
     maxZoom: 3,
     labelZoomThresholds: {
-      "subject": 0.3,
-      "layer 1": 0.45,
-      "layer 2": 0.55,
-      "layer 3": 0.65,
-      "source": 0.75,
-      "tag": 0.6, // tag grouping is for many quotes with same tag, so show earlier
-      "quote": 1.0,
-      "analysis": 1.0,
-      "cue": 1.1
+      "subject": 0.2,
+      "layer 1": 0.35,
+      "layer 2": 0.45,
+      "layer 3": 0.55,
+      "source": 0.65,
+      "tag": 0.5, // tag grouping is for many quotes with same tag, so show earlier
+      "quote": 0.9,
+      "analysis": 0.9,
+      "cue": 1.0
     },
     colors: {
       subject: "#ff6b6b",
