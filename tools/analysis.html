@@ -984,7 +984,7 @@ button.analysis-quote-jump.active-quote,
         </form>
       </div>
 
-      <div id="analysisCleanupModal" class="analysis-cleanup-modal" aria-hidden="true">
+<div id="analysisCleanupModal" class="analysis-cleanup-modal" aria-hidden="true">
         <div class="analysis-cleanup-card panel" role="dialog" aria-modal="true" aria-labelledby="analysisCleanupTitle">
           <div style="display: flex; justify-content: space-between; align-items: start; gap: 12px; margin-bottom: 12px;">
             <div class="analysis-cleanup-copy">
@@ -998,6 +998,23 @@ button.analysis-quote-jump.active-quote,
           <div class="analysis-cleanup-actions" style="margin-top: 18px;">
             <button id="analysisCleanupKeepBtn" class="btn" type="button"></button>
             <button id="analysisCleanupDeleteBtn" class="btn danger" type="button"></button>
+          </div>
+        </div>
+      </div>
+
+      <div id="analysisParentModal" class="analysis-cleanup-modal" aria-hidden="true">
+        <div class="analysis-cleanup-card panel" role="dialog" aria-modal="true" aria-labelledby="analysisParentTitle">
+          <div style="display: flex; justify-content: space-between; align-items: start; gap: 12px; margin-bottom: 12px;">
+            <div class="analysis-cleanup-copy">
+              <p class="kicker" style="margin: 0;">No Quotes Selected</p>
+              <h3 id="analysisParentTitle" class="analysis-cleanup-title">Parent this analysis to:</h3>
+            </div>
+            <button id="analysisParentClose" class="icon-btn" type="button" style="margin: 0;" title="Close">X</button>
+          </div>
+          <p id="analysisParentMessage" class="analysis-cleanup-message">This analysis has no quote references. Choose how to parent it:</p>
+          <div id="analysisParentActions" class="analysis-cleanup-actions" style="margin-top: 18px;">
+            <button id="analysisParentToSourceBtn" class="btn primary" type="button">Parent to Source</button>
+            <button id="analysisParentToSubjectBtn" class="btn" type="button">Parent to Subject</button>
           </div>
         </div>
       </div>

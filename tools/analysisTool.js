@@ -90,6 +90,13 @@ export async function initAnalysisToolV2(deps, context = {}) {
   const analysisCardKicker = document.getElementById("analysisCardKicker");
   const analysisSubmitBtn = document.getElementById("analysisSubmitBtn");
 
+  // NEW: Parent choice modal elements
+  const analysisParentModal = document.getElementById("analysisParentModal");
+  const analysisParentMessage = document.getElementById("analysisParentMessage");
+  const analysisParentToSourceBtn = document.getElementById("analysisParentToSourceBtn");
+  const analysisParentToSubjectBtn = document.getElementById("analysisParentToSubjectBtn");
+  const analysisParentClose = document.getElementById("analysisParentClose");
+
   if (!launchpadView || !studyView || !analysisForm || !analysisReader) {
     console.error("[ANALYSIS] Critical DOM elements missing. Analysis tool cannot initialize.", {
       launchpadView: !!launchpadView,
@@ -1290,6 +1297,8 @@ function htmlToPlainText(html) {
     for (const r of node.quoteRefs || []) {
       if (refTouchesSource(r, sourceId)) return true;
     }
+    // Check manualLinks from mindmapTool.js
+    if (node.meta?.manualLinks?.includes(sourceId)) return true;
     return false;
   }
 
@@ -1915,6 +1924,33 @@ function htmlToPlainText(html) {
     });
   }
 
+  // NEW: Parent choice modal for orphaned analyses
+  let resolveParentChoice = null;
+
+  function hideParentChoiceModal() {
+    if (analysisParentModal) {
+      analysisParentModal.classList.remove("open");
+      analysisParentModal.setAttribute("aria-hidden", "true");
+    }
+    if (resolveParentChoice) {
+      const resolve = resolveParentChoice;
+      resolveParentChoice = null;
+      resolve(null);
+    }
+  }
+
+  function showParentChoiceModal(sourceTitle) {
+    if (!analysisParentModal) return Promise.resolve(null);
+
+    analysisParentMessage.textContent = `This analysis has no quote references. Choose how to parent it:`;
+    analysisParentModal.classList.add("open");
+    analysisParentModal.setAttribute("aria-hidden", "false");
+
+    return new Promise((resolve) => {
+      resolveParentChoice = resolve;
+    });
+  }
+
   /**
    * Create a new quote node from selected text
    * NEW: Path 1 - Create Quote Node from source
@@ -2051,7 +2087,7 @@ function htmlToPlainText(html) {
     }
   }
 
-  async function saveAnalysisNodeWithIntegrity({ analysisId, analysis, tags }) {
+  async function saveAnalysisNodeWithIntegrity({ analysisId, analysis, tags, parentToSource = false }) {
     const existing = state.analysisNodes.find((node) => node.id === analysisId) || null;
     const now = Date.now();
     const draftRefs = getSelectedQuoteRefs().map(cloneQuoteRef);
@@ -2074,6 +2110,9 @@ function htmlToPlainText(html) {
       content: "",
       analysis,
       quoteRefs: savedQuoteRefs,
+      link: parentToSource && state.selectedSourceId
+        ? { sourceId: state.selectedSourceId }
+        : (existing?.link || {}),
       meta: {
         ...(existing?.meta || {}),
         globalScope: true,
@@ -2387,20 +2426,35 @@ const updateLayerSelection = () => {
     const analysesForSource = state.analysisNodes.filter(
       (node) => node.subject === state.selectedSubject && analysisTouchesSource(node, source.id)
     ).sort((a, b) => {
-      // Sort by the position of the first quote in the source
+      const aParented = a.link?.sourceId === source.id || a.meta?.manualLinks?.includes(source.id);
+      const bParented = b.link?.sourceId === source.id || b.meta?.manualLinks?.includes(source.id);
+
+      // Parented nodes (directly linked to this source) come first
+      if (aParented !== bParented) {
+        return aParented ? -1 : 1;
+      }
+
+      // Helper to get the earliest quote position in this source for sorting
       const getFirstQuoteStart = (node) => {
-        if (!node.quoteRefs?.length) return Infinity;
-        for (const ref of node.quoteRefs) {
-          if (ref.sourceId === source.id && ref.start != null) {
-            return Number(ref.start);
-          }
-          const quote = state.quotes.find((q) => q.id === ref.quoteId);
-          if (quote?.link?.sourceId === source.id && quote?.link?.start != null) {
-            return Number(quote.link.start);
+        // For parented nodes, use their link's start position first
+        if (node.link?.sourceId === source.id && Number.isFinite(node.link?.start)) {
+          return Number(node.link.start);
+        }
+        // Check quoteRefs for positions in this source
+        if (node.quoteRefs?.length) {
+          for (const ref of node.quoteRefs) {
+            if (ref.sourceId === source.id && Number.isFinite(ref.start)) {
+              return Number(ref.start);
+            }
+            const quote = state.quotes.find((q) => q.id === ref.quoteId);
+            if (quote?.link?.sourceId === source.id && Number.isFinite(quote?.link?.start)) {
+              return Number(quote.link.start);
+            }
           }
         }
         return Infinity;
       };
+
       return getFirstQuoteStart(a) - getFirstQuoteStart(b);
     });
 
@@ -3378,17 +3432,34 @@ return document.execCommand(command, false, null);
     analysisForm.addEventListener("submit", async (event) => {
       event.preventDefault();
 
-      // NEW: Changed analysis workflow - now analysis nodes are standalone and reference quotes
       const analysis = (analysisNotesInput?.value || "").trim();
       const tags = parseTags(analysisTagsInput?.value || "");
-      
+
       if (!analysis) {
         alert("Please enter analysis commentary.");
         return;
       }
 
       const analysisId = analysisNodeIdInput?.value || crypto.randomUUID();
-      await saveAnalysisNodeWithIntegrity({ analysisId, analysis, tags });
+      const hasQuoteRefs = state.selectedQuoteRef && state.selectedQuoteRef.length > 0;
+
+      // If no quotes selected and not editing, show parent choice modal
+      if (!hasQuoteRefs && !state.analysisEditMode) {
+        const source = getSourceById(state.selectedSourceId);
+        const choice = await showParentChoiceModal(source?.title || "");
+
+        if (!choice) return; // User dismissed
+
+        await saveAnalysisNodeWithIntegrity({
+          analysisId,
+          analysis,
+          tags,
+          parentToSource: choice === "source"
+        });
+      } else {
+        await saveAnalysisNodeWithIntegrity({ analysisId, analysis, tags });
+      }
+
       dismissAnalysisModal();
       await backupLocalNodesToCloud();
     });
@@ -3428,6 +3499,49 @@ return document.execCommand(command, false, null);
     analysisCleanupModal.addEventListener("click", (event) => {
       if (event.target === analysisCleanupModal) {
         hideAnalysisCleanupDialog(null);
+      }
+    });
+  }
+
+  // NEW: Parent choice modal event handlers
+  if (analysisParentToSourceBtn) {
+    analysisParentToSourceBtn.addEventListener("click", () => {
+      if (resolveParentChoice) {
+        const resolve = resolveParentChoice;
+        resolveParentChoice = null;
+        resolve("source");
+      }
+      if (analysisParentModal) {
+        analysisParentModal.classList.remove("open");
+        analysisParentModal.setAttribute("aria-hidden", "true");
+      }
+    });
+  }
+
+  if (analysisParentToSubjectBtn) {
+    analysisParentToSubjectBtn.addEventListener("click", () => {
+      if (resolveParentChoice) {
+        const resolve = resolveParentChoice;
+        resolveParentChoice = null;
+        resolve("subject");
+      }
+      if (analysisParentModal) {
+        analysisParentModal.classList.remove("open");
+        analysisParentModal.setAttribute("aria-hidden", "true");
+      }
+    });
+  }
+
+  if (analysisParentClose) {
+    analysisParentClose.addEventListener("click", () => {
+      hideParentChoiceModal();
+    });
+  }
+
+  if (analysisParentModal) {
+    analysisParentModal.addEventListener("click", (event) => {
+      if (event.target === analysisParentModal) {
+        hideParentChoiceModal();
       }
     });
   }

@@ -670,6 +670,20 @@ const state = {
     });
 
     analyses.forEach(analysis => {
+      // Check if analysis has any quote parent (not orphaned)
+      const hasQuoteParent =
+        (analysis.quoteRefs || []).some(ref => ref.quoteId) ||
+        (analysis.meta?.manualLinks || []).some(id => quotes.some(q => q.id === id)) ||
+        quotes.some(q => q.meta?.analysisNodeIds?.includes(analysis.id));
+
+      // Only connect orphaned analyses (no quote parents) to subject node
+      if (!hasQuoteParent && analysis.subject) {
+        const subjectNode = subjectNodes.find(s => s.subject === analysis.subject);
+        if (subjectNode) {
+          addEdge(subjectNode.id, analysis.id, "subject-analysis", 2.2);
+        }
+      }
+
       (analysis.quoteRefs || []).forEach(ref => {
         if (ref.quoteId) {
           addEdge(ref.quoteId, analysis.id, "quote-analysis", 2);
