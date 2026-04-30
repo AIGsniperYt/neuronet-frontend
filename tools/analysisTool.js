@@ -3,9 +3,11 @@ export async function initAnalysisToolV2(deps, context = {}) {
     getAllNodes,
     getAllQuotes,
     getAllCues,
+    getAllTags,
     getNode,
     addNode,
     addQuote,
+    addTag,
     getQuote,
     deleteQuote,
     deleteCue,
@@ -1732,6 +1734,112 @@ function htmlToPlainText(html) {
     });
   }
 
+  // ========= TAG SELECTOR FOR ANALYSIS FORM =========
+  let tagSelectorOpen = false;
+
+  async function toggleTagSelector() {
+    const container = document.getElementById("tagSelectorContainer");
+    if (!container) return;
+
+    if (tagSelectorOpen) {
+      container.innerHTML = "";
+      container.style.display = "none";
+      tagSelectorOpen = false;
+      return;
+    }
+
+    tagSelectorOpen = true;
+    container.style.display = "block";
+
+    try {
+      const allTags = await getAllTags();
+      const currentSubject = state.selectedSubject || "";
+      const currentTags = (analysisTagsInput?.value || "").split(",").map(t => t.trim()).filter(Boolean);
+
+      // Filter tags: show tags used in current subject, or all if none in subject
+      let subjectTags = allTags.filter(tag => {
+        // Check if any node in current subject uses this tag
+        return state.nodes.some(n =>
+          n.subject === currentSubject &&
+          n.meta?.tags?.includes(tag.title)
+        ) || state.quotes.some(q =>
+          q.subject === currentSubject &&
+          q.meta?.tags?.includes(tag.title)
+        );
+      });
+
+      // If no tags in subject yet, show all existing tags
+      if (subjectTags.length === 0) {
+        subjectTags = allTags;
+      }
+
+      const existingTagTitles = new Set(subjectTags.map(t => t.title.toLowerCase()));
+
+      container.innerHTML = `
+        <div style="background: rgba(16,43,32,0.95); border: 1px solid rgba(44,255,179,0.3); border-radius: 6px; padding: 8px; margin-top: 4px; max-height: 150px; overflow-y: auto;">
+          <div style="font-size: 0.75rem; color: rgba(230,255,245,0.7); margin-bottom: 6px;">Select existing tags or type new ones:</div>
+          ${subjectTags.length > 0 ? `
+            <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px;">
+              ${subjectTags.map(tag => `
+                <button type="button" class="tag-select-btn" data-tag="${escapeHtml(tag.title)}" style="
+                  padding: 3px 8px;
+                  border-radius: 4px;
+                  font-size: 0.75rem;
+                  cursor: pointer;
+                  background: ${currentTags.includes(tag.title) ? 'rgba(44,255,179,0.3)' : 'rgba(44,255,179,0.1)'};
+                  color: ${currentTags.includes(tag.title) ? '#e6fff5' : 'rgba(230,255,245,0.7)'};
+                  border: 1px solid rgba(44,255,179,${currentTags.includes(tag.title) ? '0.5' : '0.2'});
+                ">${escapeHtml(tag.title)}</button>
+              `).join("")}
+            </div>
+          ` : '<div style="font-size: 0.75rem; color: rgba(230,255,245,0.5);">No existing tags yet. Type to create new ones.</div>'}
+        </div>
+      `;
+
+      container.querySelectorAll(".tag-select-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const tagName = btn.dataset.tag;
+          if (!tagName) return;
+
+          const currentValue = analysisTagsInput?.value || "";
+          const currentTags = currentValue.split(",").map(t => t.trim()).filter(Boolean);
+          const tagIndex = currentTags.indexOf(tagName);
+
+          if (tagIndex !== -1) {
+            // Remove tag
+            currentTags.splice(tagIndex, 1);
+            btn.style.background = 'rgba(44,255,179,0.1)';
+            btn.style.color = 'rgba(230,255,245,0.7)';
+            btn.style.border = '1px solid rgba(44,255,179,0.2)';
+          } else {
+            // Add tag
+            currentTags.push(tagName);
+            btn.style.background = 'rgba(44,255,179,0.3)';
+            btn.style.color = '#e6fff5';
+            btn.style.border = '1px solid rgba(44,255,179,0.5)';
+          }
+
+          if (analysisTagsInput) {
+            analysisTagsInput.value = currentTags.join(", ");
+          }
+        });
+      });
+    } catch (error) {
+      console.error("Failed to load tags:", error);
+    }
+  }
+
+  // Close tag selector when clicking outside
+  document.addEventListener("click", (e) => {
+    const container = document.getElementById("tagSelectorContainer");
+    const toggleBtn = document.getElementById("tagSelectorToggle");
+    if (container && !container.contains(e.target) && e.target !== toggleBtn && !toggleBtn?.contains(e.target)) {
+      container.innerHTML = "";
+      container.style.display = "none";
+      tagSelectorOpen = false;
+    }
+  });
+
   // Right-click context menu for cues on quotes
   let cueContextMenu = null;
 
@@ -1996,6 +2104,12 @@ function htmlToPlainText(html) {
     return quoteNode;
   }
 
+  // Sync tags from a quote node to the tag store
+  async function syncQuoteTagsToTagStore(quote) {
+    if (!quote?.meta?.tags || !Array.isArray(quote.meta.tags) || quote.meta.tags.length === 0) return;
+    await syncTagsToTagStore(quote.meta.tags, quote.subject || "");
+  }
+
   // NOTE: linkAnalysisToQuote and unlinkAnalysisFromQuote should be imported from db.js
   // They are called with parameter order: (quoteId, analysisId)
   // This is handled via reconcileAnalysisQuoteLinks below
@@ -2087,6 +2201,64 @@ function htmlToPlainText(html) {
     }
   }
 
+  // ========= TAG SYNC HELPER =========
+  // When tags are used in nodes/quotes, ensure they exist in the 'tags' store
+  async function syncTagsToTagStore(tags, subject) {
+    if (!tags || !Array.isArray(tags) || tags.length === 0) return;
+    try {
+      const existingTags = await getAllTags();
+      const existingTitles = new Set(existingTags.map(t => t.title.toLowerCase()));
+      for (const tag of tags) {
+        const normalized = String(tag).trim();
+        if (!normalized) continue;
+        if (existingTitles.has(normalized.toLowerCase())) continue;
+        // Create tag node in the tags store
+        await addTag({
+          title: normalized,
+          subject,
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        });
+        existingTitles.add(normalized.toLowerCase());
+      }
+    } catch (error) {
+      console.warn("Failed to sync tags to tag store:", error);
+    }
+  }
+
+  // ========= MIGRATE EXISTING TAGS TO TAG STORE =========
+  // On init, scan all nodes and quotes for tags in meta.tags and sync to the 'tags' store
+  async function syncAllExistingTags() {
+    try {
+      const [nodes, quotes] = await Promise.all([getAllNodes(), getAllQuotes()]);
+      const allTags = new Set();
+
+      // Collect all tags from nodes
+      for (const node of nodes) {
+        if (node?.meta?.tags && Array.isArray(node.meta.tags)) {
+          for (const tag of node.meta.tags) {
+            if (tag) allTags.add(String(tag).trim());
+          }
+        }
+      }
+
+      // Collect all tags from quotes
+      for (const quote of quotes) {
+        if (quote?.meta?.tags && Array.isArray(quote.meta.tags)) {
+          for (const tag of quote.meta.tags) {
+            if (tag) allTags.add(String(tag).trim());
+          }
+        }
+      }
+
+      if (allTags.size > 0) {
+        await syncTagsToTagStore(Array.from(allTags), "");
+      }
+    } catch (error) {
+      console.warn("Failed to sync existing tags:", error);
+    }
+  }
+
   async function saveAnalysisNodeWithIntegrity({ analysisId, analysis, tags, parentToSource = false }) {
     const existing = state.analysisNodes.find((node) => node.id === analysisId) || null;
     const now = Date.now();
@@ -2125,6 +2297,12 @@ function htmlToPlainText(html) {
     };
 
     await addNode(analysisNode);
+
+    // Sync tags to the tag store so mindmap tool can see them
+    if (tags && tags.length > 0) {
+      await syncTagsToTagStore(tags, state.selectedSubject);
+    }
+
     await refreshData();
     await reconcileAnalysisQuoteLinks(analysisId, existing?.quoteRefs || [], savedQuoteRefs);
     await refreshData();
@@ -3471,6 +3649,15 @@ return document.execCommand(command, false, null);
     });
   }
 
+  // Tag selector toggle button
+  const tagSelectorToggle = document.getElementById("tagSelectorToggle");
+  if (tagSelectorToggle) {
+    tagSelectorToggle.addEventListener("click", (e) => {
+      e.preventDefault();
+      toggleTagSelector();
+    });
+  }
+
   if (closeAnalysisCardBtn) {
     closeAnalysisCardBtn.addEventListener("click", async () => {
       await maybeDismissAnalysisModal();
@@ -4026,6 +4213,9 @@ return document.execCommand(command, false, null);
   resetSourceForm();
   resetAnalysisForm();
   await refreshData();
+
+  // Migrate any existing tags from node/quote metadata to the tags store
+  await syncAllExistingTags();
 
   if (contextNodeId) {
     const targetNode = state.nodes.find(n => n.id === contextNodeId) || state.quotes.find(q => q.id === contextNodeId);

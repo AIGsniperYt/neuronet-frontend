@@ -951,7 +951,11 @@ button.analysis-quote-jump.active-quote,
           </div>
 
           <textarea id="analysisNotes" class="inline-textarea" rows="5" placeholder="Analysis commentary"></textarea>
-          <input id="analysisTags" class="inline-input" type="text" placeholder="tags, separated, by commas" />
+          <div style="display: flex; gap: 6px; align-items: flex-start;">
+            <input id="analysisTags" class="inline-input" type="text" placeholder="tags, separated, by commas" style="flex: 1;" />
+            <button type="button" id="tagSelectorToggle" class="btn" style="padding: 6px 10px; font-size: 0.8rem; white-space: nowrap;" title="Select existing tags">🏷 Tags</button>
+          </div>
+          <div id="tagSelectorContainer" style="display: none;"></div>
           <div class="form-actions">
             <button class="btn primary" id="analysisSubmitBtn" type="submit">Save Analysis Node</button>
             <button id="resetAnalysisForm" class="btn" type="button">Clear</button>
