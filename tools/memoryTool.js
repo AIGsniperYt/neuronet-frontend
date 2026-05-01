@@ -62,24 +62,43 @@ export async function initMemoryTool(deps, context = {}) {
       correctOption: null,
       answered: false,
       wasCorrect: null
+    },
+    // Middle UI state
+    sessionFilter: null,
+    selectedPriorities: [],
+    selectedTags: [],
+    selectedLayers: [],
+    filterMode: "AND", // "AND" | "OR"
+    // Middle UI data cache
+    middleUIData: {
+      priorities: [],
+      tags: [],
+      layers: []
     }
   };
 
   let memoryTool, modeSelect, newSessionBtn, statsBtn, backToDecksBtn;
-   let memoryLaunchpad, deckList, memoryContent, editDecksBtn;
+  let memoryLaunchpad, deckList, memoryContent, editDecksBtn;
   let flashcardContainer, flashcard, flashcardContent, flashcardBackContent;
-   let gradingControls, gradeDidntKnowBtn, gradeKindaBtn, gradeEasyBtn, priorityControls, priorityToggle;
+  let gradingControls, gradeDidntKnowBtn, gradeKindaBtn, gradeEasyBtn, priorityControls, priorityToggle;
   let evidenceMatchingContainer, evidencePrompt, quoteOptions, evidenceFeedback;
   let memoryStats, statsContent, closeStatsBtn, roundProgress, resetMemoryBtn;
   let systemThinkingText;
   // Deck builder elements
   let deckBuilderModal, deckNameInput, deckDescriptionInput, createDeckBtn, closeDeckBuilderBtn;
   let step1DeckInfo, step2Flashcards, step3Success, currentCardEditor;
-  let cueInput, quoteInput, priorityInput, saveCardBtn, cancelCardBtn;
+  let cueInput, quoteInput, priorityPills, saveCardBtn, cancelCardBtn, clearFormBtn, deleteCardBtn;
   let nextToDeckBtn, addNewCardBtn, backToDeckInfoBtn, finishDeckBtn;
   let studyNewDeckBtn, backToLaunchpadBtn, flashcardList, cardBuilderActions;
   let deckNameDisplay, cardCountDisplay, builderTitle;
-  
+  // New: layer inputs, import
+  let deckLayer1, deckLayer2, deckLayer3, importToggleBtn, ankiImportInput, processImportBtn, cancelImportBtn, importFeedback;
+  // Middle UI elements
+  let middleUI, middleHeader, middleBackBtn, middleSubjectName, middleStudyBtn;
+  let middleModeSelector, andFilterBtn, orFilterBtn, filterModeHint;
+  let prioritySection, priorityCheckboxes, tagsSection, tagsCheckboxes, layersSection, layersCheckboxes;
+  let cardCount;
+
   // Deck builder state
   const deckBuilderState = {
     cards: [], // Array of {cueId, cueFront, quoteId, quoteBack, priority, isExisting}
@@ -90,7 +109,7 @@ export async function initMemoryTool(deps, context = {}) {
     editingSubject: null,
     deletedCardIds: [] // Track deleted card IDs for editing
   };
-  
+
   function getDOMElements() {
     memoryTool = document.getElementById("memoryTool");
     modeSelect = document.getElementById("modeSelect");
@@ -121,7 +140,7 @@ export async function initMemoryTool(deps, context = {}) {
     roundProgress = document.getElementById("roundProgress");
     resetMemoryBtn = document.getElementById("resetMemoryBtn");
     systemThinkingText = document.getElementById("systemThinkingText");
-    
+
     // Deck builder elements
     deckBuilderModal = document.getElementById("deckBuilderModal");
     deckNameInput = document.getElementById("deckNameInput");
@@ -135,9 +154,11 @@ export async function initMemoryTool(deps, context = {}) {
     currentCardEditor = document.getElementById("currentCardEditor");
     cueInput = document.getElementById("cueInput");
     quoteInput = document.getElementById("quoteInput");
-    priorityInput = document.getElementById("priorityInput");
+    priorityPills = document.getElementById("priorityPills");
     saveCardBtn = document.getElementById("saveCardBtn");
     cancelCardBtn = document.getElementById("cancelCardBtn");
+    clearFormBtn = document.getElementById("clearFormBtn");
+    deleteCardBtn = document.getElementById("deleteCardBtn");
     nextToDeckBtn = document.getElementById("nextToDeckBtn");
     addNewCardBtn = document.getElementById("addNewCardBtn");
     backToDeckInfoBtn = document.getElementById("backToDeckInfoBtn");
@@ -149,6 +170,35 @@ export async function initMemoryTool(deps, context = {}) {
     deckNameDisplay = document.getElementById("deckNameDisplay");
     cardCountDisplay = document.getElementById("cardCountDisplay");
     builderTitle = document.getElementById("builderTitle");
+    // Layer inputs
+    deckLayer1 = document.getElementById("deckLayer1");
+    deckLayer2 = document.getElementById("deckLayer2");
+    deckLayer3 = document.getElementById("deckLayer3");
+    // Import elements
+    importToggleBtn = document.getElementById("importToggleBtn");
+    ankiImportInput = document.getElementById("ankiImportInput");
+    processImportBtn = document.getElementById("processImportBtn");
+    cancelImportBtn = document.getElementById("cancelImportBtn");
+    importFeedback = document.getElementById("importFeedback");
+    // Card count display
+    cardCount = document.getElementById("cardCount");
+
+    // Middle UI elements
+    middleUI = document.getElementById("middleUI");
+    middleHeader = document.getElementById("middleHeader");
+    middleBackBtn = document.getElementById("middleBackBtn");
+    middleSubjectName = document.getElementById("middleSubjectName");
+    middleStudyBtn = document.getElementById("middleStudyBtn");
+    middleModeSelector = document.getElementById("middleModeSelector");
+    andFilterBtn = document.getElementById("andFilterBtn");
+    orFilterBtn = document.getElementById("orFilterBtn");
+    filterModeHint = document.getElementById("filterModeHint");
+    prioritySection = document.getElementById("prioritySection");
+    priorityCheckboxes = document.getElementById("priorityCheckboxes");
+    tagsSection = document.getElementById("tagsSection");
+    tagsCheckboxes = document.getElementById("tagsCheckboxes");
+    layersSection = document.getElementById("layersSection");
+    layersCheckboxes = document.getElementById("layersCheckboxes");
   }
 
   async function initialize() {
@@ -175,6 +225,7 @@ export async function initMemoryTool(deps, context = {}) {
       backToDecksBtn.addEventListener("click", async () => {
         state.view = "launchpad";
         state.currentSubject = "";
+        state.sessionFilter = null;
         await loadLaunchpad();
         renderUI();
       });
@@ -253,9 +304,6 @@ export async function initMemoryTool(deps, context = {}) {
     }
 
 
-
-
-
     if (gradeDidntKnowBtn) {
       gradeDidntKnowBtn.addEventListener("click", async () => {
         await gradeCurrentCard("didnt_know");
@@ -283,9 +331,9 @@ export async function initMemoryTool(deps, context = {}) {
     }
 
     // Priority toggle button (bottom-right)
-    const priorityToggle = document.getElementById("priorityToggle");
-    if (priorityToggle) {
-      priorityToggle.addEventListener("click", (e) => {
+    const priorityToggleBtn = document.getElementById("priorityToggle");
+    if (priorityToggleBtn) {
+      priorityToggleBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         const controls = document.getElementById("priorityControls");
         if (controls) {
@@ -299,8 +347,8 @@ export async function initMemoryTool(deps, context = {}) {
                 ${[1,2,3,4,5].map(v => {
                   const active = v <= currentCard.record.priority;
                   const color = getPriorityColor(v);
-                  return `<button type="button" class="priority-btn ${active ? 'active' : ''}" 
-                    style="color:${active ? color : 'rgba(230,255,245,0.3)'};" 
+                  return `<button type="button" class="priority-btn ${active ? 'active' : ''}"
+                    style="color:${active ? color : 'rgba(230,255,245,0.3)'};"
                     data-value="${v}" title="Set priority to ${v}">${active ? '★' : '☆'}</button>`;
                 }).join("")}
               `;
@@ -321,8 +369,6 @@ export async function initMemoryTool(deps, context = {}) {
     }
 
     if (closeStatsBtn && !closeStatsBtn.dataset.bound) {
-      // closeStats is wired up inside the statsBtn block above when statsBtn exists
-      // Fallback binding if statsBtn is absent
       closeStatsBtn.dataset.bound = "1";
       closeStatsBtn.addEventListener("click", () => {
         if (memoryStats) memoryStats.classList.remove("open");
@@ -371,6 +417,34 @@ export async function initMemoryTool(deps, context = {}) {
       });
     }
 
+    // Import toggle
+    if (importToggleBtn) {
+      importToggleBtn.addEventListener("click", () => {
+        const importView = document.getElementById("importView");
+        const cardEditForm = document.getElementById("cardEditForm");
+        if (importView) {
+          const isVisible = importView.style.display !== "none";
+          importView.style.display = isVisible ? "none" : "block";
+          if (cardEditForm) cardEditForm.style.display = isVisible ? "block" : "none";
+        }
+      });
+    }
+
+    if (processImportBtn) {
+      processImportBtn.addEventListener("click", processAnkiImport);
+    }
+
+    if (cancelImportBtn) {
+      cancelImportBtn.addEventListener("click", () => {
+        const importView = document.getElementById("importView");
+        const cardEditForm = document.getElementById("cardEditForm");
+        if (importView) importView.style.display = "none";
+        if (cardEditForm) cardEditForm.style.display = "block";
+        if (ankiImportInput) ankiImportInput.value = "";
+        if (importFeedback) importFeedback.textContent = "";
+      });
+    }
+
     if (saveCardBtn) {
       saveCardBtn.addEventListener("click", () => {
         const cueFront = cueInput?.value?.trim() || "";
@@ -379,8 +453,24 @@ export async function initMemoryTool(deps, context = {}) {
           alert("Please enter both front and back of the card");
           return;
         }
-        const priority = parseInt(priorityInput?.value) || 3;
+        // Get selected priority from pills
+        const activePill = priorityPills?.querySelector(".priority-pill.active");
+        const priority = activePill ? parseInt(activePill.dataset.priority) : 3;
         saveFlashcard(cueFront, quoteBack, priority);
+      });
+    }
+
+    if (clearFormBtn) {
+      clearFormBtn.addEventListener("click", () => {
+        finishEditingCard();
+      });
+    }
+
+    if (deleteCardBtn) {
+      deleteCardBtn.addEventListener("click", () => {
+        if (deckBuilderState.currentCardIndex >= 0) {
+          deleteFlashcard(deckBuilderState.currentCardIndex);
+        }
       });
     }
 
@@ -423,6 +513,73 @@ export async function initMemoryTool(deps, context = {}) {
         closeDeckBuilder();
       });
     }
+
+    // Middle UI event listeners
+    if (middleBackBtn) {
+      middleBackBtn.addEventListener("click", async () => {
+        state.view = "launchpad";
+        state.currentSubject = "";
+        state.sessionFilter = null;
+        await loadLaunchpad();
+        renderUI();
+      });
+    }
+
+    if (middleStudyBtn) {
+      middleStudyBtn.addEventListener("click", async () => {
+        // Build session filter from selected options
+        state.sessionFilter = {
+          mode: state.currentMode,
+          filterMode: state.filterMode,
+          priorities: [...state.selectedPriorities],
+          tags: [...state.selectedTags],
+          layers: [...state.selectedLayers]
+        };
+        state.view = "study";
+        await loadFlashcards();
+        renderUI();
+      });
+    }
+
+    // Mode selector pills
+    if (middleModeSelector) {
+      middleModeSelector.querySelectorAll(".mode-pill").forEach(btn => {
+        btn.addEventListener("click", () => {
+          middleModeSelector.querySelectorAll(".mode-pill").forEach(b => b.classList.remove("active"));
+          btn.classList.add("active");
+          state.currentMode = btn.dataset.mode;
+        });
+      });
+    }
+
+    // AND/OR filter toggle
+    if (andFilterBtn) {
+      andFilterBtn.addEventListener("click", () => {
+        state.filterMode = "AND";
+        andFilterBtn.classList.add("active");
+        orFilterBtn.classList.remove("active");
+      });
+    }
+
+    if (orFilterBtn) {
+      orFilterBtn.addEventListener("click", () => {
+        state.filterMode = "OR";
+        orFilterBtn.classList.add("active");
+        andFilterBtn.classList.remove("active");
+      });
+    }
+
+    // Cue/quote input listeners for save button state
+    if (cueInput && quoteInput && saveCardBtn) {
+      const updateSaveButton = () => {
+        const hasContent = cueInput.value.trim() && quoteInput.value.trim();
+        saveCardBtn.disabled = !hasContent;
+        saveCardBtn.style.opacity = hasContent ? "1" : "0.4";
+        saveCardBtn.style.pointerEvents = hasContent ? "auto" : "none";
+      };
+      cueInput.addEventListener("input", updateSaveButton);
+      quoteInput.addEventListener("input", updateSaveButton);
+    }
   }
 
   function attachKeyboardShortcuts() {
@@ -431,7 +588,7 @@ export async function initMemoryTool(deps, context = {}) {
 
   async function handleKeyDown(e) {
     if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
-    
+
     // Priority shortcut: Ctrl+1-5 to set quote priority
     if (e.ctrlKey && e.key >= "1" && e.key <= "5") {
       const currentCard = state.flashcards[state.currentIndex];
@@ -441,7 +598,7 @@ export async function initMemoryTool(deps, context = {}) {
         return;
       }
     }
-    
+
     if (state.currentMode === "evidence-matching") {
       if (!state.evidenceMatching.answered) {
         if (e.key >= "1" && e.key <= "4") {
@@ -459,7 +616,7 @@ export async function initMemoryTool(deps, context = {}) {
         return;
       }
     }
-    
+
     switch (e.key) {
       case " ":
         e.preventDefault();
@@ -560,7 +717,7 @@ export async function initMemoryTool(deps, context = {}) {
     }
 
     await maybeEnqueueSurpriseCard();
-    
+
     // Build recycled card for re-queueing
     const cardForHeap = {
       ...currentCard,
@@ -642,15 +799,15 @@ export async function initMemoryTool(deps, context = {}) {
 
   async function navigateTo(index) {
     if (index === state.currentIndex || index < 0 || index >= state.flashcards.length) return;
-    
+
     updateSystemThought();
-    
+
     const direction = index > state.currentIndex ? "forward" : "back";
-    
+
     if (flashcard) {
       const exitClass = direction === "forward" ? "slide-away" : "slide-away-back";
       const enterClass = direction === "forward" ? "slide-in" : "slide-in-back";
-      
+
       flashcard.classList.add(exitClass);
       setTimeout(async () => {
         state.currentIndex = index;
@@ -661,9 +818,9 @@ export async function initMemoryTool(deps, context = {}) {
         if (state.currentMode === "evidence-matching") {
           await loadEvidenceMatchingForAnalysis(state.flashcards[index].id);
         }
-        
+
         renderUI();
-        
+
         flashcard.classList.remove(exitClass);
         flashcard.classList.add(enterClass);
         setTimeout(() => {
@@ -709,11 +866,12 @@ export async function initMemoryTool(deps, context = {}) {
       const analyses = await getAnalysisNodesForSubject(subject) || [];
       const total = quotes.length + analyses.length;
 
-      const card = document.createElement("div");
-      card.className = "deck-card";
+       const card = document.createElement("div");
+      card.className = "card";
       card.innerHTML = `
-        <div class="deck-title">${escapeHtml(subject)}</div>
-        <div class="deck-stats">${total} items</div>
+        <div class="card-title">${escapeHtml(subject)}</div>
+        <button class="card-btn deck-study-btn" data-subject="${escapeHtml(subject)}">Study</button>
+        <div class="card-meta deck-stats">${total} items</div>
         ${state.editMode ? `<button class="deck-edit-btn" data-subject="${escapeHtml(subject)}">✎</button>` : ""}
       `;
 
@@ -723,14 +881,28 @@ export async function initMemoryTool(deps, context = {}) {
           e.stopPropagation();
           await openDeckEditor(subject);
         });
-      } else {
-        card.addEventListener("click", async () => {
-          state.currentSubject = subject;
-          state.view = "study";
-          await loadFlashcards();
-          renderUI();
-        });
       }
+
+      // Study button - quick study with no filters
+      const studyBtn = card.querySelector(".deck-study-btn");
+      studyBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        state.currentSubject = subject;
+        state.currentMode = "quote-learning";
+        state.sessionFilter = null;
+        state.view = "study";
+        await loadFlashcards();
+        renderUI();
+      });
+
+      // Card click - go to middle UI for filters
+      card.addEventListener("click", async () => {
+        if (state.editMode) return;
+        state.currentSubject = subject;
+        state.view = "middle-ui";
+        await loadMiddleUIData();
+        renderUI();
+      });
 
       deckList.appendChild(card);
     }
@@ -741,7 +913,7 @@ export async function initMemoryTool(deps, context = {}) {
       state.flashcards = [];
       return;
     }
-    
+
     state.flashcards = [];
     state.currentIndex = 0;
     state.isFlipped = false;
@@ -841,7 +1013,7 @@ export async function initMemoryTool(deps, context = {}) {
       interval: clampNumber(Number(meta.interval ?? 0.1), 0.1, 365),
       nextReview: Number.isFinite(Number(meta.nextReview)) ? Number(meta.nextReview) : 0,
       lastReview: Number.isFinite(Number(meta.lastReview)) ? Number(meta.lastReview) : null,
-      reviewCount: Number.isFinite(Number(meta.reviewCount)) ? Number(meta.reviewCount) : 0,
+      reviewCount: Number.isFinite(Number(meta.reviewCount)) ? meta.reviewCount : 0,
       expectedTime: clampNumber(Number(meta.expectedTime ?? (getExpectedTimeMs(kind) / 1000)), 1, 120),
       avgTime: clampNumber(Number(meta.avgTime ?? (getExpectedTimeMs(kind) / 1000)), 0.2, 240),
       timeVariance: clampNumber(Number(meta.timeVariance ?? 0.7), 0, 1000),
@@ -1056,7 +1228,7 @@ export async function initMemoryTool(deps, context = {}) {
         const analyses = await getAnalysesReferencingQuote(quote.id);
         const cueNode = cuesByQuoteId.get(quote.id) || null;
         const memoryState = getMemoryStateFromMeta(quote.meta || {}, "quote");
-        
+
         // For custom decks, display cue on front, quote on back
         let frontContent;
         if (isCustomDeck(quote) && cueNode?.cue) {
@@ -1064,7 +1236,7 @@ export async function initMemoryTool(deps, context = {}) {
         } else {
           frontContent = getCueForQuote(quote, cueNode);
         }
-        
+
         return {
           id: quote.id,
           memoryKind: "quote",
@@ -1088,14 +1260,22 @@ export async function initMemoryTool(deps, context = {}) {
       })
     );
 
-    cards.forEach((card) => {
+    // Apply filters if set
+    let filteredCards = cards;
+    if (state.sessionFilter) {
+      filteredCards = cards.filter(card => {
+        return passesFilter(card, state.sessionFilter);
+      });
+    }
+
+    filteredCards.forEach((card) => {
       const quotePriority = card.record?.priority ?? null;
       const priority = computePriority(card.memoryState, nowMs, quotePriority);
       state.session.heap.push({ priority, card });
     });
   }
 
-   function getCueForQuote(quote, cueNode = null) {
+  function getCueForQuote(quote, cueNode = null) {
      // Check for custom cue (from deck builder or manually added)
      if (cueNode?.cue) {
        return cueNode.cue;
@@ -1137,7 +1317,15 @@ export async function initMemoryTool(deps, context = {}) {
       })
     );
 
-    cards.forEach((card) => {
+    // Apply filters if set
+    let filteredCards = cards;
+    if (state.sessionFilter) {
+      filteredCards = cards.filter(card => {
+        return passesFilter(card, state.sessionFilter);
+      });
+    }
+
+    filteredCards.forEach((card) => {
       // Analysis nodes don't have quote priority, but we could compute from referenced quotes
       const priority = computePriority(card.memoryState, nowMs);
       state.session.heap.push({ priority, card });
@@ -1174,7 +1362,7 @@ export async function initMemoryTool(deps, context = {}) {
         // For a quote, if it has a referencing analysis, use that as a hint
         const linkedAnalyses = quoteToAnalyses.get(q.id) || [];
         let cueText = q.section ? `Recall quote from: ${q.section}` : "Recall this quote";
-        
+
         if (linkedAnalyses.length > 0) {
           const a = linkedAnalyses[0];
           const cleanA = (a.analysis || "").replace(/[#*`]/g, "").trim();
@@ -1193,7 +1381,7 @@ export async function initMemoryTool(deps, context = {}) {
 
       (analyses || []).forEach(a => {
         let cueText = "";
-        
+
         // For an analysis, if it has linked quotes, use the first quote as the prompt
         if (a.quoteRefs && a.quoteRefs.length > 0) {
           const firstQuote = quotesById.get(a.quoteRefs[0].quoteId);
@@ -1245,7 +1433,7 @@ export async function initMemoryTool(deps, context = {}) {
         targetRecord,
         review: { required: true, graded: false, grade: null, responseTimeMs: null },
         front: { content: cue.cue, isCue: true, cueNode: cue },
-        back: { 
+        back: {
           isBlurtInput: true,
           targetContent: targetKind === "quote" ? targetRecord.quote : targetRecord.analysis,
           targetRecord,
@@ -1270,7 +1458,7 @@ export async function initMemoryTool(deps, context = {}) {
       state.flashcards = [];
       return;
     }
-    
+
     // Create placeholders for all analyses to show in the dots
     state.flashcards = analyses.map(analysis => ({
       id: analysis.id,
@@ -1281,39 +1469,39 @@ export async function initMemoryTool(deps, context = {}) {
       front: { content: analysis.analysis, isAnalysis: true },
       back: { content: "Select supporting quotes", isInstruction: true }
     }));
-    
+
     state.currentIndex = 0;
     await loadEvidenceMatchingForAnalysis(state.flashcards[0].id);
   }
 
   async function resetSubjectMemoryMetadata() {
     if (!state.currentSubject) return;
-    
+
     const [quotes, analyses] = await Promise.all([
       getQuotesForSubject(state.currentSubject),
       getAnalysisNodesForSubject(state.currentSubject)
     ]);
-    
+
     const srsKeys = ["S", "D", "U", "interval", "nextReview", "lastReview", "reviewCount", "expectedTime", "avgTime", "timeVariance", "consistency", "confidence", "lastGrade"];
-    
+
     state.session.suppressDBChange = (quotes || []).length + (analyses || []).length;
-    
+
     const promises = [];
-    
+
     for (const quote of (quotes || [])) {
       if (quote.meta) {
         srsKeys.forEach(key => delete quote.meta[key]);
         promises.push(addQuote(quote));
       }
     }
-    
+
     for (const analysis of (analyses || [])) {
       if (analysis.meta) {
         srsKeys.forEach(key => delete analysis.meta[key]);
         promises.push(addNode(analysis));
       }
     }
-    
+
     await Promise.all(promises);
     console.log("Memory metadata reset successfully for subject:", state.currentSubject);
   }
@@ -1378,37 +1566,48 @@ export async function initMemoryTool(deps, context = {}) {
     if (!flashcardContainer || !flashcardContent || !flashcardBackContent) {
       getDOMElements();
     }
-    
+
      if (state.view === "launchpad") {
       if (memoryLaunchpad) memoryLaunchpad.style.display = "flex";
       if (memoryContent) memoryContent.style.display = "none";
+      if (middleUI) middleUI.style.display = "none";
       if (modeSelect) modeSelect.style.display = "none";
       if (newSessionBtn) newSessionBtn.style.display = "none";
       if (statsBtn) statsBtn.style.display = "none";
       if (backToDecksBtn) backToDecksBtn.style.display = "none";
       return;
+    } else if (state.view === "middle-ui") {
+      if (memoryLaunchpad) memoryLaunchpad.style.display = "none";
+      if (memoryContent) memoryContent.style.display = "none";
+      if (middleUI) middleUI.style.display = "flex";
+      if (modeSelect) modeSelect.style.display = "none";
+      if (newSessionBtn) newSessionBtn.style.display = "none";
+      if (statsBtn) statsBtn.style.display = "none";
+      if (backToDecksBtn) backToDecksBtn.style.display = "none";
+      renderMiddleUI();
+      return;
     } else {
       if (memoryLaunchpad) memoryLaunchpad.style.display = "none";
       if (memoryContent) memoryContent.style.display = "flex";
+      if (middleUI) middleUI.style.display = "none";
       if (modeSelect) modeSelect.style.display = "inline-block";
       if (newSessionBtn) newSessionBtn.style.display = "inline-block";
       if (statsBtn) statsBtn.style.display = "inline-block";
       if (backToDecksBtn) backToDecksBtn.style.display = "inline-block";
     }
-    
+
     if (modeSelect) {
-      modeSelect.textContent = 
+      modeSelect.textContent =
         state.currentMode === "quote-learning" ? "Quote Learning" :
         state.currentMode === "analysis-learning" ? "Analysis Learning" :
         state.currentMode === "blurt" ? "Blurt" :
         "Evidence Matching";
     }
 
-    if (flashcardContainer) flashcardContainer.style.display = 
+    if (flashcardContainer) flashcardContainer.style.display =
       state.currentMode !== "evidence-matching" ? "flex" : "none";
-    if (evidenceMatchingContainer) evidenceMatchingContainer.style.display = 
+    if (evidenceMatchingContainer) evidenceMatchingContainer.style.display =
       state.currentMode === "evidence-matching" ? "block" : "none";
-    // Don't hide stats here - it's a sidebar now
 
     if (!state.currentSubject) {
       if (flashcardContent) flashcardContent.textContent = "Select a subject to start studying.";
@@ -1443,16 +1642,16 @@ export async function initMemoryTool(deps, context = {}) {
     }
 
     // Show/hide priority toggle button (bottom-right)
-    const priorityToggle = document.getElementById("priorityToggle");
-    const priorityControls = document.getElementById("priorityControls");
-    if (priorityToggle) {
+    const priorityToggleBtn = document.getElementById("priorityToggle");
+    const priorityCtrl = document.getElementById("priorityControls");
+    if (priorityToggleBtn) {
       const isQuoteCard = currentCard?.memoryKind === "quote" || currentCard?.type === "quote-learning";
       if (isQuoteCard && currentCard?.record?.priority !== undefined) {
-        priorityToggle.style.display = "block";
-        priorityToggle.textContent = `${"★".repeat(currentCard.record.priority)}${"☆".repeat(5 - currentCard.record.priority)}`;
+        priorityToggleBtn.style.display = "block";
+        priorityToggleBtn.textContent = `${"★".repeat(currentCard.record.priority)}${"☆".repeat(5 - currentCard.record.priority)}`;
       } else {
-        priorityToggle.style.display = "none";
-        if (priorityControls) priorityControls.style.display = "none";
+        priorityToggleBtn.style.display = "none";
+        if (priorityCtrl) priorityCtrl.style.display = "none";
       }
     }
 
@@ -1536,13 +1735,13 @@ export async function initMemoryTool(deps, context = {}) {
     const front = flashcardData.front || {};
     const back = flashcardData.back || {};
 
-// Front content
+ // Front content
      if (front.isCue) {
        // For blurt cards pointing at a quote, render the cue more prominently
        const isBlurtQuoteCard = flashcardData.type === "blurt" && flashcardData.targetKind === "quote";
        const isBlurtAnalysisCard = flashcardData.type === "blurt" && flashcardData.targetKind === "analysis";
        const isCustomDeckCard = front.isCustomDeck;
-       
+
        if (isBlurtQuoteCard) {
          flashcardContent.innerHTML = `
            <div class="blurt-prompt-label">Recall the quote:</div>
@@ -1577,19 +1776,19 @@ export async function initMemoryTool(deps, context = {}) {
        }
      } else if (front.isAnalysis) {
        flashcardContent.innerHTML = `<div class="analysis-preview">${formatAnalysisForDisplay(front.content || "")}</div>`;
-        } else if (front.isQuote) {
-          flashcardContent.innerHTML = `<div class="quote">${escapeHtml(front.content || "")}</div>`;
-          const quoteData = flashcardData.front?.quoteData;
-          if (quoteData && !quoteData.meta?.tags?.includes("custom-deck")) {
-            flashcardContent.innerHTML += `<div class="quote-meta">From: ${escapeHtml(quoteData.section || "unknown source")}</div>`;
-          }
-          // Show priority subtly in corner
-          if (quoteData?.priority) {
-            const stars = [1,2,3,4,5].map(v => v <= quoteData.priority ? "★" : "☆").join("");
-            flashcardContent.innerHTML += `<div class="quote-priority-subtle">${stars}</div>`;
-          }
-      } else {
-       flashcardContent.textContent = front.content || "";
+     } else if (front.isQuote) {
+       flashcardContent.innerHTML = `<div class="quote">${escapeHtml(front.content || "")}</div>`;
+       const quoteData = flashcardData.front?.quoteData;
+       if (quoteData && !quoteData.meta?.tags?.includes("custom-deck")) {
+         flashcardContent.innerHTML += `<div class="quote-meta">From: ${escapeHtml(quoteData.section || "unknown source")}</div>`;
+       }
+       // Show priority subtly in corner
+       if (quoteData?.priority) {
+         const stars = [1,2,3,4,5].map(v => v <= quoteData.priority ? "★" : "☆").join("");
+         flashcardContent.innerHTML += `<div class="quote-priority-subtle">${stars}</div>`;
+       }
+    } else {
+     flashcardContent.textContent = front.content || "";
      }
 
 // Back content - Only populate if flipped to prevent spoiling the next card during transitions
@@ -1688,7 +1887,6 @@ export async function initMemoryTool(deps, context = {}) {
     const hasNextInHistory = state.currentIndex < state.flashcards.length - 1;
     const hasNextInHeap = !!state.session.heap && state.session.heap.size() > 0;
 
-
   }
 
   async function updateQuotePriority(quoteId, newPriority) {
@@ -1709,9 +1907,9 @@ export async function initMemoryTool(deps, context = {}) {
     }
 
     // Update toggle button text
-    const priorityToggle = document.getElementById("priorityToggle");
-    if (priorityToggle && currentCard?.record?.id === quoteId) {
-      priorityToggle.textContent = `Priority: ${"★".repeat(quote.priority)}${"☆".repeat(5 - quote.priority)}`;
+    const priorityToggleBtn = document.getElementById("priorityToggle");
+    if (priorityToggleBtn && currentCard?.record?.id === quoteId) {
+      priorityToggleBtn.textContent = `Priority: ${"★".repeat(quote.priority)}${"☆".repeat(5 - quote.priority)}`;
     }
 
     renderUI();
@@ -1733,12 +1931,12 @@ export async function initMemoryTool(deps, context = {}) {
       const isSelected = state.evidenceMatching.selectedOption === index;
       const isAnswered = state.evidenceMatching.answered;
       const isCorrect = state.evidenceMatching.correctOption?.includes(quote.id);
-      
+
       let className = "quote-option";
       if (isSelected) className += " selected";
       if (isAnswered && isCorrect) className += " correct";
       if (isAnswered && isSelected && !isCorrect) className += " incorrect";
-      
+
       const optionDiv = document.createElement("div");
       optionDiv.className = className;
       optionDiv.innerHTML = `
@@ -1794,16 +1992,6 @@ export async function initMemoryTool(deps, context = {}) {
     }
 
     return isCorrect;
-  }
-
-  async function moveToNextEvidenceQuestion() {
-    const analyses = await getAnalysisNodesForSubject(state.currentSubject);
-    if (!analyses || analyses.length === 0) return;
-    
-    const currentIdx = analyses.findIndex(a => a.id === state.evidenceMatching.currentAnalysis?.id);
-    const nextIdx = (currentIdx + 1) % analyses.length;
-    await loadEvidenceMatchingForAnalysis(analyses[nextIdx].id);
-    renderUI();
   }
 
   function renderStats() {
@@ -2006,7 +2194,7 @@ export async function initMemoryTool(deps, context = {}) {
     let candidates = pool.filter(m => m !== _lastThoughtMsg);
     if (candidates.length === 0) candidates = pool;
     let msg = candidates[Math.floor(Math.random() * candidates.length)];
-    
+
     // If we had a grade reaction, potentially combine it with an observation for a 'smart' synthesis
     if (lastGrade && pool.length > 1) {
       const observation = pool.filter(m => !m.includes("recall") && !m.includes("Grade") && !m.includes("Trace") && !m.includes("Stability"))[0];
@@ -2057,7 +2245,7 @@ export async function initMemoryTool(deps, context = {}) {
         const streakBonus = Math.min((state.stats.streak || 0) * 0.2, 2.0);
         const cx = window.innerWidth / 2;
         const cy = window.innerHeight / 2;
-        
+
         // Choose ONE prominent impulse type appropriately
         if (state.stats.streak > 0 && state.stats.streak % 5 === 0) {
           // Milestone reward
@@ -2107,23 +2295,27 @@ export async function initMemoryTool(deps, context = {}) {
       const cardCues = cues.filter(c => c.quoteId === quote.id);
       const cue = cardCues.length > 0 ? cardCues[0] : null;
 
+      // Get layer info from quote's hierarchyPath
+      const path = quote.meta?.hierarchyPath || [];
+      const layer1 = path[1] || "";
+      const layer2 = path[2] || "";
+      const layer3 = path[3] || "";
+
       deckBuilderState.cards.push({
         cueId: cue ? cue.id : crypto.randomUUID(),
         cueFront: cue ? cue.cue : "",
         quoteId: quote.id,
         quoteBack: quote.quote,
         priority: quote.priority || 3,
-        isExisting: true
+        isExisting: true,
+        layer1,
+        layer2,
+        layer3
       });
     }
 
     renderFlashcardList();
     if (finishDeckBtn) finishDeckBtn.textContent = "Save Changes";
-    if (deckBuilderModal) deckBuilderModal.style.display = "flex";
-    showDeckBuilderStep(2);
-  
-
-    renderFlashcardList();
     if (deckBuilderModal) deckBuilderModal.style.display = "flex";
     showDeckBuilderStep(2);
   }
@@ -2144,33 +2336,126 @@ export async function initMemoryTool(deps, context = {}) {
     if (deckNameInput) deckNameInput.value = "";
     if (deckDescriptionInput) deckDescriptionInput.value = "";
     if (finishDeckBtn) finishDeckBtn.textContent = "Finish Deck";
+    // Clear layer inputs
+    if (deckLayer1) deckLayer1.value = "";
+    if (deckLayer2) deckLayer2.value = "";
+    if (deckLayer3) deckLayer3.value = "";
   }
 
   function showDeckBuilderStep(step) {
     if (step1DeckInfo) step1DeckInfo.style.display = step === 1 ? "block" : "none";
-    if (step2Flashcards) step2Flashcards.style.display = step === 2 ? "block" : "none";
+    if (step2Flashcards) {
+      step2Flashcards.style.display = step === 2 ? "flex" : "none";
+      if (step === 2) {
+        step2Flashcards.style.flexDirection = "column";
+        step2Flashcards.style.minHeight = "0";
+      }
+    }
     if (step3Success) step3Success.style.display = step === 3 ? "block" : "none";
+    // Reset form on step 2
+    if (step === 2) {
+      renderPriorityPills();
+      clearForm();
+    }
+  }
+
+  function renderPriorityPills() {
+    if (!priorityPills) return;
+    const labels = ["Very Low", "Low", "Medium", "High", "Very High"];
+    priorityPills.innerHTML = labels.map((label, i) => {
+      const p = i + 1;
+      const color = getPriorityColor(p);
+      const isActive = p === 3; // Default to Medium
+      return `<button type="button" class="priority-pill ${isActive ? 'active' : ''}"
+        data-priority="${p}"
+        style="color: ${isActive ? color : 'var(--text-muted)'}; border-color: ${isActive ? color : 'rgba(255,255,255,0.15)'};"
+        title="Set priority to ${label}">${label}</button>`;
+    }).join("");
+
+    priorityPills.querySelectorAll(".priority-pill").forEach(btn => {
+      btn.addEventListener("click", () => {
+        priorityPills.querySelectorAll(".priority-pill").forEach(b => {
+          const p = parseInt(b.dataset.priority);
+          b.classList.remove("active");
+          b.style.color = "var(--text-muted)";
+          b.style.borderColor = "rgba(255,255,255,0.15)";
+        });
+        btn.classList.add("active");
+        const p = parseInt(btn.dataset.priority);
+        btn.style.color = getPriorityColor(p);
+        btn.style.borderColor = getPriorityColor(p);
+      });
+    });
   }
 
   function startEditingCard(index) {
     deckBuilderState.currentCardIndex = index;
     deckBuilderState.isEditingCard = true;
-    
+
     if (currentCardEditor) currentCardEditor.style.display = "block";
     if (cardBuilderActions) cardBuilderActions.style.display = "none";
+
+    // Show form, hide import view
+    const importView = document.getElementById("importView");
+    const cardEditForm = document.getElementById("cardEditForm");
+    if (importView) importView.style.display = "none";
+    if (cardEditForm) cardEditForm.style.display = "block";
 
     if (index >= 0 && index < deckBuilderState.cards.length) {
       const card = deckBuilderState.cards[index];
       if (cueInput) cueInput.value = card.cueFront;
       if (quoteInput) quoteInput.value = card.quoteBack;
-      if (priorityInput) priorityInput.value = card.priority;
+      // Set priority pill
+      if (priorityPills) {
+        priorityPills.querySelectorAll(".priority-pill").forEach(b => {
+          const p = parseInt(b.dataset.priority);
+          const isActive = p === card.priority;
+          b.classList.toggle("active", isActive);
+          b.style.color = isActive ? getPriorityColor(p) : "var(--text-muted)";
+          b.style.borderColor = isActive ? getPriorityColor(p) : "rgba(255,255,255,0.15)";
+        });
+      }
+      // Set layer inputs
+      if (deckLayer1) deckLayer1.value = card.layer1 || "";
+      if (deckLayer2) deckLayer2.value = card.layer2 || "";
+      if (deckLayer3) deckLayer3.value = card.layer3 || "";
+      // Show delete button
+      if (deleteCardBtn) deleteCardBtn.style.display = "inline-block";
+      // Update form title
+      const formTitle = document.getElementById("formTitle");
+      if (formTitle) formTitle.textContent = "Edit Card";
     } else {
+      // New card
       if (cueInput) cueInput.value = "";
       if (quoteInput) quoteInput.value = "";
-      if (priorityInput) priorityInput.value = "4";
+      if (deckLayer1) deckLayer1.value = "";
+      if (deckLayer2) deckLayer2.value = "";
+      if (deckLayer3) deckLayer3.value = "";
+      if (deleteCardBtn) deleteCardBtn.style.display = "none";
+      // Reset priority to default (Medium)
+      if (priorityPills) {
+        priorityPills.querySelectorAll(".priority-pill").forEach(b => {
+          const p = parseInt(b.dataset.priority);
+          const isActive = p === 3;
+          b.classList.toggle("active", isActive);
+          b.style.color = isActive ? getPriorityColor(p) : "var(--text-muted)";
+          b.style.borderColor = isActive ? getPriorityColor(p) : "rgba(255,255,255,0.15)";
+        });
+      }
+      // Update form title
+      const formTitle = document.getElementById("formTitle");
+      if (formTitle) formTitle.textContent = "Add New Card";
     }
-    
+
     if (cueInput) cueInput.focus();
+
+    // Update save button state
+    if (saveCardBtn && cueInput && quoteInput) {
+      const hasContent = cueInput.value.trim() && quoteInput.value.trim();
+      saveCardBtn.disabled = !hasContent;
+      saveCardBtn.style.opacity = hasContent ? "1" : "0.4";
+      saveCardBtn.style.pointerEvents = hasContent ? "auto" : "none";
+    }
   }
 
   function finishEditingCard() {
@@ -2178,7 +2463,36 @@ export async function initMemoryTool(deps, context = {}) {
     deckBuilderState.currentCardIndex = -1;
     if (currentCardEditor) currentCardEditor.style.display = "none";
     if (cardBuilderActions) cardBuilderActions.style.display = "flex";
+    clearForm();
     renderFlashcardList();
+  }
+
+  function clearForm() {
+    if (cueInput) cueInput.value = "";
+    if (quoteInput) quoteInput.value = "";
+    if (deckLayer1) deckLayer1.value = "";
+    if (deckLayer2) deckLayer2.value = "";
+    if (deckLayer3) deckLayer3.value = "";
+    // Reset priority to default (Medium)
+    if (priorityPills) {
+      priorityPills.querySelectorAll(".priority-pill").forEach(b => {
+        const p = parseInt(b.dataset.priority);
+        const isActive = p === 3;
+        b.classList.toggle("active", isActive);
+        b.style.color = isActive ? getPriorityColor(p) : "var(--text-muted)";
+        b.style.borderColor = isActive ? getPriorityColor(p) : "rgba(255,255,255,0.15)";
+      });
+    }
+    if (deleteCardBtn) deleteCardBtn.style.display = "none";
+    // Update form title
+    const formTitle = document.getElementById("formTitle");
+    if (formTitle) formTitle.textContent = "Add New Card";
+    // Update save button state
+    if (saveCardBtn) {
+      saveCardBtn.disabled = true;
+      saveCardBtn.style.opacity = "0.4";
+      saveCardBtn.style.pointerEvents = "none";
+    }
   }
 
   function saveFlashcard(cueFront, quoteBack, priority) {
@@ -2187,18 +2501,28 @@ export async function initMemoryTool(deps, context = {}) {
       cueFront,
       quoteId: crypto.randomUUID(),
       quoteBack,
-      priority
+      priority,
+      layer1: deckLayer1?.value?.trim() || "",
+      layer2: deckLayer2?.value?.trim() || "",
+      layer3: deckLayer3?.value?.trim() || "",
+      isExisting: false
     };
 
     if (deckBuilderState.currentCardIndex >= 0) {
       // Update existing card
-      deckBuilderState.cards[deckBuilderState.currentCardIndex] = card;
+      deckBuilderState.cards[deckBuilderState.currentCardIndex] = {
+        ...deckBuilderState.cards[deckBuilderState.currentCardIndex],
+        ...card,
+        isExisting: deckBuilderState.cards[deckBuilderState.currentCardIndex].isExisting
+      };
     } else {
       // Add new card
       deckBuilderState.cards.push(card);
     }
 
     finishEditingCard();
+    // Update card count
+    if (cardCount) cardCount.textContent = deckBuilderState.cards.length;
   }
 
   function deleteFlashcard(index) {
@@ -2214,36 +2538,39 @@ export async function initMemoryTool(deps, context = {}) {
 
   function renderFlashcardList() {
     if (!flashcardList) return;
-    
+
     flashcardList.innerHTML = "";
-    
+
+    // Update card count
+    if (cardCount) cardCount.textContent = deckBuilderState.cards.length;
+
     deckBuilderState.cards.forEach((card, index) => {
       const item = document.createElement("div");
       item.className = "flashcard-item";
       if (index === deckBuilderState.currentCardIndex) {
         item.classList.add("active");
       }
-      
+
       const title = document.createElement("div");
       title.className = "flashcard-item-title";
       title.textContent = `${index + 1}. ${card.cueFront.substring(0, 50)}...`;
-      
+
       const actions = document.createElement("div");
       actions.className = "flashcard-item-actions";
-      
+
       const editBtn = document.createElement("button");
       editBtn.className = "flashcard-item-btn";
       editBtn.textContent = "Edit";
       editBtn.addEventListener("click", () => startEditingCard(index));
-      
+
       const deleteBtn = document.createElement("button");
       deleteBtn.className = "flashcard-item-btn";
       deleteBtn.textContent = "Delete";
       deleteBtn.addEventListener("click", () => deleteFlashcard(index));
-      
+
       actions.appendChild(editBtn);
       actions.appendChild(deleteBtn);
-      
+
       item.appendChild(title);
       item.appendChild(actions);
       flashcardList.appendChild(item);
@@ -2278,6 +2605,14 @@ export async function initMemoryTool(deps, context = {}) {
 
         // Save all cards (update existing, add new)
         for (const card of deckBuilderState.cards) {
+          // Build hierarchyPath with layers
+          const hierarchyPath = [
+            subjectName,
+            card.layer1 || "",
+            card.layer2 || "",
+            card.layer3 || ""
+          ].filter(Boolean);
+
           const quote = {
             id: card.quoteId,
             type: "quote",
@@ -2287,6 +2622,7 @@ export async function initMemoryTool(deps, context = {}) {
             priority: card.priority,
             meta: {
               tags: ["custom-deck"],
+              hierarchyPath: hierarchyPath,
               confidence: 0.8,
               nextReview: Date.now(),
               interval: 1,
@@ -2329,11 +2665,369 @@ export async function initMemoryTool(deps, context = {}) {
        await loadLaunchpad();
        renderUI();
 
-     } catch (error) {
-       console.error("Error saving deck:", error);
-       alert("Error saving deck: " + error.message);
-     }
+      } catch (error) {
+        console.error("Error saving deck:", error);
+        alert("Error saving deck: " + error.message);
+      }
    }
+
+  // ========== ANKI IMPORT ==========
+
+  function processAnkiImport() {
+    if (!ankiImportInput || !importFeedback) return;
+
+    const text = ankiImportInput.value.trim();
+    if (!text) {
+      importFeedback.textContent = "Please paste some cards first.";
+      importFeedback.style.color = "#ff4d4d";
+      return;
+    }
+
+    const lines = text.split("\n");
+    let imported = 0;
+    let skipped = 0;
+
+    lines.forEach(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+
+      const tabIndex = trimmed.indexOf("\t");
+      if (tabIndex === -1) {
+        skipped++;
+        return;
+      }
+
+      const front = trimmed.substring(0, tabIndex).trim();
+      const back = trimmed.substring(tabIndex + 1).trim();
+
+      if (!front || !back) {
+        skipped++;
+        return;
+      }
+
+      deckBuilderState.cards.push({
+        cueId: crypto.randomUUID(),
+        cueFront: front,
+        quoteId: crypto.randomUUID(),
+        quoteBack: back,
+        priority: 3, // Default to Medium
+        layer1: "",
+        layer2: "",
+        layer3: "",
+        isExisting: false
+      });
+
+      imported++;
+    });
+
+    // Clear import area
+    ankiImportInput.value = "";
+
+    // Switch back to card form
+    const importView = document.getElementById("importView");
+    const cardEditForm = document.getElementById("cardEditForm");
+    if (importView) importView.style.display = "none";
+    if (cardEditForm) cardEditForm.style.display = "block";
+
+    // Update UI
+    renderFlashcardList();
+    clearForm();
+
+    importFeedback.textContent = `${imported} cards imported${skipped > 0 ? `, ${skipped} lines skipped (no tab separator)` : ''}.`;
+    importFeedback.style.color = "#3fd07d";
+  }
+
+  // ========== MIDDLE UI FUNCTIONS ==========
+
+  async function loadMiddleUIData() {
+    if (!state.currentSubject) return;
+
+    // Get all quotes and analyses for this subject
+    const [quotes, analyses, allCues] = await Promise.all([
+      getQuotesForSubject(state.currentSubject),
+      getAnalysisNodesForSubject(state.currentSubject),
+      getAllCues()
+    ]);
+
+    // Priority counts
+    const priorityCounts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    let totalWithPriority = 0;
+    (quotes || []).forEach(q => {
+      if (q.priority !== undefined && q.priority !== null) {
+        priorityCounts[q.priority] = (priorityCounts[q.priority] || 0) + 1;
+        totalWithPriority++;
+      }
+    });
+
+    // Tags - collect from quotes and analyses
+    const tagSet = new Set();
+    (quotes || []).forEach(q => {
+      (q.meta?.tags || []).forEach(t => tagSet.add(t));
+    });
+    (analyses || []).forEach(a => {
+      (a.tags || []).forEach(t => tagSet.add(t));
+    });
+    const tags = Array.from(tagSet).sort().map(tag => {
+      // Count items with this tag
+      const quoteCount = (quotes || []).filter(q => (q.meta?.tags || []).includes(tag)).length;
+      const analysisCount = (analyses || []).filter(a => (a.tags || []).includes(tag)).length;
+      return { name: tag, count: quoteCount + analysisCount };
+    });
+
+    // Layers - collect from quotes' hierarchyPath
+    const layerMap = new Map(); // layer1 -> { count, children: Map(layer2 -> { count, children: Map(layer3 -> count) }) }
+
+    (quotes || []).forEach(q => {
+      const path = q.meta?.hierarchyPath || [];
+      const l1 = path[1] || "(None)";
+      const l2 = path[2] || "";
+      const l3 = path[3] || "";
+
+      if (!layerMap.has(l1)) {
+        layerMap.set(l1, { count: 0, children: new Map() });
+      }
+      const l1Entry = layerMap.get(l1);
+      l1Entry.count++;
+
+      if (l2) {
+        if (!l1Entry.children.has(l2)) {
+          l1Entry.children.set(l2, { count: 0, children: new Map() });
+        }
+        const l2Entry = l1Entry.children.get(l2);
+        l2Entry.count++;
+
+        if (l3) {
+          l2Entry.children.set(l3, (l2Entry.children.get(l3) || 0) + 1);
+        }
+      }
+    });
+
+    // Also add sources as leaf nodes
+    // We need to get sources for this subject
+    // For now, we'll use the layer structure from quotes
+
+    state.middleUIData = {
+      priorities: [1, 2, 3, 4, 5].map(p => ({ value: p, count: priorityCounts[p] })),
+      tags,
+      layers: Array.from(layerMap.entries()).map(([name, data]) => ({
+        name,
+        count: data.count,
+        children: Array.from(data.children.entries()).map(([l2name, l2data]) => ({
+          name: l2name,
+          count: l2data.count,
+          children: Array.from(l2data.children.entries()).map(([l3name, l3count]) => ({
+            name: l3name,
+            count: l3count
+          }))
+        }))
+      }))
+    };
+  }
+
+  function renderMiddleUI() {
+    if (!middleSubjectName) return;
+
+    middleSubjectName.textContent = state.currentSubject;
+
+    // Render priority checkboxes
+    if (priorityCheckboxes) {
+      priorityCheckboxes.innerHTML = state.middleUIData.priorities.map(p => `
+        <div class="filter-row ${state.selectedPriorities.includes(p.value) ? 'selected' : ''}" data-priority="${p.value}">
+          <input type="checkbox" class="filter-row-checkbox" ${state.selectedPriorities.includes(p.value) ? 'checked' : ''}>
+          <span class="filter-row-label" style="color: ${getPriorityColor(p.value)};">${['Very Low', 'Low', 'Medium', 'High', 'Very High'][p.value - 1]}</span>
+          <span class="filter-row-count">${p.count}</span>
+        </div>
+      `).join("");
+
+      priorityCheckboxes.querySelectorAll(".filter-row").forEach(row => {
+        row.addEventListener("click", (e) => {
+          if (e.target.tagName === "INPUT") return;
+          const priority = parseInt(row.dataset.priority);
+          togglePriority(priority);
+        });
+        const checkbox = row.querySelector("input");
+        if (checkbox) {
+          checkbox.addEventListener("change", () => {
+            const priority = parseInt(row.dataset.priority);
+            togglePriority(priority);
+          });
+        }
+      });
+    }
+
+    // Render tag checkboxes
+    if (tagsCheckboxes) {
+      tagsCheckboxes.innerHTML = state.middleUIData.tags.length > 0
+        ? state.middleUIData.tags.map(tag => `
+          <div class="filter-row ${state.selectedTags.includes(tag.name) ? 'selected' : ''}" data-tag="${tag.name}">
+            <input type="checkbox" class="filter-row-checkbox" ${state.selectedTags.includes(tag.name) ? 'checked' : ''}>
+            <span class="filter-row-label">${escapeHtml(tag.name)}</span>
+            <span class="filter-row-count">${tag.count}</span>
+            <button class="filter-row-study-btn" data-tag="${tag.name}">Study</button>
+          </div>
+        `).join("")
+        : '<div style="color: var(--text-muted); font-size: 0.85rem;">No tags found in this subject.</div>';
+
+      tagsCheckboxes.querySelectorAll(".filter-row").forEach(row => {
+        row.addEventListener("click", (e) => {
+          if (e.target.tagName === "INPUT" || e.target.classList.contains("filter-row-study-btn")) return;
+          const tag = row.dataset.tag;
+          toggleTag(tag);
+        });
+        const checkbox = row.querySelector("input");
+        if (checkbox) {
+          checkbox.addEventListener("change", () => {
+            const tag = row.dataset.tag;
+            toggleTag(tag);
+          });
+        }
+        const studyBtn = row.querySelector(".filter-row-study-btn");
+        if (studyBtn) {
+          studyBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const tag = studyBtn.dataset.tag;
+            state.sessionFilter = {
+              mode: state.currentMode,
+              filterMode: state.filterMode,
+              priorities: [...state.selectedPriorities],
+              tags: [tag],
+              layers: [...state.selectedLayers]
+            };
+            state.view = "study";
+            loadFlashcards().then(renderUI);
+          });
+        }
+      });
+    }
+
+    // Render layer checkboxes (tree structure)
+    if (layersCheckboxes) {
+      layersCheckboxes.innerHTML = state.middleUIData.layers.length > 0
+        ? state.middleUIData.layers.map(layer => renderLayerTree(layer, 0)).join("")
+        : '<div style="color: var(--text-muted); font-size: 0.85rem;">No layers found in this subject.</div>';
+
+      // Attach event listeners to all layer rows
+      layersCheckboxes.querySelectorAll(".filter-row").forEach(row => {
+        row.addEventListener("click", (e) => {
+          if (e.target.tagName === "INPUT" || e.target.classList.contains("filter-row-study-btn")) return;
+          const layer = row.dataset.layer;
+          if (layer) toggleLayer(layer);
+        });
+        const checkbox = row.querySelector("input");
+        if (checkbox) {
+          checkbox.addEventListener("change", () => {
+            const layer = row.dataset.layer;
+            if (layer) toggleLayer(layer);
+          });
+        }
+        const studyBtn = row.querySelector(".filter-row-study-btn");
+        if (studyBtn) {
+          studyBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const layer = studyBtn.dataset.layer;
+            state.sessionFilter = {
+              mode: state.currentMode,
+              filterMode: state.filterMode,
+              priorities: [...state.selectedPriorities],
+              tags: [...state.selectedTags],
+              layers: layer ? [layer] : []
+            };
+            state.view = "study";
+            loadFlashcards().then(renderUI);
+          });
+        }
+      });
+    }
+  }
+
+  function renderLayerTree(layer, depth) {
+    const isSelected = state.selectedLayers.includes(layer.name);
+    let html = `
+      <div class="filter-row ${isSelected ? 'selected' : ''}" data-layer="${layer.name}" style="margin-left: ${depth * 20}px;">
+        <input type="checkbox" class="filter-row-checkbox" ${isSelected ? 'checked' : ''}>
+        <span class="filter-row-label">${escapeHtml(layer.name)}</span>
+        <span class="filter-row-count">${layer.count}</span>
+        <button class="filter-row-study-btn" data-layer="${layer.name}">Study</button>
+      </div>
+    `;
+
+    if (layer.children && layer.children.length > 0) {
+      html += '<div class="layer-tree">';
+      layer.children.forEach(child => {
+        html += renderLayerTree(child, depth + 1);
+      });
+      html += '</div>';
+    }
+
+    return html;
+  }
+
+  function togglePriority(priority) {
+    const index = state.selectedPriorities.indexOf(priority);
+    if (index === -1) {
+      state.selectedPriorities.push(priority);
+    } else {
+      state.selectedPriorities.splice(index, 1);
+    }
+    renderMiddleUI();
+  }
+
+  function toggleTag(tag) {
+    const index = state.selectedTags.indexOf(tag);
+    if (index === -1) {
+      state.selectedTags.push(tag);
+    } else {
+      state.selectedTags.splice(index, 1);
+    }
+    renderMiddleUI();
+  }
+
+  function toggleLayer(layer) {
+    const index = state.selectedLayers.indexOf(layer);
+    if (index === -1) {
+      state.selectedLayers.push(layer);
+    } else {
+      state.selectedLayers.splice(index, 1);
+    }
+    renderMiddleUI();
+  }
+
+  function passesFilter(card, filter) {
+    const isAND = filter.filterMode === "AND";
+
+    // Priority check
+    if (filter.priorities.length > 0) {
+      const cardPriority = card.record?.priority ?? card.targetRecord?.priority;
+      const priorityMatch = filter.priorities.includes(cardPriority);
+      if (isAND && !priorityMatch) return false;
+      if (!isAND && priorityMatch) return true;
+      if (!isAND && !priorityMatch) { /* continue checking other filters */ }
+    }
+
+    // Tag check
+    if (filter.tags.length > 0) {
+      const cardTags = card.record?.meta?.tags || card.record?.tags || [];
+      const hasTag = filter.tags.some(t => cardTags.includes(t));
+      if (isAND && !hasTag) return false;
+      if (!isAND && hasTag) return true;
+    }
+
+    // Layer check
+    if (filter.layers.length > 0) {
+      const path = card.record?.meta?.hierarchyPath || [];
+      const inLayer = filter.layers.some(l => path.includes(l));
+      if (isAND && !inLayer) return false;
+      if (!isAND && inLayer) return true;
+    }
+
+    // For AND mode: if we got here, all selected filters passed
+    // For OR mode: if we got here and no match found yet, return false
+    if (isAND) {
+      return filter.priorities.length > 0 || filter.tags.length > 0 || filter.layers.length > 0;
+    } else {
+      return false; // No matching filter found
+    }
+  }
 
   window.__neuronetMemoryCleanup = () => {
     document.removeEventListener("db-change", handleDBChange);
