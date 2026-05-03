@@ -150,7 +150,7 @@
 
         <!-- Step 2: Flashcard Builder with Sidebar Layout -->
         <div id="step2-flashcards" class="builder-step" style="display: none;">
-          <div class="deck-builder-body" style="flex:1; min-height:0;">
+          <div class="deck-builder-body" style="display:flex; flex-direction:row; flex:1; min-height:0;">
             <!-- Left Sidebar: Flashcard List -->
             <div class="deck-sidebar">
               <div class="deck-sidebar-header">
@@ -195,28 +195,42 @@
                     <!-- Pills rendered by JS -->
                   </div>
                 </div>
-                <div class="form-group">
-                  <label>Layers (Optional)</label>
-                  <div class="layer-inputs">
-                    <input id="deckLayer1" class="builder-input layer-input" placeholder="Layer 1 (optional)">
-                    <input id="deckLayer2" class="builder-input layer-input" placeholder="Layer 2 (optional)">
-                    <input id="deckLayer3" class="builder-input layer-input" placeholder="Layer 3 (optional)">
+        <div class="form-group">
+          <label>Layers</label>
+          <div id="layerRowsContainer">
+            <div class="layer-row" id="layer1Row">
+              <span class="layer-row-label">L1</span>
+              <div class="layer-pills-row" id="layer1Pills"></div>
+              <button type="button" class="layer-new-pill" data-level="1">+ New</button>
+            </div>
+            <div class="layer-row disabled" id="layer2Row">
+              <span class="layer-row-label">L2</span>
+              <div class="layer-pills-row" id="layer2Pills"></div>
+              <button type="button" class="layer-new-pill" data-level="2" disabled>+ New</button>
+            </div>
+            <div class="layer-row disabled" id="layer3Row">
+              <span class="layer-row-label">L3</span>
+              <div class="layer-pills-row" id="layer3Pills"></div>
+              <button type="button" class="layer-new-pill" data-level="3" disabled>+ New</button>
+            </div>
+          </div>
+        </div>
+                <div class="builder-sticky-actions">
+                  <div>
+                    <button id="backToDeckInfoBtn" class="memory-btn">Back</button>
                   </div>
-                </div>
-                <div class="builder-actions">
-                  <button id="saveCardBtn" class="memory-btn primary" disabled>Save Card</button>
-                  <button id="clearFormBtn" class="memory-btn">Clear</button>
-                  <button id="deleteCardBtn" class="memory-btn flashcard-item-btn" style="display: none;">Delete</button>
+                  <div style="display:flex; gap:8px;">
+                    <button id="clearFormBtn" class="memory-btn">Clear</button>
+                    <button id="deleteCardBtn" class="memory-btn flashcard-item-btn" style="display: none;">Delete</button>
+                    <button id="saveCardBtn" class="memory-btn primary" disabled>Save Card</button>
+                    <button id="finishDeckBtn" class="memory-btn primary">Finish Deck</button>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
 
-          <div class="builder-actions bottom-actions">
-            <button id="backToDeckInfoBtn" class="memory-btn">Back</button>
-            <button id="finishDeckBtn" class="memory-btn primary">Finish Deck</button>
           </div>
-        </div>
 
         <!-- Step 3: Success -->
         <div id="step3-success" class="builder-step" style="display: none;">
@@ -316,10 +330,10 @@
 
   #memoryContent {
     flex: 1;
-    overflow: hidden;
     display: flex;
-    flex-direction: row; /* allow sidebar to sit beside content */
+    flex-direction: column;
     position: relative;
+    overflow: hidden;
   }
 
   #memoryMainArea {
@@ -1396,13 +1410,73 @@
     user-select: none;
   }
 
-/* Deck Builder Sidebar Layout */
+/* Deck Builder Body */
 .deck-builder-body {
   display: flex;
+  flex-direction: row;
   gap: 20px;
   flex:1;
   min-height:0;
   overflow: hidden;
+}
+
+/* Deck Builder Sidebar Layout */
+.deck-sidebar {
+  width: 260px;
+  flex-shrink:0;
+  display: flex;
+  flex-direction: column;
+  border-right:1px solid var(--glass-border);
+  padding: 16px 16px 16px 0;
+  overflow-y: auto;
+}
+
+.deck-sidebar-header {
+  margin-bottom: 12px;
+  color: var(--accent);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.deck-main-area {
+  flex:1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  min-width:0;
+  min-height:0;
+  padding: 12px 16px;
+}
+
+/* Deck Builder Sidebar Layout */
+.deck-sidebar {
+  width: 260px;
+  flex-shrink:0;
+  display: flex;
+  flex-direction: column;
+  border-right:1px solid rgba(44,255,179,0.15);
+  background: rgba(255,255,255,0.02);
+  padding: 16px 16px 16px 0;
+  overflow-y: auto;
+}
+
+.deck-sidebar-header {
+  margin-bottom: 12px;
+  color: var(--accent);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.deck-main-area {
+  flex:1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  min-width:0;
+  min-height:0;
+  background: rgba(255,255,255,0.01);
+  padding: 16px 20px;
+  border-radius: 12px;
 }
 
 .deck-sidebar {
@@ -1444,36 +1518,138 @@
   font-size: 1.1rem;
 }
 
-.bottom-actions {
-  margin-top: auto;
-  border-top: 1px solid var(--glass-border);
-  padding-top: 16px;
-  padding-bottom: 8px;
-  flex-shrink: 0;
-}
+  /* Layer Rows - three distinct rows with cascade logic */
+  #layerRowsContainer {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
 
-.layer-inputs {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
+  .layer-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
 
-.layer-input {
-  width: 100%;
-  padding: 8px 12px;
-  background: rgba(255,255,255,0.05);
-  border: 1px solid var(--glass-border);
-  border-radius: 8px;
-  color: var(--text-main);
-  font-family: inherit;
-  font-size: 0.9rem;
-  box-sizing: border-box;
-}
+  .layer-row.disabled {
+    opacity: 0.4;
+    pointer-events: none;
+    filter: grayscale(0.8);
+  }
 
-.layer-input:focus {
-    outline: none;
+  .layer-row.disabled .layer-row-label {
+    color: var(--text-muted);
+    opacity: 0.5;
+  }
+
+  .layer-row:not(.disabled) .layer-row-label {
+    color: var(--accent-soft);
+  }
+
+  .layer-row-label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    min-width: 24px;
+    flex-shrink: 0;
+  }
+
+  .layer-pills-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .layer-pill {
+    padding: 5px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-family: inherit;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .layer-pill:hover {
     border-color: var(--accent-soft);
+    color: var(--text-main);
+  }
+
+  .layer-pill.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(44,255,179,0.12);
+    font-weight: 600;
+  }
+
+  .layer-new-pill {
+    padding: 5px 10px;
+    border-radius: 999px;
+    border: 1px dashed rgba(255,255,255,0.2);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-family: inherit;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .layer-new-pill:hover:not(:disabled) {
+    border-color: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .layer-new-pill:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  .layer-input-inline {
+    padding: 5px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--accent-soft);
+    background: rgba(44,255,179,0.06);
+    color: var(--text-main);
+    font-size: 0.82rem;
+    font-family: inherit;
+    outline: none;
+    min-width: 80px;
+    max-width: 140px;
+    box-sizing: border-box;
+  }
+
+  .layer-input-inline:focus {
+    border-color: var(--accent);
     box-shadow: 0 0 0 2px rgba(44,255,179,0.1);
+  }
+
+  .layer-confirm-btn {
+    padding: 5px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(44,255,179,0.3);
+    background: rgba(44,255,179,0.1);
+    color: var(--accent);
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-family: inherit;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .layer-confirm-btn:hover {
+    background: rgba(44,255,179,0.2);
   }
 
   .anki-import-area {
@@ -1484,46 +1660,48 @@
     box-sizing: border-box;
   }
 
-  /* Deck Builder Modal Styles */
-  .deck-builder-modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 10000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    animation: fadeIn 0.3s ease;
-  }
+/* Deck Builder Modal Styles */
+   .deck-builder-modal {
+     position: fixed;
+     top: 0;
+     left: 0;
+     right: 0;
+     bottom: 0;
+     z-index: 10000;
+     display: flex;
+     align-items: center;
+     justify-content: center;
+     animation: fadeIn 0.3s ease;
+   }
 
-  @keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
+   @keyframes fadeIn {
+     from { opacity: 0; }
+     to { opacity: 1; }
+   }
 
-  .deck-builder-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0,0,0,0.7);
-    backdrop-filter: blur(4px);
-  }
+   .deck-builder-overlay {
+     position: absolute;
+     top: 0;
+     left: 0;
+     right: 0;
+     bottom: 0;
+     background: rgba(0,0,0,0.7);
+     backdrop-filter: blur(4px);
+   }
 
 .deck-builder-container {
   position: relative;
   z-index: 10001;
   background: var(--panel-bg);
-  border: 1px solid var(--glass-border);
+  border: 1px solid rgba(44,255,179,0.25);
   border-radius: 20px;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.5),
-              inset 0 0 0 1px rgba(255,255,255,0.05);
+  box-shadow:
+    0 30px 80px rgba(0,0,0,0.6),
+    0 0 40px rgba(44,255,179,0.08);
   max-width: 900px;
   width: 90vw;
-  max-height: 85vh;
+  max-height: 88vh;
+  height: auto;
   display: flex;
   flex-direction: column;
   animation: slideUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -1577,14 +1755,14 @@
     color: #ff4d4d;
   }
 
-.deck-builder-content {
-  padding: 24px;
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
+  .deck-builder-content {
+    padding: 16px 20px;
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
 
 .builder-step {
   animation: fadeIn 0.3s ease;
@@ -1602,27 +1780,27 @@
   }
 
   .form-group {
-    margin-bottom: 20px;
+    margin-bottom: 10px;
   }
 
   .form-group label {
     display: block;
-    margin-bottom: 8px;
+    margin-bottom: 5px;
     color: var(--text-main);
     font-weight: 500;
-    font-size: 0.95rem;
+    font-size: 0.85rem;
   }
 
   .builder-input,
   .builder-select {
     width: 100%;
-    padding: 12px;
+    padding: 10px 12px;
     background: rgba(255,255,255,0.05);
     border: 1px solid var(--glass-border);
     border-radius: 10px;
     color: var(--text-main);
     font-family: inherit;
-    font-size: 0.95rem;
+    font-size: 0.9rem;
     transition: all 0.2s ease;
     box-sizing: border-box;
   }
@@ -1646,8 +1824,11 @@
 
   textarea.builder-input {
     resize: vertical;
-    min-height: 100px;
+    min-height: 60px;
+    max-height: 160px;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    padding: 8px 12px;
+    box-sizing: border-box;
   }
 
 .flashcard-builder-list {
@@ -1679,8 +1860,17 @@
 
   .flashcard-item.active {
     background: rgba(44,255,179,0.2);
-    border-color: var(--accent);
+    border-left: 3px solid var(--accent);
     box-shadow: 0 0 10px rgba(44,255,179,0.3);
+  }
+
+  .flashcard-item-layers {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .flashcard-item-title {
@@ -1724,12 +1914,26 @@
     margin-bottom: 20px;
   }
 
-  .builder-actions {
-    display: flex;
-    gap: 12px;
-    justify-content: flex-end;
-    margin-top: 20px;
-  }
+.builder-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.builder-sticky-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: rgba(10,10,10,0.85);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid var(--glass-border);
+  margin-top: auto;
+  flex-shrink: 0;
+}
 
   .builder-actions .memory-btn {
     padding: 10px 18px;

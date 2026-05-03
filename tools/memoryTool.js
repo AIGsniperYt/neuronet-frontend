@@ -86,13 +86,13 @@ export async function initMemoryTool(deps, context = {}) {
   let systemThinkingText;
   // Deck builder elements
   let deckBuilderModal, deckNameInput, deckDescriptionInput, createDeckBtn, closeDeckBuilderBtn;
-  let step1DeckInfo, step2Flashcards, step3Success, currentCardEditor;
+  let step1DeckInfo, step2Flashcards, step3Success;
   let cueInput, quoteInput, priorityPills, saveCardBtn, cancelCardBtn, clearFormBtn, deleteCardBtn;
   let nextToDeckBtn, addNewCardBtn, backToDeckInfoBtn, finishDeckBtn;
-  let studyNewDeckBtn, backToLaunchpadBtn, flashcardList, cardBuilderActions;
+  let studyNewDeckBtn, backToLaunchpadBtn, flashcardList;
   let deckNameDisplay, cardCountDisplay, builderTitle;
-  // New: layer inputs, import
-  let deckLayer1, deckLayer2, deckLayer3, importToggleBtn, ankiImportInput, processImportBtn, cancelImportBtn, importFeedback;
+    // New: layer rows, import
+   let importToggleBtn, ankiImportInput, processImportBtn, cancelImportBtn, importFeedback;
   // Middle UI elements
   let middleUI, middleHeader, middleBackBtn, middleSubjectName, middleStudyBtn;
   let middleModeSelector, andFilterBtn, orFilterBtn, filterModeHint;
@@ -101,13 +101,16 @@ export async function initMemoryTool(deps, context = {}) {
 
   // Deck builder state
   const deckBuilderState = {
-    cards: [], // Array of {cueId, cueFront, quoteId, quoteBack, priority, isExisting}
+    cards: [], // Array of {cueId, cueFront, quoteId, quoteBack, priority, layers: [], isExisting}
     deckName: "",
     deckDescription: "",
     currentCardIndex: -1,
     isEditingCard: false,
     editingSubject: null,
-    deletedCardIds: [] // Track deleted card IDs for editing
+    deletedCardIds: [], // Track deleted card IDs for editing
+    layerPillState: {
+      selectedLayers: []   // currently selected layer names for the editing card (max 3)
+    }
   };
 
   function getDOMElements() {
@@ -151,7 +154,6 @@ export async function initMemoryTool(deps, context = {}) {
     step1DeckInfo = document.getElementById("step1-deckInfo");
     step2Flashcards = document.getElementById("step2-flashcards");
     step3Success = document.getElementById("step3-success");
-    currentCardEditor = document.getElementById("currentCardEditor");
     cueInput = document.getElementById("cueInput");
     quoteInput = document.getElementById("quoteInput");
     priorityPills = document.getElementById("priorityPills");
@@ -166,20 +168,18 @@ export async function initMemoryTool(deps, context = {}) {
     studyNewDeckBtn = document.getElementById("studyNewDeckBtn");
     backToLaunchpadBtn = document.getElementById("backToLaunchpadBtn");
     flashcardList = document.getElementById("flashcardList");
-    cardBuilderActions = document.getElementById("cardBuilderActions");
     deckNameDisplay = document.getElementById("deckNameDisplay");
     cardCountDisplay = document.getElementById("cardCountDisplay");
     builderTitle = document.getElementById("builderTitle");
-    // Layer inputs
-    deckLayer1 = document.getElementById("deckLayer1");
-    deckLayer2 = document.getElementById("deckLayer2");
-    deckLayer3 = document.getElementById("deckLayer3");
+    // Layer row elements (dynamically rendered, accessed via getElementById in render functions)
     // Import elements
     importToggleBtn = document.getElementById("importToggleBtn");
     ankiImportInput = document.getElementById("ankiImportInput");
     processImportBtn = document.getElementById("processImportBtn");
     cancelImportBtn = document.getElementById("cancelImportBtn");
     importFeedback = document.getElementById("importFeedback");
+    // Layer row elements
+    // (dynamically rendered, accessed via getElementById in render functions)
     // Card count display
     cardCount = document.getElementById("cardCount");
 
@@ -2295,11 +2295,9 @@ export async function initMemoryTool(deps, context = {}) {
       const cardCues = cues.filter(c => c.quoteId === quote.id);
       const cue = cardCues.length > 0 ? cardCues[0] : null;
 
-      // Get layer info from quote's hierarchyPath
+      // Get layer info from quote's hierarchyPath, convert to layers array
       const path = quote.meta?.hierarchyPath || [];
-      const layer1 = path[1] || "";
-      const layer2 = path[2] || "";
-      const layer3 = path[3] || "";
+      const layers = path.filter(Boolean).slice(1, 4); // layers only (skip subject at index 0)
 
       deckBuilderState.cards.push({
         cueId: cue ? cue.id : crypto.randomUUID(),
@@ -2307,10 +2305,8 @@ export async function initMemoryTool(deps, context = {}) {
         quoteId: quote.id,
         quoteBack: quote.quote,
         priority: quote.priority || 3,
-        isExisting: true,
-        layer1,
-        layer2,
-        layer3
+        layers,
+        isExisting: true
       });
     }
 
@@ -2333,13 +2329,12 @@ export async function initMemoryTool(deps, context = {}) {
     deckBuilderState.isEditingCard = false;
     deckBuilderState.editingSubject = null;
     deckBuilderState.deletedCardIds = [];
+    deckBuilderState.layerPillState = {
+      selectedLayers: []
+    };
     if (deckNameInput) deckNameInput.value = "";
     if (deckDescriptionInput) deckDescriptionInput.value = "";
     if (finishDeckBtn) finishDeckBtn.textContent = "Finish Deck";
-    // Clear layer inputs
-    if (deckLayer1) deckLayer1.value = "";
-    if (deckLayer2) deckLayer2.value = "";
-    if (deckLayer3) deckLayer3.value = "";
   }
 
   function showDeckBuilderStep(step) {
@@ -2349,12 +2344,18 @@ export async function initMemoryTool(deps, context = {}) {
       if (step === 2) {
         step2Flashcards.style.flexDirection = "column";
         step2Flashcards.style.minHeight = "0";
+        // Ensure deck-builder-body is row layout
+        const body = step2Flashcards.querySelector(".deck-builder-body");
+        if (body) body.style.flexDirection = "row";
       }
     }
     if (step3Success) step3Success.style.display = step === 3 ? "block" : "none";
     // Reset form on step 2
     if (step === 2) {
+      deckBuilderState.layerPillState.selectedLayers = [];
       renderPriorityPills();
+      renderLayerRows();
+      setupNewLayerButtons();
       clearForm();
     }
   }
@@ -2388,12 +2389,213 @@ export async function initMemoryTool(deps, context = {}) {
     });
   }
 
+  // ========== LAYER ROWS SYSTEM ==========
+
+  function renderLayerRows() {
+    renderLayerRow(1);
+    renderLayerRow(2);
+    renderLayerRow(3);
+    updateLayerRowStates();
+  }
+
+  function getLayersForLevel(level) {
+    // L1: all unique L1 names from all cards
+    // L2: L2 names only if L1 is selected
+    // L3: L3 names only if L1 and L2 are selected
+    const cards = deckBuilderState.cards;
+    const selected = deckBuilderState.layerPillState.selectedLayers; // [l1, l2, l3] (may be shorter)
+
+    if (level === 1) {
+      const set = new Set();
+      cards.forEach(c => { if (c.layers && c.layers[0]) set.add(c.layers[0]); });
+      // Include currently selected L1 even if not in any card yet
+      if (selected[0]) set.add(selected[0]);
+      return Array.from(set).sort();
+    }
+
+    if (level === 2) {
+      const l1 = selected[0];
+      if (!l1) return [];
+      const set = new Set();
+      cards.forEach(c => {
+        if (c.layers && c.layers[0] === l1 && c.layers[1]) set.add(c.layers[1]);
+      });
+      if (selected[1]) set.add(selected[1]);
+      return Array.from(set).sort();
+    }
+
+    if (level === 3) {
+      const l1 = selected[0];
+      const l2 = selected[1];
+      if (!l1 || !l2) return [];
+      const set = new Set();
+      cards.forEach(c => {
+        if (c.layers && c.layers[0] === l1 && c.layers[1] === l2 && c.layers[2]) {
+          set.add(c.layers[2]);
+        }
+      });
+      if (selected[2]) set.add(selected[2]);
+      return Array.from(set).sort();
+    }
+
+    return [];
+  }
+
+  function renderLayerRow(level) {
+    const container = document.getElementById(`layer${level}Pills`);
+    if (!container) return;
+
+    const layers = getLayersForLevel(level);
+    const selected = deckBuilderState.layerPillState.selectedLayers;
+    const selectedForLevel = selected[level - 1] || null;
+
+    let html = layers.map(name => {
+      const isActive = name === selectedForLevel;
+      return `<button type="button" class="layer-pill ${isActive ? 'active' : ''}" data-level="${level}" data-layer="${escapeHtml(name)}">${escapeHtml(name)}</button>`;
+    }).join("");
+
+    container.innerHTML = html;
+
+    // Attach click events
+    container.querySelectorAll(".layer-pill").forEach(btn => {
+      btn.addEventListener("click", () => {
+        selectLayerPill(parseInt(btn.dataset.level), btn.dataset.layer);
+      });
+    });
+  }
+
+  function selectLayerPill(level, layerName) {
+    const selected = deckBuilderState.layerPillState.selectedLayers;
+    // Pad array to length (level-1) with undefined
+    while (selected.length < level - 1) selected.push(undefined);
+    const current = selected[level - 1];
+
+    if (current === layerName) {
+      // Deselect this level and all levels below
+      selected.splice(level - 1);
+    } else {
+      // Set this level, clear all below
+      selected[level - 1] = layerName;
+      selected.length = level; // truncate anything below
+    }
+
+    renderLayerRows();
+  }
+
+  function updateLayerRowStates() {
+    const selected = deckBuilderState.layerPillState.selectedLayers;
+    const l1Row = document.getElementById("layer1Row");
+    const l2Row = document.getElementById("layer2Row");
+    const l3Row = document.getElementById("layer3Row");
+    const l2Btn = document.querySelector('#layer2Row .layer-new-pill');
+    const l3Btn = document.querySelector('#layer3Row .layer-new-pill');
+
+    // L1 always enabled
+    if (l1Row) l1Row.classList.remove("disabled");
+
+    // L2 enabled only if L1 selected
+    if (l2Row) {
+      if (selected[0]) {
+        l2Row.classList.remove("disabled");
+        if (l2Btn) l2Btn.disabled = false;
+      } else {
+        l2Row.classList.add("disabled");
+        if (l2Btn) l2Btn.disabled = true;
+      }
+    }
+
+    // L3 enabled only if L1 and L2 selected
+    if (l3Row) {
+      if (selected[0] && selected[1]) {
+        l3Row.classList.remove("disabled");
+        if (l3Btn) l3Btn.disabled = false;
+      } else {
+        l3Row.classList.add("disabled");
+        if (l3Btn) l3Btn.disabled = true;
+      }
+    }
+  }
+
+  function setupNewLayerButtons() {
+    document.querySelectorAll(".layer-new-pill").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const level = parseInt(btn.dataset.level);
+        const row = btn.closest(".layer-row");
+        if (row && row.classList.contains("disabled")) return;
+        showNewLayerInput(level);
+      });
+    });
+  }
+
+  function showNewLayerInput(level) {
+    const container = document.getElementById(`layer${level}Pills`);
+    const newBtn = document.querySelector(`#layer${level}Row .layer-new-pill`);
+    if (!container || !newBtn) return;
+
+    const existingInput = document.getElementById(`newLayerInput${level}`);
+    if (existingInput) return; // already open
+
+    const wrapper = document.createElement("div");
+    wrapper.style.display = "flex";
+    wrapper.style.gap = "6px";
+    wrapper.id = `newLayerWrapper${level}`;
+
+    wrapper.innerHTML = `
+      <input type="text" id="newLayerInput${level}" class="layer-input-inline" placeholder="Layer name...">
+      <button type="button" id="confirmLayerBtn${level}" class="layer-confirm-btn">Add</button>
+    `;
+
+    newBtn.style.display = "none";
+    container.parentNode.insertBefore(wrapper, container.nextSibling);
+
+    const input = document.getElementById(`newLayerInput${level}`);
+    const confirmBtn = document.getElementById(`confirmLayerBtn${level}`);
+
+    if (input) {
+      input.focus();
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          confirmNewLayer(level);
+        }
+        if (e.key === "Escape") {
+          cancelNewLayer(level);
+        }
+      });
+    }
+
+    if (confirmBtn) {
+      confirmBtn.addEventListener("click", () => confirmNewLayer(level));
+    }
+  }
+
+  function confirmNewLayer(level) {
+    const input = document.getElementById(`newLayerInput${level}`);
+    if (!input) return;
+    const newLayer = input.value.trim();
+    if (!newLayer) return;
+
+    // Select it directly — it will appear in the row via getLayersForLevel
+    // since getLayersForLevel scans cards, we just need to set selected state
+    const selected = deckBuilderState.layerPillState.selectedLayers;
+    while (selected.length < level - 1) selected.push(undefined);
+    selected[level - 1] = newLayer;
+    selected.length = level;
+
+    cancelNewLayer(level);
+    renderLayerRows();
+  }
+
+  function cancelNewLayer(level) {
+    const wrapper = document.getElementById(`newLayerWrapper${level}`);
+    const newBtn = document.querySelector(`#layer${level}Row .layer-new-pill`);
+    if (wrapper) wrapper.remove();
+    if (newBtn) newBtn.style.display = "";
+  }
+
   function startEditingCard(index) {
     deckBuilderState.currentCardIndex = index;
     deckBuilderState.isEditingCard = true;
-
-    if (currentCardEditor) currentCardEditor.style.display = "block";
-    if (cardBuilderActions) cardBuilderActions.style.display = "none";
 
     // Show form, hide import view
     const importView = document.getElementById("importView");
@@ -2415,10 +2617,9 @@ export async function initMemoryTool(deps, context = {}) {
           b.style.borderColor = isActive ? getPriorityColor(p) : "rgba(255,255,255,0.15)";
         });
       }
-      // Set layer inputs
-      if (deckLayer1) deckLayer1.value = card.layer1 || "";
-      if (deckLayer2) deckLayer2.value = card.layer2 || "";
-      if (deckLayer3) deckLayer3.value = card.layer3 || "";
+      // Set layer rows state: populate selectedLayers from card.layers
+      deckBuilderState.layerPillState.selectedLayers = [...(card.layers || [])];
+      renderLayerRows();
       // Show delete button
       if (deleteCardBtn) deleteCardBtn.style.display = "inline-block";
       // Update form title
@@ -2428,9 +2629,8 @@ export async function initMemoryTool(deps, context = {}) {
       // New card
       if (cueInput) cueInput.value = "";
       if (quoteInput) quoteInput.value = "";
-      if (deckLayer1) deckLayer1.value = "";
-      if (deckLayer2) deckLayer2.value = "";
-      if (deckLayer3) deckLayer3.value = "";
+      deckBuilderState.layerPillState.selectedLayers = [];
+      renderLayerRows();
       if (deleteCardBtn) deleteCardBtn.style.display = "none";
       // Reset priority to default (Medium)
       if (priorityPills) {
@@ -2461,8 +2661,6 @@ export async function initMemoryTool(deps, context = {}) {
   function finishEditingCard() {
     deckBuilderState.isEditingCard = false;
     deckBuilderState.currentCardIndex = -1;
-    if (currentCardEditor) currentCardEditor.style.display = "none";
-    if (cardBuilderActions) cardBuilderActions.style.display = "flex";
     clearForm();
     renderFlashcardList();
   }
@@ -2470,9 +2668,9 @@ export async function initMemoryTool(deps, context = {}) {
   function clearForm() {
     if (cueInput) cueInput.value = "";
     if (quoteInput) quoteInput.value = "";
-    if (deckLayer1) deckLayer1.value = "";
-    if (deckLayer2) deckLayer2.value = "";
-    if (deckLayer3) deckLayer3.value = "";
+    // Reset layer rows
+    deckBuilderState.layerPillState.selectedLayers = [];
+    renderLayerRows();
     // Reset priority to default (Medium)
     if (priorityPills) {
       priorityPills.querySelectorAll(".priority-pill").forEach(b => {
@@ -2496,15 +2694,18 @@ export async function initMemoryTool(deps, context = {}) {
   }
 
   function saveFlashcard(cueFront, quoteBack, priority) {
+    // Build layers array from selectedLayers, filtering out undefined
+    const layers = deckBuilderState.layerPillState.selectedLayers
+      .filter(Boolean)
+      .map(s => s.trim())
+      .filter(Boolean);
     const card = {
       cueId: crypto.randomUUID(),
       cueFront,
       quoteId: crypto.randomUUID(),
       quoteBack,
       priority,
-      layer1: deckLayer1?.value?.trim() || "",
-      layer2: deckLayer2?.value?.trim() || "",
-      layer3: deckLayer3?.value?.trim() || "",
+      layers, // array of up to 3 layer names [l1, l2, l3]
       isExisting: false
     };
 
@@ -2523,6 +2724,8 @@ export async function initMemoryTool(deps, context = {}) {
     finishEditingCard();
     // Update card count
     if (cardCount) cardCount.textContent = deckBuilderState.cards.length;
+    // After save: clear inputs and focus cue
+    if (cueInput) cueInput.focus();
   }
 
   function deleteFlashcard(index) {
@@ -2539,21 +2742,42 @@ export async function initMemoryTool(deps, context = {}) {
   function renderFlashcardList() {
     if (!flashcardList) return;
 
-    flashcardList.innerHTML = "";
-
     // Update card count
     if (cardCount) cardCount.textContent = deckBuilderState.cards.length;
 
-    deckBuilderState.cards.forEach((card, index) => {
+    // Filter cards based on selected layer filters
+    const filters = deckBuilderState.layerPillState.selectedLayers.filter(Boolean);
+    const filteredCards = filters.length === 0 ? deckBuilderState.cards : deckBuilderState.cards.filter(card => {
+      for (let i = 0; i < filters.length; i++) {
+        if (!card.layers || card.layers[i] !== filters[i]) return false;
+      }
+      return true;
+    });
+
+    flashcardList.innerHTML = "";
+
+    filteredCards.forEach((card, filteredIndex) => {
+      // Find the real index in the full cards array
+      const realIndex = deckBuilderState.cards.indexOf(card);
+
       const item = document.createElement("div");
       item.className = "flashcard-item";
-      if (index === deckBuilderState.currentCardIndex) {
+      if (realIndex === deckBuilderState.currentCardIndex) {
         item.classList.add("active");
       }
 
       const title = document.createElement("div");
       title.className = "flashcard-item-title";
-      title.textContent = `${index + 1}. ${card.cueFront.substring(0, 50)}...`;
+      title.textContent = `${realIndex + 1}. ${(card.cueFront || "").substring(0, 50)}`;
+
+      // Show layers as subtle text below title
+      if (card.layers && card.layers.length > 0) {
+        const layersDiv = document.createElement("div");
+        layersDiv.className = "flashcard-item-layers";
+        layersDiv.textContent = card.layers.join(" > ");
+        title.appendChild(document.createElement("br"));
+        title.appendChild(layersDiv);
+      }
 
       const actions = document.createElement("div");
       actions.className = "flashcard-item-actions";
@@ -2561,12 +2785,18 @@ export async function initMemoryTool(deps, context = {}) {
       const editBtn = document.createElement("button");
       editBtn.className = "flashcard-item-btn";
       editBtn.textContent = "Edit";
-      editBtn.addEventListener("click", () => startEditingCard(index));
+      editBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        startEditingCard(realIndex);
+      });
 
       const deleteBtn = document.createElement("button");
       deleteBtn.className = "flashcard-item-btn";
       deleteBtn.textContent = "Delete";
-      deleteBtn.addEventListener("click", () => deleteFlashcard(index));
+      deleteBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        deleteFlashcard(realIndex);
+      });
 
       actions.appendChild(editBtn);
       actions.appendChild(deleteBtn);
@@ -2575,6 +2805,16 @@ export async function initMemoryTool(deps, context = {}) {
       item.appendChild(actions);
       flashcardList.appendChild(item);
     });
+
+    // Show filter indicator
+    if (filters.length > 0) {
+      const indicator = document.createElement("div");
+      indicator.className = "flashcard-item-layers";
+      indicator.style.padding = "8px 12px";
+      indicator.style.fontStyle = "italic";
+      indicator.textContent = `Filtering by: ${filters.join(" > ")} (${filteredCards.length} of ${deckBuilderState.cards.length})`;
+      flashcardList.prepend(indicator);
+    }
   }
 
   async function saveDeckToDB() {
@@ -2605,12 +2845,10 @@ export async function initMemoryTool(deps, context = {}) {
 
         // Save all cards (update existing, add new)
         for (const card of deckBuilderState.cards) {
-          // Build hierarchyPath with layers
+           // Build hierarchyPath from layers array [l1, l2, l3]
           const hierarchyPath = [
             subjectName,
-            card.layer1 || "",
-            card.layer2 || "",
-            card.layer3 || ""
+            ...(card.layers || [])
           ].filter(Boolean);
 
           const quote = {
@@ -2705,17 +2943,15 @@ export async function initMemoryTool(deps, context = {}) {
         return;
       }
 
-      deckBuilderState.cards.push({
-        cueId: crypto.randomUUID(),
-        cueFront: front,
-        quoteId: crypto.randomUUID(),
-        quoteBack: back,
-        priority: 3, // Default to Medium
-        layer1: "",
-        layer2: "",
-        layer3: "",
-        isExisting: false
-      });
+        deckBuilderState.cards.push({
+          cueId: crypto.randomUUID(),
+          cueFront: front,
+          quoteId: crypto.randomUUID(),
+          quoteBack: back,
+          priority: 3, // Default to Medium
+          layers: [], // populated via layer rows after import
+          isExisting: false
+        });
 
       imported++;
     });
