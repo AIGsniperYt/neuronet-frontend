@@ -129,7 +129,10 @@ export async function initMemoryTool(deps, context = {}) {
       suppressDBChange: 0,
       lastGradeReaction: null,
       weightCache: new Map(),
-      learningMode: "global-srs",
+      learningMode: "global_srs",
+      learningRoute: null,
+      systemState: null,
+      routeRerouteCounter: 0,
       focusedBlockKeys: new Set()
     },
     userProfile: loadUserLearningProfile(),
@@ -874,9 +877,8 @@ export async function initMemoryTool(deps, context = {}) {
     if (isBlurt) {
       cardForHeap.blurt = { submitted: false, text: "" };
     }
-    const quotePriority = cardForHeap.memoryKind === "quote" ? (cardForHeap.record?.priority ?? null) : null;
-    const nextPriority = computePriority(updatedMemoryState, nowMs, quotePriority);
-    if (state.session.heap) {
+    if (state.session.heap && shouldReinsertReviewedCard(cardForHeap, grade, state.session.learningRoute)) {
+      const nextPriority = computeModePriority(cardForHeap, state.session.learningRoute, state.userProfile, nowMs);
       state.session.heap.push({ priority: nextPriority, card: cardForHeap });
     }
 
@@ -923,6 +925,10 @@ export async function initMemoryTool(deps, context = {}) {
     if (state.currentIndex < state.flashcards.length - 1) {
       await navigateTo(state.currentIndex + 1);
       return;
+    }
+
+    if ((!state.session.heap || state.session.heap.size() === 0) && state.session.surprisePool.length > 0) {
+      rerouteRemainingLearningScope();
     }
 
     if (state.session.heap && state.session.heap.size() > 0) {
@@ -1071,7 +1077,10 @@ export async function initMemoryTool(deps, context = {}) {
     state.session.revealedAt = null;
     state.session.suppressDBChange = 0;
     state.session.weightCache = new Map();
-    state.session.learningMode = "global-srs";
+    state.session.learningMode = "global_srs";
+    state.session.learningRoute = null;
+    state.session.systemState = null;
+    state.session.routeRerouteCounter = 0;
     state.session.focusedBlockKeys = new Set();
 
     if (state.currentMode === "quote-learning") {
@@ -1452,85 +1461,524 @@ export async function initMemoryTool(deps, context = {}) {
     return result / Math.sqrt(heapFactor);
   }
 
-  function selectLearningMode(heapOrCards, userProfile = state.userProfile) {
-    const cards = Array.isArray(heapOrCards)
-      ? heapOrCards
-      : (heapOrCards?.items || []).map((item) => item.card).filter(Boolean);
-    const heapSize = cards.length;
-    if (heapSize < 20) return "global-srs";
+  function getCardRecord(card) {
+    return card?.record || card?.targetRecord || card?.back?.targetRecord || null;
+  }
 
-    const earlyCount = cards.filter((card) => {
-      const phase = getUserLearningPhase(card, userProfile);
-      return phase === "new" || phase === "warming" || phase === "stabilising";
-    }).length;
-    const earlyRatio = heapSize > 0 ? earlyCount / heapSize : 0;
-    const expectedTrials = Number(userProfile.expectedTrialsToMastery || 5);
+  function getCardTags(card) {
+    const record = getCardRecord(card);
+    const tags = [
+      ...(Array.isArray(record?.meta?.tags) ? record.meta.tags : []),
+      ...(Array.isArray(record?.tags) ? record.tags : [])
+    ];
+    return [...new Set(tags.filter(Boolean))];
+  }
 
-    if (heapSize > 100 && earlyRatio > 0.25) return "focused-block";
-    if (expectedTrials >= 6 && earlyCount >= 12) return "focused-block";
-    return "global-srs";
+  function getCardLayers(card) {
+    const record = getCardRecord(card);
+    const path = Array.isArray(record?.meta?.hierarchyPath) ? record.meta.hierarchyPath : [];
+    return path.filter(Boolean).slice(1, 4);
+  }
+
+  function getCardSubject(card) {
+    const record = getCardRecord(card);
+    const path = Array.isArray(record?.meta?.hierarchyPath) ? record.meta.hierarchyPath : [];
+    return record?.subject || path[0] || state.currentSubject || "";
+  }
+
+  function getQuotePriorityForCard(card) {
+    return card?.memoryKind === "quote" || card?.targetKind === "quote"
+      ? (card?.record?.priority ?? card?.targetRecord?.priority ?? null)
+      : null;
+  }
+
+  function getCardPriorityBand(card) {
+    const p = getQuotePriorityForCard(card);
+    if (p >= 4) return "high";
+    if (p <= 2) return "low";
+    return "medium";
   }
 
   function getCardClusterKey(card) {
-    const path = card?.record?.meta?.hierarchyPath || card?.targetRecord?.meta?.hierarchyPath || [];
-    if (path[1]) return `layer:${path[1]}`;
-    const tags = card?.record?.meta?.tags || card?.record?.tags || card?.targetRecord?.meta?.tags || [];
+    const layers = getCardLayers(card);
+    if (layers[1]) return `layer:${layers[0]}/${layers[1]}`;
+    if (layers[0]) return `layer:${layers[0]}`;
+    const tags = getCardTags(card);
     if (tags[0]) return `tag:${tags[0]}`;
+    const record = getCardRecord(card);
+    if (card?.memoryKind === "analysis" && Array.isArray(record?.quoteRefs) && record.quoteRefs.length > 0) {
+      return `analysis:${record.quoteRefs[0].quoteId || record.quoteRefs[0].id || record.id}`;
+    }
     const difficulty = Math.round(Number(card?.memoryState?.D || 1));
     return `difficulty:${difficulty}`;
   }
 
-  function selectFocusedBlock(cards, userProfile = state.userProfile) {
-    if (!Array.isArray(cards) || cards.length === 0) return { block: [], remainder: [] };
-    const groups = new Map();
-    cards.forEach((card) => {
-      const phase = getUserLearningPhase(card, userProfile);
-      const clusterKey = `${phase}:${getCardClusterKey(card)}`;
-      if (!groups.has(clusterKey)) groups.set(clusterKey, []);
-      groups.get(clusterKey).push(card);
-    });
+  function getCardRouteFacts(card, userProfile = state.userProfile) {
+    const ms = card?.memoryState || {};
+    const phase = getUserLearningPhase(card, userProfile);
+    return {
+      phase,
+      subject: getCardSubject(card),
+      layers: getCardLayers(card),
+      tags: getCardTags(card),
+      cluster: getCardClusterKey(card),
+      priorityBand: getCardPriorityBand(card),
+      quotePriority: getQuotePriorityForCard(card),
+      uncertainty: clampNumber(Number(ms.U ?? 0.5), 0, 1),
+      stability: clampNumber(Number(ms.S ?? 1), 0.1, 1000),
+      reviewCount: Number(ms.reviewCount || 0),
+      lastReview: Number(ms.lastReview || 0),
+      nextReview: Number(ms.nextReview || 0),
+      recentFailure: Array.isArray(ms.recentGrades) && ms.recentGrades.slice(-3).includes("didnt_know"),
+      hasAnalysisGraph: card?.memoryKind === "analysis" || (Array.isArray(card?.back?.analyses) && card.back.analyses.length > 0)
+    };
+  }
 
-    const sortedGroups = [...groups.values()].sort((a, b) => {
-      const aScore = a.length + a.reduce((sum, card) => sum + Number(card.memoryState?.U || 0), 0);
-      const bScore = b.length + b.reduce((sum, card) => sum + Number(card.memoryState?.U || 0), 0);
+  function incrementMap(map, key, amount = 1) {
+    if (!key) return;
+    map.set(key, (map.get(key) || 0) + amount);
+  }
+
+  function mapToRankedArray(map, limit = 12) {
+    return [...map.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([name, count]) => ({ name, count }));
+  }
+
+  function entropyFromMap(map, total) {
+    if (!total) return 0;
+    return [...map.values()].reduce((sum, count) => {
+      const p = count / total;
+      return p > 0 ? sum - p * Math.log2(p) : sum;
+    }, 0);
+  }
+
+  function structuralIgnitionSample(cards, userProfile = state.userProfile) {
+    const list = Array.isArray(cards) ? cards.filter(Boolean) : [];
+    const maxSample = clampNumber(Math.round(Math.sqrt(list.length) * 6), 16, 64);
+    if (list.length <= maxSample) return [...list];
+
+    const selected = [];
+    const selectedKeys = new Set();
+    const addCard = (card) => {
+      const key = getCardQueueKey(card);
+      if (!card || (key && selectedKeys.has(key)) || selected.length >= maxSample) return;
+      selected.push(card);
+      if (key) selectedKeys.add(key);
+    };
+
+    const byScore = [...list].sort((a, b) => {
+      const af = getCardRouteFacts(a, userProfile);
+      const bf = getCardRouteFacts(b, userProfile);
+      const aScore = af.uncertainty * 2 + (af.reviewCount === 0 ? 1.4 : 0) + ((af.quotePriority || 3) - 3) * 0.5 + (af.recentFailure ? 1 : 0);
+      const bScore = bf.uncertainty * 2 + (bf.reviewCount === 0 ? 1.4 : 0) + ((bf.quotePriority || 3) - 3) * 0.5 + (bf.recentFailure ? 1 : 0);
       return bScore - aScore;
     });
+    byScore.slice(0, Math.ceil(maxSample * 0.4)).forEach(addCard);
 
-    const speed = clampNumber(Number(userProfile.learningSpeedFactor || 1), 0.45, 1.8);
-    const maxBlockSize = clampNumber(Math.round(8 * speed), 5, 16);
-    const block = sortedGroups[0]?.slice(0, maxBlockSize) || cards.slice(0, maxBlockSize);
-    const blockKeys = new Set(block.map(getCardQueueKey).filter(Boolean));
-    const remainder = cards.filter((card) => !blockKeys.has(getCardQueueKey(card)));
-    return { block, remainder };
+    const seenBands = {
+      cluster: new Set(),
+      layer: new Set(),
+      tag: new Set(),
+      priority: new Set()
+    };
+    byScore.forEach((card) => {
+      if (selected.length >= maxSample) return;
+      const facts = getCardRouteFacts(card, userProfile);
+      const layer = facts.layers[0] || "";
+      const tag = facts.tags[0] || "";
+      if (!seenBands.cluster.has(facts.cluster) || (layer && !seenBands.layer.has(layer)) || (tag && !seenBands.tag.has(tag)) || !seenBands.priority.has(facts.priorityBand)) {
+        addCard(card);
+        seenBands.cluster.add(facts.cluster);
+        if (layer) seenBands.layer.add(layer);
+        if (tag) seenBands.tag.add(tag);
+        seenBands.priority.add(facts.priorityBand);
+      }
+    });
+
+    byScore.forEach(addCard);
+    return selected;
+  }
+
+  function deriveStartType(cards, sessionHistory = []) {
+    const list = Array.isArray(cards) ? cards : [];
+    if (list.length === 0) return "cold_start";
+    const reviewed = list.filter((card) => Number(card?.memoryState?.reviewCount || 0) > 0).length;
+    const stable = list.filter((card) => {
+      const phase = getUserLearningPhase(card, state.userProfile);
+      return phase === "stable" || phase === "mastered";
+    }).length;
+    const avgUncertainty = list.reduce((sum, card) => sum + Number(card?.memoryState?.U ?? 0.5), 0) / list.length;
+    const hasRecentHistory = Array.isArray(sessionHistory) && sessionHistory.some((card) => Number(card?.memoryState?.reviewCount || 0) > 0);
+    const reviewedRatio = reviewed / list.length;
+    const stableRatio = stable / list.length;
+
+    if (reviewedRatio < 0.25 && stableRatio < 0.2 && avgUncertainty >= 0.45 && !hasRecentHistory) return "cold_start";
+    if (reviewedRatio < 0.15 && list.length >= 40) return "cold_start";
+    return "warm_start";
+  }
+
+  function buildLearningSystemState(cards, userProfile = state.userProfile) {
+    const list = Array.isArray(cards) ? cards.filter(Boolean) : [];
+    const sample = structuralIgnitionSample(list, userProfile);
+    const phaseCounts = new Map();
+    const clusterMap = new Map();
+    const layerMap = new Map();
+    const tagMap = new Map();
+    const priorityDistribution = new Map();
+    const uncertaintyMap = new Map();
+    const difficultyDistribution = new Map();
+    const subjectMap = new Map();
+    const nowMs = Date.now();
+
+    let newCount = 0;
+    let masteredCount = 0;
+    let totalUncertainty = 0;
+    let instabilityTotal = 0;
+    let recentFailureCount = 0;
+    let decayingMasteredCount = 0;
+    let analysisLinkedCount = 0;
+
+    sample.forEach((card) => {
+      const facts = getCardRouteFacts(card, userProfile);
+      totalUncertainty += facts.uncertainty;
+      if (facts.phase === "new") newCount++;
+      if (facts.phase === "mastered" || facts.phase === "stable") masteredCount++;
+      if (facts.recentFailure) recentFailureCount++;
+      if (facts.hasAnalysisGraph) analysisLinkedCount++;
+      if ((facts.phase === "mastered" || facts.phase === "stable") && facts.nextReview > 0 && facts.nextReview < nowMs && facts.uncertainty > 0.35) {
+        decayingMasteredCount++;
+      }
+      instabilityTotal += facts.uncertainty + (facts.recentFailure ? 0.5 : 0) + (facts.stability < 1 ? 0.25 : 0);
+      incrementMap(phaseCounts, facts.phase);
+      incrementMap(clusterMap, facts.cluster);
+      incrementMap(subjectMap, facts.subject);
+      incrementMap(priorityDistribution, facts.priorityBand);
+      facts.layers.forEach((layer, index) => incrementMap(layerMap, index === 0 ? layer : `${facts.layers[0]} > ${layer}`));
+      facts.tags.forEach((tag) => incrementMap(tagMap, tag));
+      incrementMap(uncertaintyMap, facts.cluster, facts.uncertainty);
+      incrementMap(difficultyDistribution, Math.round(Number(card?.memoryState?.D || 1)));
+    });
+
+    const heapSize = list.length;
+    const observedSize = sample.length || heapSize;
+    return {
+      heapSize,
+      sampleSize: sample.length,
+      structuralSampleKeys: sample.map(getCardQueueKey).filter(Boolean),
+      clusterMap: mapToRankedArray(clusterMap, 16),
+      difficultyDistribution: mapToRankedArray(difficultyDistribution, 8),
+      uncertaintyMap: mapToRankedArray(uncertaintyMap, 16),
+      layerMap: mapToRankedArray(layerMap, 16),
+      tagMap: mapToRankedArray(tagMap, 16),
+      phaseDistribution: Object.fromEntries(phaseCounts),
+      priorityDistribution: Object.fromEntries(priorityDistribution),
+      subjectDistribution: mapToRankedArray(subjectMap, 8),
+      newCardRatio: observedSize ? newCount / observedSize : 0,
+      masteryRatio: observedSize ? masteredCount / observedSize : 0,
+      avgUncertainty: observedSize ? totalUncertainty / observedSize : 0,
+      instabilityScore: observedSize ? instabilityTotal / observedSize : 0,
+      recentFailureRate: observedSize ? recentFailureCount / observedSize : 0,
+      decayingMasteredRatio: observedSize ? decayingMasteredCount / observedSize : 0,
+      analysisGraphDensity: observedSize ? analysisLinkedCount / observedSize : 0,
+      clusterEntropy: entropyFromMap(clusterMap, observedSize),
+      layerDensity: observedSize ? layerMap.size / observedSize : 0,
+      tagDensity: observedSize ? tagMap.size / observedSize : 0
+    };
+  }
+
+  function buildRouteScope(route, metadata = {}) {
+    const systemState = metadata.systemState || {};
+    const topClusters = (systemState.clusterMap || []).slice(0, route.mode === "focused_block" ? 2 : 4).map((x) => x.name);
+    const topLayers = (systemState.layerMap || []).slice(0, 4).map((x) => x.name.split(" > ")[0]);
+    const topTags = (systemState.tagMap || []).slice(0, 5).map((x) => x.name);
+    const subjects = (systemState.subjectDistribution || []).slice(0, 3).map((x) => x.name).filter(Boolean);
+
+    if (route.mode === "rapid_sweep") {
+      return {
+        subjects,
+        layers: topLayers,
+        tags: topTags,
+        clusters: (systemState.clusterMap || []).slice(0, 8).map((x) => x.name),
+        priorityBands: ["high", "medium", "low"]
+      };
+    }
+    if (route.mode === "repair_cycle") {
+      return {
+        subjects,
+        layers: topLayers,
+        tags: topTags,
+        clusters: topClusters,
+        priorityBands: ["high", "medium"]
+      };
+    }
+    if (route.mode === "focused_block") {
+      return {
+        subjects,
+        layers: topLayers.slice(0, 2),
+        tags: topTags.slice(0, 3),
+        clusters: topClusters,
+        priorityBands: ["high", "medium"]
+      };
+    }
+    return {
+      subjects,
+      layers: state.sessionFilter?.layers || [],
+      tags: state.sessionFilter?.tags || [],
+      clusters: [],
+      priorityBands: ["high", "medium", "low"]
+    };
+  }
+
+  function selectLearningRoute(routeState, userProfile = state.userProfile) {
+    const cards = Array.isArray(routeState?.cards) ? routeState.cards : [];
+    const systemState = routeState?.systemState || buildLearningSystemState(cards, userProfile);
+    const startType = deriveStartType(cards, routeState?.sessionHistory || []);
+    const heapSize = systemState.heapSize || cards.length;
+    let mode = "global_srs";
+    let heapConstruction = "global";
+    let samplingStrategy = "mixed";
+    let aggressiveness = 0.35;
+    let interleaveRate = 0.08;
+
+    if (heapSize < 20) {
+      mode = "global_srs";
+      heapConstruction = "global";
+      samplingStrategy = "priority";
+      aggressiveness = 0.25;
+      interleaveRate = 0.05;
+    } else if (startType === "cold_start" && heapSize >= 80 && systemState.clusterEntropy > 1) {
+      mode = "rapid_sweep";
+      heapConstruction = "sampled";
+      samplingStrategy = "stratified";
+      aggressiveness = 0.55;
+      interleaveRate = 0.12;
+    } else if (systemState.newCardRatio > 0.6 || (startType === "cold_start" && systemState.newCardRatio > 0.35)) {
+      mode = "focused_block";
+      heapConstruction = "local";
+      samplingStrategy = "mixed";
+      aggressiveness = 0.72;
+      interleaveRate = 0.15;
+    } else if (startType === "warm_start" && (systemState.decayingMasteredRatio > 0.08 || systemState.recentFailureRate > 0.18 || systemState.instabilityScore > 0.95)) {
+      mode = "repair_cycle";
+      heapConstruction = "clustered";
+      samplingStrategy = "uncertainty";
+      aggressiveness = 0.62;
+      interleaveRate = 0.22;
+    } else if (systemState.masteryRatio > 0.55 && systemState.avgUncertainty < 0.42) {
+      mode = "global_srs";
+      heapConstruction = "global";
+      samplingStrategy = "priority";
+      aggressiveness = 0.3;
+      interleaveRate = 0.08;
+    } else {
+      mode = "focused_block";
+      heapConstruction = "local";
+      samplingStrategy = "mixed";
+      aggressiveness = 0.58;
+      interleaveRate = 0.16;
+    }
+
+    const route = {
+      mode,
+      startType,
+      scope: {
+        subjects: [],
+        layers: [],
+        tags: [],
+        clusters: [],
+        priorityBands: []
+      },
+      heapConstruction,
+      samplingStrategy,
+      aggressiveness,
+      interleaveRate
+    };
+    route.scope = buildRouteScope(route, { systemState });
+    return route;
+  }
+
+  function routeScopeMatches(card, route) {
+    if (!route?.scope) return true;
+    const facts = getCardRouteFacts(card, state.userProfile);
+    const scope = route.scope;
+    const subjectMatch = scope.subjects.length === 0 || scope.subjects.includes(facts.subject);
+    const clusterMatch = scope.clusters.length === 0 || scope.clusters.includes(facts.cluster);
+    const layerMatch = scope.layers.length === 0 || facts.layers.some((layer) => scope.layers.includes(layer));
+    const tagMatch = scope.tags.length === 0 || facts.tags.some((tag) => scope.tags.includes(tag));
+    const priorityMatch = scope.priorityBands.length === 0 || scope.priorityBands.includes(facts.priorityBand);
+    return subjectMatch && priorityMatch && (clusterMatch || layerMatch || tagMatch || scope.clusters.length === 0);
+  }
+
+  function rankCardsForRoute(cards, route, userProfile = state.userProfile) {
+    const nowMs = Date.now();
+    return [...(cards || [])].sort((a, b) => {
+      const aPriority = computeModePriority(a, route, userProfile, nowMs);
+      const bPriority = computeModePriority(b, route, userProfile, nowMs);
+      return bPriority - aPriority;
+    });
+  }
+
+  function takeDiverseSample(cards, route, maxSize) {
+    const sorted = rankCardsForRoute(cards, route, state.userProfile);
+    const selected = [];
+    const keys = new Set();
+    const buckets = new Map();
+    sorted.forEach((card) => {
+      const facts = getCardRouteFacts(card, state.userProfile);
+      const bucket = `${facts.priorityBand}:${facts.layers[0] || "none"}:${facts.tags[0] || "untagged"}:${facts.cluster}`;
+      if (!buckets.has(bucket)) buckets.set(bucket, []);
+      buckets.get(bucket).push(card);
+    });
+    const bucketLists = [...buckets.values()];
+    while (selected.length < maxSize && bucketLists.some((bucket) => bucket.length > 0)) {
+      for (const bucket of bucketLists) {
+        const card = bucket.shift();
+        const key = getCardQueueKey(card);
+        if (card && (!key || !keys.has(key))) {
+          selected.push(card);
+          if (key) keys.add(key);
+        }
+        if (selected.length >= maxSize) break;
+      }
+    }
+    return selected;
+  }
+
+  function buildActiveHeap(route, cards) {
+    const allCards = Array.isArray(cards) ? cards.filter(Boolean) : [];
+    if (route?.mode === "global_srs") {
+      return { activeCards: allCards, remainder: [] };
+    }
+
+    let scopedCards = allCards.filter((card) => routeScopeMatches(card, route));
+    if (scopedCards.length === 0) scopedCards = allCards;
+
+    if (route.mode === "rapid_sweep") {
+      const maxSize = clampNumber(Math.round(24 + Math.sqrt(allCards.length) * 3), 24, 72);
+      const activeCards = takeDiverseSample(scopedCards, route, Math.min(maxSize, scopedCards.length));
+      const activeKeys = new Set(activeCards.map(getCardQueueKey).filter(Boolean));
+      return { activeCards, remainder: allCards.filter((card) => !activeKeys.has(getCardQueueKey(card))) };
+    }
+
+    if (route.mode === "focused_block") {
+      const speed = clampNumber(Number(state.userProfile.learningSpeedFactor || 1), 0.45, 1.8);
+      const maxBlockSize = clampNumber(Math.round(10 * speed), 6, 18);
+      const activeCards = rankCardsForRoute(scopedCards, route, state.userProfile).slice(0, maxBlockSize);
+      const activeKeys = new Set(activeCards.map(getCardQueueKey).filter(Boolean));
+      return { activeCards, remainder: allCards.filter((card) => !activeKeys.has(getCardQueueKey(card))) };
+    }
+
+    if (route.mode === "repair_cycle") {
+      const maxSize = clampNumber(Math.round(28 + state.userProfile.expectedTrialsToMastery * 4), 28, 56);
+      const activeCards = rankCardsForRoute(scopedCards, route, state.userProfile).slice(0, maxSize);
+      const activeKeys = new Set(activeCards.map(getCardQueueKey).filter(Boolean));
+      return { activeCards, remainder: allCards.filter((card) => !activeKeys.has(getCardQueueKey(card))) };
+    }
+
+    return { activeCards: scopedCards, remainder: allCards.filter((card) => !scopedCards.includes(card)) };
+  }
+
+  function computeModePriority(card, route, userProfile = state.userProfile, nowMs = Date.now()) {
+    const phase = getUserLearningPhase(card, userProfile);
+    const quotePriority = getQuotePriorityForCard(card);
+    const base = computePriority(card.memoryState || {}, nowMs, quotePriority, {
+      phase,
+      heapSize: (state.session.heap?.size?.() || 0) + state.session.surprisePool.length
+    });
+    const facts = getCardRouteFacts(card, userProfile);
+    let boost = 0;
+    if (route?.mode === "focused_block") {
+      boost += (phase === "new" || phase === "warming" || phase === "stabilising") ? 1.4 : -0.25;
+      boost += routeScopeMatches(card, route) ? 0.7 : 0;
+    } else if (route?.mode === "rapid_sweep") {
+      boost += facts.reviewCount === 0 ? 0.9 : 0;
+      boost += facts.priorityBand === "high" ? 0.7 : facts.priorityBand === "low" ? -0.15 : 0.25;
+      boost += facts.uncertainty * 0.6;
+    } else if (route?.mode === "repair_cycle") {
+      boost += (phase === "stable" || phase === "mastered") ? 0.65 : 0;
+      boost += facts.recentFailure ? 1.3 : 0;
+      boost += facts.nextReview > 0 && facts.nextReview < nowMs ? 0.9 : 0;
+      boost += facts.uncertainty * 1.2;
+    }
+    if (facts.hasAnalysisGraph && route?.startType === "warm_start") boost += 0.25;
+    return base + boost * clampNumber(Number(route?.aggressiveness ?? 0.4), 0, 1);
+  }
+
+  function shouldInterleaveOldCard(route, sessionStats = state.stats) {
+    const baseRate = clampNumber(Number(route?.interleaveRate ?? 0.08), 0, 0.6);
+    const streakBoost = Number(sessionStats?.streak || 0) >= 4 ? 0.08 : 0;
+    const completionBoost = isFocusedBlockComplete() ? 0.65 : 0;
+    return Math.random() < clampNumber(baseRate + streakBoost + completionBoost, 0, 1);
+  }
+
+  function shouldReinsertReviewedCard(card, grade, route) {
+    if (!card?.memoryState) return false;
+    if (grade === "didnt_know") return true;
+    if (route?.mode === "rapid_sweep") return grade !== "easy" || Number(card.memoryState.U ?? 1) > 0.65;
+    if (route?.mode === "repair_cycle") return grade !== "easy" || Number(card.memoryState.U ?? 1) > 0.42;
+    if (route?.mode === "focused_block") return grade !== "easy" || !isFocusedBlockComplete();
+    return true;
   }
 
   function enqueueLearningCards(cards, nowMs) {
-    let activeCards = Array.isArray(cards) ? cards : [];
+    const allCards = Array.isArray(cards) ? cards : [];
     state.session.surprisePool = [];
-    state.session.learningMode = selectLearningMode(activeCards, state.userProfile);
     state.session.focusedBlockKeys = new Set();
+    state.session.systemState = buildLearningSystemState(allCards, state.userProfile);
+    state.session.learningRoute = selectLearningRoute({
+      cards: allCards,
+      sessionHistory: state.flashcards,
+      systemState: state.session.systemState
+    }, state.userProfile);
+    state.session.learningMode = state.session.learningRoute.mode;
 
-    if (state.session.learningMode === "focused-block") {
-      const { block, remainder } = selectFocusedBlock(activeCards, state.userProfile);
-      activeCards = block;
-      state.session.surprisePool = remainder;
-      state.session.focusedBlockKeys = new Set(block.map(getCardQueueKey).filter(Boolean));
+    const { activeCards, remainder } = buildActiveHeap(state.session.learningRoute, allCards);
+    state.session.surprisePool = remainder;
+    if (state.session.learningRoute.mode === "focused_block") {
+      state.session.focusedBlockKeys = new Set(activeCards.map(getCardQueueKey).filter(Boolean));
     }
 
-    const heapSize = activeCards.length + state.session.surprisePool.length;
     activeCards.forEach((card) => {
       const phase = getUserLearningPhase(card, state.userProfile);
       card.memoryState.L_phase = phase;
-      const quotePriority = card.memoryKind === "quote" || card.targetKind === "quote"
-        ? (card.record?.priority ?? card.targetRecord?.priority ?? null)
-        : null;
-      const priority = computePriority(card.memoryState, nowMs, quotePriority, { phase, heapSize });
+      const priority = computeModePriority(card, state.session.learningRoute, state.userProfile, nowMs);
       state.session.heap.push({ priority, card });
     });
   }
 
+  function rerouteRemainingLearningScope() {
+    if (!Array.isArray(state.session.surprisePool) || state.session.surprisePool.length === 0 || !state.session.heap) return;
+    const remaining = state.session.surprisePool;
+    state.session.surprisePool = [];
+    state.session.systemState = buildLearningSystemState(remaining, state.userProfile);
+    state.session.learningRoute = selectLearningRoute({
+      cards: remaining,
+      sessionHistory: state.flashcards,
+      systemState: state.session.systemState
+    }, state.userProfile);
+    state.session.learningMode = state.session.learningRoute.mode;
+    state.session.routeRerouteCounter = Number(state.session.routeRerouteCounter || 0) + 1;
+
+    const { activeCards, remainder } = buildActiveHeap(state.session.learningRoute, remaining);
+    state.session.surprisePool = remainder;
+    state.session.focusedBlockKeys = state.session.learningRoute.mode === "focused_block"
+      ? new Set(activeCards.map(getCardQueueKey).filter(Boolean))
+      : new Set();
+    const nowMs = Date.now();
+    activeCards.forEach((card) => {
+      const phase = getUserLearningPhase(card, state.userProfile);
+      card.memoryState.L_phase = phase;
+      state.session.heap.push({
+        priority: computeModePriority(card, state.session.learningRoute, state.userProfile, nowMs),
+        card
+      });
+    });
+  }
+
   function isFocusedBlockComplete() {
-    if (state.session.learningMode !== "focused-block" || !state.session.focusedBlockKeys?.size) return false;
+    if (state.session.learningMode !== "focused_block" || !state.session.focusedBlockKeys?.size) return false;
     const blockCards = [
       ...state.flashcards,
       ...(state.session.heap?.items || []).map((item) => item.card)
@@ -1547,19 +1995,14 @@ export async function initMemoryTool(deps, context = {}) {
     if (state.currentMode !== "quote-learning" && state.currentMode !== "analysis-learning" && state.currentMode !== "blurt") return;
     if (!state.session.heap) return;
     if (!Array.isArray(state.session.surprisePool) || state.session.surprisePool.length === 0) return;
-    const injectionRate = isFocusedBlockComplete() ? 1 : (state.session.learningMode === "focused-block" ? 0.15 : 0.08);
-    if (Math.random() > injectionRate) return;
+    if (!shouldInterleaveOldCard(state.session.learningRoute, state.stats)) return;
 
     const idx = Math.floor(Math.random() * state.session.surprisePool.length);
     const candidate = state.session.surprisePool.splice(idx, 1)[0];
     if (candidate?.review && candidate?.memoryState) {
       if (state.flashcards.some((c) => getCardQueueKey(c) === getCardQueueKey(candidate)) || state.session.heap.hasCard(candidate)) return;
       const phase = getUserLearningPhase(candidate, state.userProfile);
-      const quotePriority = candidate.memoryKind === "quote" ? (candidate.record?.priority ?? null) : null;
-      const priority = computePriority(candidate.memoryState, Date.now(), quotePriority, {
-        phase,
-        heapSize: (state.session.heap?.size?.() || 0) + state.session.surprisePool.length
-      }) + 0.7;
+      const priority = computeModePriority(candidate, state.session.learningRoute, state.userProfile, Date.now()) + 0.7;
       state.session.heap.push({ priority, card: candidate });
       return;
     }
@@ -1618,8 +2061,7 @@ export async function initMemoryTool(deps, context = {}) {
     }
 
     if (!card) return;
-    const quotePriority = card.memoryKind === "quote" ? (card.record?.priority ?? null) : null;
-    const priority = computePriority(card.memoryState, nowMs, quotePriority) + 0.7;
+    const priority = computeModePriority(card, state.session.learningRoute, state.userProfile, nowMs) + 0.7;
     state.session.heap.push({ priority, card });
   }
 
@@ -2502,6 +2944,20 @@ export async function initMemoryTool(deps, context = {}) {
       }
     });
 
+    const route = state.session.learningRoute;
+    const routeSummary = route ? `
+      <div class="heap-section" style="margin-bottom: 12px;">
+        <div class="heap-section-title">Learning Router</div>
+        <div class="heap-item-meta" style="padding:6px 0 0;">
+          <span title="Mode">${escapeHtml(route.mode)}</span>
+          <span title="Start type">${escapeHtml(route.startType)}</span>
+          <span title="Heap construction">${escapeHtml(route.heapConstruction)}</span>
+          <span title="Sampling">${escapeHtml(route.samplingStrategy)}</span>
+          <span title="Sampled source">${state.session.systemState?.sampleSize || 0}/${state.session.systemState?.heapSize || 0} structural sample</span>
+        </div>
+      </div>
+    ` : "";
+
     const prioritySummary = totalQuotes > 0 ? `
       <div class="heap-section" style="margin-bottom: 12px;">
         <div class="heap-section-title">Priority Distribution</div>
@@ -2528,6 +2984,7 @@ export async function initMemoryTool(deps, context = {}) {
         <div class="stat-item"><span class="stat-label">Best</span><span class="stat-value">${state.stats.bestStreak}</span></div>
         <div class="stat-item"><span class="stat-label">Accuracy</span><span class="stat-value">${state.stats.totalStudied > 0 ? Math.round((state.stats.correctAnswers / state.stats.totalStudied) * 100) : 0}%</span></div>
       </div>
+      ${routeSummary}
       ${prioritySummary}
       <div class="heap-section">
         <div class="heap-section-title">Heap Queue (${heapItems.length} cards)</div>
@@ -2540,6 +2997,7 @@ export async function initMemoryTool(deps, context = {}) {
 
   let _typewriterTimer = null;
   let _lastThoughtMsg = "";
+  
 
   function generateSystemThought(manualGrade = null) {
     const lastGrade = manualGrade || state.session.lastGradeReaction;
@@ -2555,7 +3013,8 @@ export async function initMemoryTool(deps, context = {}) {
     const D = ms.D ?? 1;
     const interval = ms.interval || 0;
     const mode = state.currentMode;
-    const learningMode = state.session.learningMode || "global-srs";
+    const route = state.session.learningRoute;
+    const learningMode = state.session.learningMode || "global_srs";
     const phase = ms.L_phase || getUserLearningPhase(card, state.userProfile);
     const isNew = reviewCount === 0;
 
@@ -2612,8 +3071,19 @@ export async function initMemoryTool(deps, context = {}) {
     } else if (heapSize > 10) {
       pool.push(`${heapSize} items queued. Prioritising highest-urgency cards first.`);
     }
-    if (learningMode === "focused-block") {
+    if (route?.startType === "cold_start") {
+      pool.push("Cold Start / Cold Import detected. Router is sampling structure before committing to deeper review.");
+    } else if (route?.startType === "warm_start") {
+      pool.push("Warm Start / Warm Knowledge detected. Router is looking for weak gaps and decaying stable cards.");
+    }
+    if (learningMode === "focused_block") {
       pool.push("Focused block mode active. Reinforcing a related subset while occasionally interleaving older cards.");
+    } else if (learningMode === "rapid_sweep") {
+      pool.push("Rapid sweep active. This is a bounded structural pass, not a full first sweep.");
+    } else if (learningMode === "repair_cycle") {
+      pool.push("Repair cycle active. Previously stable or fragile items are being pulled back into focus.");
+    } else if (learningMode === "global_srs") {
+      pool.push("Global SRS active. The deck is small or mature enough for normal heap scheduling.");
     }
     if (state.stats.streak >= 5) {
       pool.push(`${state.stats.streak}-card streak. Recall quality is strong this session.`);
@@ -2655,7 +3125,7 @@ export async function initMemoryTool(deps, context = {}) {
     return msg;
   }
 
-  function typewriteThought(text) {
+    function typewriteThought(text) {
     if (!systemThinkingText) return;
     clearTimeout(_typewriterTimer);
     systemThinkingText.innerHTML = '<span class="cursor"></span>';
@@ -2678,7 +3148,7 @@ export async function initMemoryTool(deps, context = {}) {
     tick();
   }
 
-  function updateSystemThought(lastGrade = null) {
+    function updateSystemThought(lastGrade = null) {
     const thought = generateSystemThought(lastGrade);
     typewriteThought(thought);
 

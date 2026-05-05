@@ -1,8 +1,8 @@
 # NeuroNet Developer Specification
 
-**Version**: 6.0  
+**Version**: 6.1  
 **Date**: May 5, 2026  
-**Status**: Production-ready with SSS (Semantic Search System) anchoring, complete tool implementations (Analysis v2, Memory SuperProgram, Mindmap), bidirectional quote/analysis linking, layer hierarchy navigation, advanced source editor, full feature parity across codebase, advanced lite deckbuilder with layer categorising and priority heap ordering, a specific study filter system, and an adaptive learning layer that personalises memory scheduling per user
+**Status**: Production-ready with SSS (Semantic Search System) anchoring, complete tool implementations (Analysis v2, Memory SuperProgram, Mindmap), bidirectional quote/analysis linking, layer hierarchy navigation, advanced source editor, full feature parity across codebase, advanced lite deckbuilder with layer categorising and priority heap ordering, a specific study filter system, an adaptive learning layer that personalises memory scheduling per user, and a Learning Router that selects cold/warm learning strategy before heap construction
 
 ---
 
@@ -1403,29 +1403,140 @@ intervalScale = 1 / (heapFactor * heapSensitivity)
 
 This keeps small decks responsive while making large decks more conservative.
 
-#### Global SRS vs Focused Block Mode
+#### Learning Router Layer
 
-The scheduler can choose between two modes:
+Version 6.1 adds a Learning Router above the SuperProgram scheduler. The router operates on the data layer and available metadata before the active heap is built.
 
-| Mode | Purpose |
-|------|---------|
-| Global SRS | Default mode; optimise across the full heap |
-| Focused Block | Select a local cluster for repeated reinforcement |
+The memory stack is now:
 
-Focused Block Mode activates when the heap is large or many cards are still in early phases. Blocks are selected using:
-
-- Subject/layer grouping
-- Tag clustering
-- Difficulty similarity
-- Phase similarity
-
-Even in block mode, old cards are occasionally injected:
-
-```js
-if (Math.random() < 0.15) injectRandomPastCard()
+```text
+L4: Learning Router          -> chooses strategy and scope
+L3: Scheduler                -> orders active cards inside the chosen scope
+L2: Memory Dynamics          -> updates S, D, U, interval, nextReview
+L1: Data Layer               -> cards, quotes, analyses, cues, layers, tags
 ```
 
-This prevents the system from mistaking short-term block fluency for durable mastery.
+The key rule is:
+
+> Route the learning scope first, then build only the active heap required for that route.
+
+This removes the old assumption that every new heap must be fully traversed before learning becomes useful.
+
+#### Cold Start / Cold Import
+
+Used when a user is learning from scratch or has imported a large amount of unfamiliar material.
+
+Signals:
+
+- High new-card ratio
+- High uncertainty
+- Low stability
+- Weak or missing recall history
+- Large unencoded content regions
+
+Behaviour:
+
+- Avoid mandatory full heap traversal
+- Run bounded structural sampling
+- Identify clusters, layers, tags, priority bands, and weak areas
+- Move into `rapid_sweep` or `focused_block`
+
+#### Warm Start / Warm Knowledge
+
+Used when the user already knows much of the material and needs consolidation.
+
+Signals:
+
+- Prior review history exists
+- Some cards have stability/uncertainty history
+- Quote/analysis graph is already structured
+- Existing analysis and quote networks are available
+
+Behaviour:
+
+- Avoid treating everything as unknown
+- Prioritise fragile clusters, weak gaps, and decaying mastered cards
+- Use `repair_cycle` and focused reinforcement
+- Allow fast consolidation rather than a blanket first pass
+
+#### Route Object
+
+The router produces:
+
+```js
+route = {
+  mode: "global_srs" | "focused_block" | "rapid_sweep" | "repair_cycle",
+  startType: "cold_start" | "warm_start",
+  scope: {
+    subjects: [],
+    layers: [],
+    tags: [],
+    clusters: [],
+    priorityBands: []
+  },
+  heapConstruction: "global" | "local" | "clustered" | "sampled",
+  samplingStrategy: "priority" | "stratified" | "uncertainty" | "mixed",
+  aggressiveness: 0.0,
+  interleaveRate: 0.0
+}
+```
+
+#### Structural Ignition
+
+Before committing to a deep learning mode, the router may inspect a bounded structural sample. This is not mastery training and must not equal a full pass on large heaps.
+
+The sample is biased by:
+
+- Priority
+- Tags
+- Layers
+- Uncertainty
+- Subject coverage
+- Cluster diversity
+
+It builds a lightweight state vector:
+
+```js
+systemState = {
+  heapSize,
+  sampleSize,
+  clusterMap,
+  difficultyDistribution,
+  uncertaintyMap,
+  layerMap,
+  tagMap,
+  phaseDistribution,
+  priorityDistribution,
+  newCardRatio,
+  masteryRatio,
+  avgUncertainty,
+  instabilityScore,
+  recentFailureRate,
+  clusterEntropy,
+  layerDensity,
+  tagDensity
+}
+```
+
+#### Learning Modes
+
+| Mode | Start Context | Heap Construction | Purpose |
+|------|---------------|-------------------|---------|
+| `global_srs` | Small/mature deck | `global` | Normal SuperProgram scheduling |
+| `focused_block` | Many new/unstable cards | `local` | Drill a small related region until it stabilises |
+| `rapid_sweep` | Cold import / large unknown graph | `sampled` | Quickly classify structure without a full sweep |
+| `repair_cycle` | Warm knowledge with decay | `clustered` | Pull fragile mastered cards and weak returns back into focus |
+
+Focused Block Mode selects local clusters using:
+
+- Subject and layer grouping
+- Tag clustering
+- Quote priority
+- Difficulty/uncertainty similarity
+- Card phase similarity
+- Quote/analysis graph density
+
+Even in local modes, old or out-of-scope cards are occasionally interleaved through `interleaveRate` so the system does not mistake local fluency for durable mastery.
 
 #### Block Completion
 
@@ -1440,24 +1551,74 @@ Once a block approaches completion, interleaving pressure increases so the learn
 
 #### Implementation Hooks
 
-The adaptive layer is implemented through the following hooks in `memoryTool.js`:
+The adaptive/router layer is implemented through the following hooks in `memoryTool.js`:
 
 ```js
 getUserLearningPhase(card)
 getAdaptiveWeights(userProfile, phase, heapSize)
-selectLearningMode(cards, userProfile)
+deriveStartType(cards, sessionHistory)
+structuralIgnitionSample(cards, userProfile)
+buildLearningSystemState(cards, userProfile)
+selectLearningRoute(state, userProfile)
+buildRouteScope(route, metadata)
+buildActiveHeap(route, cards)
+computeModePriority(card, route, userProfile)
+shouldInterleaveOldCard(route, sessionStats)
 updateUserLearningModel(userProfile, outcome)
 enqueueLearningCards(cards, nowMs)
+rerouteRemainingLearningScope()
 isFocusedBlockComplete()
 ```
 
 These hooks integrate with:
 
 - `updateCardMemoryState()` - applies adaptive weights to card state
-- `computePriority()` - adds phase and heap-size context to heap priority
-- `generateSystemThought()` - explains learning phase and focused-block behaviour in the UI
+- `computePriority()` - provides base SuperProgram urgency
+- `computeModePriority()` - adjusts urgency for the selected route
+- `generateSystemThought()` - explains learning phase, start type, route mode, and repair/sweep/focused behaviour in the UI
+- `renderStats()` - exposes route mode, start type, heap construction, sampling strategy, and bounded sample size
 
-### 11.12 Conceptual Outcome
+### 11.12 Full Learning Loop
+
+Each review session now follows this order:
+
+1. Build candidate cards from quotes, analyses, or cues.
+2. Apply existing middle-UI filters for priority, tags, and layers.
+3. Run structural ignition if the candidate set is large.
+4. Derive `cold_start` or `warm_start`.
+5. Select a route and scope.
+6. Build a global, local, clustered, or sampled active heap.
+7. Scheduler pops the next card from that active heap.
+8. User grades the card.
+9. SuperProgram updates `S`, `D`, `U`, interval, and `nextReview`.
+10. User profile and card phase data are updated.
+11. Reviewed cards are reinserted or held out according to the current mode.
+12. The router may re-route remaining cards when the current local/sampled heap is exhausted.
+
+### 11.13 Behaviour Guarantees
+
+Cold Start / Cold Import must:
+
+- Avoid full heap traversal
+- Use bounded structural sampling
+- Quickly route into focused learning or rapid sweep
+- Minimise wasted first-pass work
+
+Warm Start / Warm Knowledge must:
+
+- Prioritise weak gaps and unstable cards
+- Preserve what is already learned
+- Avoid treating the whole heap as unknown
+- Use repair cycles and focused blocks where useful
+
+General behaviour must:
+
+- Use layers, tags, priority, and quote/analysis graph structure
+- Respect the existing middle UI filter layer
+- Stay local-first
+- Keep the SuperProgram memory dynamics intact
+
+### 11.14 Conceptual Outcome
 
 This system behaves like a unified model of:
 
@@ -1467,8 +1628,11 @@ This system behaves like a unified model of:
 - Adaptive difficulty tutoring
 - Personalised learning curve estimation
 - MoE-inspired focused reinforcement blocks
+- Learning-router scope selection
+- Rapid structural sampling
+- Repair-cycle consolidation
 
-### 11.13 Key Insight
+### 11.15 Key Insight
 
 Memory is not stored as correctness.
 
@@ -1479,6 +1643,10 @@ It is stored as:
 Version 6.0 extends this:
 
 > NeuroNet does not only adapt cards to memory. It adapts the structure of learning to the specific human using it.
+
+Version 6.1 extends this again:
+
+> NeuroNet should not ask the entire heap what to do. It should first decide what kind of learning problem this moment actually is.
 
 ---
 
