@@ -993,29 +993,54 @@ export async function initMemoryTool(deps, context = {}) {
   class MaxHeap {
     constructor() {
       this.items = [];
+      this.indexByKey = new Map();
     }
     size() {
       return this.items.length;
     }
     push(value) {
+      const key = getCardQueueKey(value?.card);
+      if (key && this.indexByKey.has(key)) {
+        const existingIndex = this.indexByKey.get(key);
+        this.items[existingIndex] = { ...value, key };
+        this.#bubbleUp(existingIndex);
+        this.#bubbleDown(this.indexByKey.get(key));
+        return;
+      }
+      if (key) {
+        value = { ...value, key };
+      }
       this.items.push(value);
+      if (key) {
+        this.indexByKey.set(key, this.items.length - 1);
+      }
       this.#bubbleUp(this.items.length - 1);
     }
     pop() {
       if (this.items.length === 0) return null;
       const top = this.items[0];
       const last = this.items.pop();
+      if (top?.key) {
+        this.indexByKey.delete(top.key);
+      }
       if (this.items.length > 0 && last) {
         this.items[0] = last;
+        if (last?.key) {
+          this.indexByKey.set(last.key, 0);
+        }
         this.#bubbleDown(0);
       }
       return top;
+    }
+    hasCard(card) {
+      const key = getCardQueueKey(card);
+      return !!key && this.indexByKey.has(key);
     }
     #bubbleUp(index) {
       while (index > 0) {
         const parent = Math.floor((index - 1) / 2);
         if ((this.items[parent]?.priority ?? 0) >= (this.items[index]?.priority ?? 0)) return;
-        [this.items[parent], this.items[index]] = [this.items[index], this.items[parent]];
+        this.#swap(parent, index);
         index = parent;
       }
     }
@@ -1028,10 +1053,37 @@ export async function initMemoryTool(deps, context = {}) {
         if (left < length && (this.items[left]?.priority ?? 0) > (this.items[largest]?.priority ?? 0)) largest = left;
         if (right < length && (this.items[right]?.priority ?? 0) > (this.items[largest]?.priority ?? 0)) largest = right;
         if (largest === index) return;
-        [this.items[index], this.items[largest]] = [this.items[largest], this.items[index]];
+        this.#swap(index, largest);
         index = largest;
       }
     }
+    #swap(a, b) {
+      [this.items[a], this.items[b]] = [this.items[b], this.items[a]];
+      if (this.items[a]?.key) {
+        this.indexByKey.set(this.items[a].key, a);
+      }
+      if (this.items[b]?.key) {
+        this.indexByKey.set(this.items[b].key, b);
+      }
+    }
+  }
+
+  function getCardQueueKey(card) {
+    if (!card) return null;
+    if (card.type === "blurt") {
+      const targetKind = card.targetKind || card.back?.targetKind || "unknown";
+      const targetId = card.targetRecord?.id || card.back?.targetRecord?.id;
+      return targetId ? `blurt:${targetKind}:${targetId}` : (card.id ? `blurt-cue:${card.id}` : null);
+    }
+    if (card.memoryKind === "quote" || card.type === "quote-learning") {
+      const quoteId = card.record?.id || card.id;
+      return quoteId ? `quote:${quoteId}` : null;
+    }
+    if (card.memoryKind === "analysis" || card.type === "analysis-learning") {
+      const analysisId = card.record?.id || card.id;
+      return analysisId ? `analysis:${analysisId}` : null;
+    }
+    return card.id ? `${card.type || card.memoryKind || "card"}:${card.id}` : null;
   }
 
   function clampNumber(value, min, max) {
