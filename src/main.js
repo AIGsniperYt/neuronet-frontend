@@ -1,4 +1,4 @@
-import { cleanupOldDemoDatabases, initDB, addNode, addNodes, getAllNodes, getNode, deleteNode, addQuote, addQuotes, getAllQuotes, getQuote, deleteQuote, clearNodes, clearQuotes, clearCues, addCues, getQuotesForSubject, getAnalysisNodesForSubject, getDueQuotesForSubject, getDueAnalysisNodesForSubject, getQuotesReferencedByAnalysis, getAnalysesReferencingQuote, getPinnedTools, pinTool, unpinTool, isToolPinned, setPinnedToolsOrder, getSubjects, addSubject, deleteSubject, renameSubject, addCue, getAllCues, getCue, deleteCue, getCuesForQuote, getCuesForAnalysis, getCuesForSubject, updateCueLinks, getAllTags, addTag, deleteTag, findExistingQuote, findExistingQuoteByText, linkAnalysisToQuote, unlinkAnalysisFromQuote } from "./db.js";
+import { cleanupOldDemoDatabases, initDB, addNode, addNodes, getAllNodes, getNode, deleteNode, addQuote, addQuotes, getAllQuotes, getQuote, deleteQuote, clearNodes, clearQuotes, clearCues, addCues, getQuotesForSubject, getAnalysisNodesForSubject, getDueQuotesForSubject, getDueAnalysisNodesForSubject, getQuotesReferencedByAnalysis, getAnalysesReferencingQuote, getPinnedTools, pinTool, unpinTool, isToolPinned, setPinnedToolsOrder, getSubjects, addSubject, deleteSubject, renameSubject, addCue, getAllCues, getCue, deleteCue, getCuesForQuote, getCuesForAnalysis, getCuesForSubject, updateCueLinks, getAllTags, addTag, deleteTag, findExistingQuote, findExistingQuoteByText, linkAnalysisToQuote, unlinkAnalysisFromQuote, getFormattedQuote, resolveQuoteInSource } from "./db.js";
 import { syncLocalWithCloud, syncToCloud, deleteCloudNode, deleteCloudQuote, deleteCloudCue, fetchCloudNodes, fetchCloudQuotes, fetchCloudCues } from "./sync.js";
 import { initAnalysisToolV2 } from "./tools/analysisTool.js";
 import { initMemoryTool } from "./tools/memoryTool.js";
@@ -61,7 +61,9 @@ const tools = {
       findExistingQuote,
       findExistingQuoteByText,
       linkAnalysisToQuote,
-      unlinkAnalysisFromQuote
+      unlinkAnalysisFromQuote,
+      getFormattedQuote,
+      resolveQuoteInSource
     }, context)
   },
 
@@ -91,6 +93,8 @@ const tools = {
       getCue,
       getQuote,
       getSubjects,
+      getFormattedQuote,
+      resolveQuoteInSource,
       escapeHtml
     }, context)
   },

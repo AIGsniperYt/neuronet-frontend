@@ -26,7 +26,9 @@ export async function initAnalysisToolV2(deps, context = {}) {
     findExistingQuote,
     findExistingQuoteByText,
     linkAnalysisToQuote,
-    unlinkAnalysisFromQuote
+    unlinkAnalysisFromQuote,
+    getFormattedQuote,
+    resolveQuoteInSource
   } = deps;
 
   let textMap = null;
@@ -164,42 +166,64 @@ function enforceUserSelect() {
 
   function convertGoogleDocsHtml(html) {
     let result = html;
+    // Remove Google Docs specific spans (Apple-style-span)
     result = result.replace(/<span[^>]*class="[^"]*Apple-style-span[^"]*"[^>]*>(.*?)<\/span>/gi, "$1");
+    // Remove font-family style spans
     result = result.replace(/<span[^>]*style="[^"]*font-family:[^;]*;?[^"]*">(.*?)<\/span>/gi, "$1");
+    // Remove any remaining spans but keep content
     result = result.replace(/<span[^>]*>(.*?)<\/span>/gi, "$1");
+    // Remove font tags
     result = result.replace(/<font[^>]*>(.*?)<\/font>/gi, "$1");
+    // Remove Office paragraph tags
     result = result.replace(/<o:p>(.*?)<\/o:p>/gi, "$1");
     result = result.replace(/<bdo[^>]*>(.*?)<\/bdo>/gi, "$1");
+    // Remove any remaining span open tags without attributes
     result = result.replace(/<span[^>]+>/gi, "");
     return result;
   }
 
+
   function convertWordHtml(html) {
     let result = html;
-    result = result.replace(/<xml[^>]*>.*?<\/xml>/gi, "");
+    // Remove XML declaration and processing instructions
+    result = result.replace(/<\?xml[^>]*\?>.*?<\?xml[^>]*\?>/gi, "");
+    result = result.replace(/<\?xml[^>]*\?>/gi, "");
+    // Remove Word namespace tags (w:, o:, v:, st1:)
     result = result.replace(/<w:[^>]+>.*?<\/w:[^>]+>/gi, "");
+    result = result.replace(/<w:[^>]+\/>/gi, "");
     result = result.replace(/<o:[^>]+>.*?<\/o:[^>]+>/gi, "");
+    result = result.replace(/<o:[^>]+\/>/gi, "");
     result = result.replace(/<v:[^>]+>.*?<\/v:[^>]+>/gi, "");
+    result = result.replace(/<v:[^>]+\/>/gi, "");
     result = result.replace(/<st1:[^>]+>.*?<\/st1:[^>]+>/gi, "");
+    result = result.replace(/<st1:[^>]+\/>/gi, "");
+    result = result.replace(/<st1:[^>]+>/gi, "");
     result = result.replace(/class="Mso[^"]*"/gi, "");
     result = result.replace(/style="[^"]*mso-[^"]*"/gi, "");
-    result = result.replace(/<!--\[if[^>]*>-->/gi, "");
-    result = result.replace(/<!--<!\[endif\]-->/gi, "");
     return result;
   }
 
   function convertMarkdown(text) {
-    let result = escapeHtml(text);
+    let result = escapeHtml(text || "");
+    // Bold: ***text*** or **text**
+    result = result.replace(/\*\*\*([^*]+)\*\*\*/g, "<strong><em>$1</em></strong>");
     result = result.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    // Italic: *text*
     result = result.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+    // Bold: __text__
     result = result.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+    // Italic: _text_
     result = result.replace(/_([^_]+)_/g, "<em>$1</em>");
+    // Headers
     result = result.replace(/^### (.+)$/gm, "<h3>$1</h3>");
     result = result.replace(/^## (.+)$/gm, "<h2>$1</h2>");
     result = result.replace(/^# (.+)$/gm, "<h1>$1</h1>");
+    // Blockquote
     result = result.replace(/^> (.+)$/gm, "<blockquote>$1</blockquote>");
+    // Unordered list
     result = result.replace(/^- (.+)$/gm, "<li>$1</li>");
     result = result.replace(/^\d+\. (.+)$/gm, "<li>$1</li>");
+    // Newlines
     result = result.replace(/\n/g, "<br>");
     return result;
   }
@@ -555,30 +579,28 @@ function htmlToPlainText(html) {
   }
 
   function formatQuoteForDisplay(textOrRef, fallbackText = "") {
-    let sourceId = null;
-    let startPos = null;
-    let endPos = null;
-    let plainQuoteText = "";
-    
     if (typeof textOrRef === "object" && textOrRef !== null) {
-      sourceId = textOrRef.sourceId || null;
-      startPos = Number(textOrRef.start);
-      endPos = Number(textOrRef.end);
-      plainQuoteText = textOrRef.quote || "";
-    } else {
-      plainQuoteText = textOrRef || fallbackText || "";
-    }
-    
-    // Try source extraction
-    if (sourceId && !isNaN(startPos) && !isNaN(endPos)) {
-      const source = getSourceById(sourceId);
-      if (source && source.contentHtml) {
-        const formatted = getFormattedFromSource(source, startPos, endPos);
-        if (formatted) return formatted;
+      const sourceId = textOrRef.sourceId || textOrRef.link?.sourceId;
+      if (sourceId) {
+        const source = getSourceById(sourceId);
+        if (source) {
+          const fakeQuoteNode = {
+             quote: textOrRef.quote || fallbackText,
+             link: textOrRef.link || { 
+               start: textOrRef.start, 
+               end: textOrRef.end, 
+               prefix: textOrRef.prefix,
+               suffix: textOrRef.suffix,
+               context: textOrRef.context || textOrRef.link?.context 
+             }
+          };
+          return getFormattedQuote(fakeQuoteNode, source);
+        }
       }
     }
     
-    return plainTextToHtml(plainQuoteText);
+    const plainQuoteText = typeof textOrRef === "string" ? textOrRef : (textOrRef?.quote || fallbackText || "");
+    return escapeHtml(plainQuoteText).replace(/\n/g, "<br>");
   }
   
   function getFormattedFromSource(source, start, end) {
@@ -1417,10 +1439,15 @@ function htmlToPlainText(html) {
     const end = start + quote.length;
     const sourceText = normalizeSource(source).contentText;
 
+    const prefix = sourceText.substring(Math.max(0, start - 20), start);
+    const suffix = sourceText.substring(end, Math.min(sourceText.length, end + 20));
+
     return {
       start: Math.min(start, sourceText.length),
       end: Math.min(end, sourceText.length),
       quote,
+      prefix,
+      suffix,
       quoteHtml: rawQuoteHtml,
       sourceId: source.id,
       range
@@ -3981,7 +4008,7 @@ return document.execCommand(command, false, null);
         const refTexts = (node.quoteRefs || [])
           .map((ref) => ref.quote || state.quotes.find((q) => q.id === ref.quoteId)?.quote || "")
           .filter(Boolean);
-        const quoteText = refTexts.length ? refTexts.join("\n\n") : node.quote || "";
+        const quoteText = refTexts.length ? refTexts.join("nn") : node.quote || "";
         navigator.clipboard.writeText(quoteText).then(() => {
           // Visual feedback - briefly change button appearance
           const button = event.target.closest("button[data-action='copy-node']");

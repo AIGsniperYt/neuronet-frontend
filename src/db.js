@@ -1147,3 +1147,209 @@ export function deleteTag(id) {
     tx.onerror = () => reject(tx.error);
   });
 }
+
+// ========== SSS (Semantic Search System) ENGINE ==========
+
+function escapeHtmlForDB(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
+ * Resolves the precise start and end indices of a quote in a source text.
+ * Falls back to semantic anchoring if the original indices are invalid.
+ */
+export function resolveQuoteInSource(quoteNode, sourceNode) {
+  if (!quoteNode || !sourceNode) return null;
+  
+  const sourceText = sourceNode.contentText || ""; 
+  const quoteText = quoteNode.quote || "";
+  const originalStart = Number(quoteNode.link?.start ?? -1);
+  const originalEnd = Number(quoteNode.link?.end ?? -1);
+  
+  // Support both nested context and direct prefix/suffix
+  const prefix = quoteNode.link?.prefix || quoteNode.link?.context?.prefix || "";
+  const suffix = quoteNode.link?.suffix || quoteNode.link?.context?.suffix || "";
+  
+  if (!quoteText) return null;
+
+  const matchesExactly = (text, start, end) => {
+    if (start >= 0 && end <= text.length && end > start) {
+      return text.substring(start, end).trim() === quoteText.trim();
+    }
+    return false;
+  };
+
+  // 1. Try exact original position in sourceText
+  if (matchesExactly(sourceText, originalStart, originalEnd)) {
+    return { start: originalStart, end: originalEnd };
+  }
+
+  // 2. Semantic Search using prefix and suffix in sourceText
+  if (prefix || suffix) {
+    const searchString = `${prefix}${quoteText}${suffix}`;
+    let matchIdx = sourceText.indexOf(searchString);
+    
+    if (matchIdx !== -1) {
+      const newStart = matchIdx + prefix.length;
+      return { start: newStart, end: newStart + quoteText.length };
+    }
+  } else if (matchesExactly(sourceText, originalStart, originalEnd)) {
+     return { start: originalStart, end: originalEnd };
+  }
+
+  // 3. Fallback to basic text search (find closest match to original start)
+  let bestStart = -1;
+  let minDiff = Infinity;
+  let currentIdx = sourceText.indexOf(quoteText);
+  
+  while (currentIdx !== -1) {
+    const diff = Math.abs(currentIdx - Math.max(0, originalStart));
+    if (diff < minDiff) {
+      minDiff = diff;
+      bestStart = currentIdx;
+    }
+    currentIdx = sourceText.indexOf(quoteText, currentIdx + 1);
+  }
+
+  if (bestStart !== -1) {
+    return { start: bestStart, end: bestStart + quoteText.length };
+  }
+
+  return null; 
+}
+
+/**
+ * Extracts rich HTML formatting from a source document using SSS.
+ * Falls back to correctly formatted plain text with <br> tags.
+ */
+export function getFormattedQuote(quoteNode, sourceNode) {
+  const quoteText = quoteNode.quote || "";
+  
+  const formatFallback = (text) => {
+    return escapeHtmlForDB(text).replace(/\n/g, "<br>");
+  };
+
+  if (!sourceNode || !sourceNode.contentHtml) {
+    return formatFallback(quoteText);
+  }
+
+  const temp = document.createElement("div");
+  temp.innerHTML = sourceNode.contentHtml;
+  const visualText = temp.textContent || "";
+  
+  const prefix = quoteNode.link?.prefix || quoteNode.link?.context?.prefix || "";
+  const suffix = quoteNode.link?.suffix || quoteNode.link?.context?.suffix || "";
+
+  // Helper to find offsets in visual text (textContent)
+  const resolveVisualOffsets = () => {
+    // 1. Try fingerprint
+    if (prefix || suffix) {
+      const searchString = `${prefix}${quoteText}${suffix}`;
+      const idx = visualText.indexOf(searchString);
+      if (idx !== -1) {
+        return { start: idx + prefix.length, end: idx + prefix.length + quoteText.length };
+      }
+    }
+    // 2. Try raw quote
+    const rawIdx = visualText.indexOf(quoteText);
+    if (rawIdx !== -1) {
+       return { start: rawIdx, end: rawIdx + quoteText.length };
+    }
+    // 3. Fallback to DB offsets (risky if contentText mismatch, but last resort)
+    const dbResolved = resolveQuoteInSource(quoteNode, sourceNode);
+    return dbResolved;
+  };
+
+  const resolved = resolveVisualOffsets();
+  
+  if (!resolved) {
+    console.warn("[SSS] Could not resolve quote in visual text:", quoteText);
+    return formatFallback(quoteText);
+  }
+
+  let { start, end } = resolved;
+  
+  // CRITICAL: Trim leading/trailing whitespace from indices to avoid gaps in cards
+  while (start < end && /\s/.test(visualText[start])) start++;
+  while (end > start && /\s/.test(visualText[end - 1])) end--;
+  
+  // Extract with basic textContent walker (standard indexing)
+  let currentPos = 0;
+  const parts = [];
+  let lastNodeWasBlock = false;
+  const blockTags = new Set(["P", "DIV", "BLOCKQUOTE", "H1", "H2", "H3", "UL", "OL", "LI", "BR"]);
+
+  function walk(node) {
+    if (currentPos >= end) return;
+
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.nodeValue || "";
+      const nodeStart = currentPos;
+      const nodeEnd = currentPos + text.length;
+
+      if (nodeEnd > start && nodeStart < end) {
+        // If we just entered a block and have previous content, add a break
+        if (lastNodeWasBlock && parts.length > 0) {
+           parts.push("<br>");
+           lastNodeWasBlock = false;
+        }
+
+        const sliceStart = Math.max(0, start - nodeStart);
+        const sliceEnd = Math.min(text.length, end - nodeStart);
+        const slice = text.slice(sliceStart, sliceEnd);
+        
+        let parent = node.parentElement;
+        let hasBold = false;
+        let hasItalic = false;
+        while (parent && parent !== temp) {
+          const tag = parent.tagName?.toUpperCase();
+          if (tag === "B" || tag === "STRONG") hasBold = true;
+          if (tag === "I" || tag === "EM") hasItalic = true;
+          parent = parent.parentElement;
+        }
+
+        let formatted = escapeHtmlForDB(slice);
+        if (hasBold) formatted = `<strong>${formatted}</strong>`;
+        if (hasItalic) formatted = `<em>${formatted}</em>`;
+        parts.push(formatted);
+      }
+      currentPos = nodeEnd;
+      lastNodeWasBlock = false;
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      const tag = node.tagName.toUpperCase();
+      const isBlock = blockTags.has(tag);
+      
+      if (isBlock && currentPos >= start && currentPos < end && parts.length > 0) {
+        lastNodeWasBlock = true;
+      }
+
+      for (const child of node.childNodes) {
+        walk(child);
+      }
+      
+      // Also check after children for block closure if it helps
+      if (isBlock && currentPos >= start && currentPos < end) {
+        lastNodeWasBlock = true;
+      }
+    }
+  }
+
+  walk(temp);
+  
+  // Join and trim leading/trailing breaks/whitespace
+  let result = parts.join("");
+  
+  // Clean up: remove leading/trailing <br> tags and excess whitespace
+  result = result.replace(/^(<br>|\s)+/gi, "").replace(/(<br>|\s)+$/gi, "");
+  
+  if (!result.trim()) {
+     console.debug("[SSS] Extraction returned empty, falling back to plain text.");
+     return formatFallback(quoteText);
+  }
+  return result;
+}

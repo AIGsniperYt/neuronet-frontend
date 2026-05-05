@@ -23,6 +23,8 @@ export async function initMemoryTool(deps, context = {}) {
     getCue,
     getQuote,
     getSubjects,
+    getFormattedQuote,
+    resolveQuoteInSource,
     escapeHtml
   } = deps;
 
@@ -91,9 +93,10 @@ export async function initMemoryTool(deps, context = {}) {
   let nextToDeckBtn, addNewCardBtn, backToDeckInfoBtn, finishDeckBtn;
   let studyNewDeckBtn, backToLaunchpadBtn, flashcardList;
   let deckNameDisplay, cardCountDisplay, builderTitle;
-    // New: layer rows, import, export
+    // New: layer rows, import, export, mass edit
    let importToggleBtn, ankiImportInput, processImportBtn, cancelImportBtn, importFeedback;
    let exportBtn;
+   let massEditBtn, massEditContainer, massEditCards, massEditCancelBtn, massEditSaveBtn;
   // Middle UI elements
   let middleUI, middleHeader, middleBackBtn, middleSubjectName, middleStudyBtn;
   let middleModeSelector, andFilterBtn, orFilterBtn, filterModeHint;
@@ -109,6 +112,8 @@ export async function initMemoryTool(deps, context = {}) {
     isEditingCard: false,
     editingSubject: null,
     deletedCardIds: [], // Track deleted card IDs for editing
+    isMassEditMode: false, // Track if we're in mass edit mode
+    massEditData: null, // Deep copy of cards for mass edit
     layerPillState: {
       selectedLayers: []   // currently selected layer names for the editing card (max 3)
     }
@@ -182,6 +187,13 @@ export async function initMemoryTool(deps, context = {}) {
 
     // Export element
     exportBtn = document.getElementById("exportBtn");
+
+    // Mass Edit elements
+    massEditBtn = document.getElementById("massEditBtn");
+    massEditContainer = document.getElementById("massEditContainer");
+    massEditCards = document.getElementById("massEditCards");
+    massEditCancelBtn = document.getElementById("massEditCancelBtn");
+    massEditSaveBtn = document.getElementById("massEditSaveBtn");
     // Layer row elements
     // (dynamically rendered, accessed via getElementById in render functions)
     // Card count display
@@ -438,6 +450,35 @@ export async function initMemoryTool(deps, context = {}) {
     if (exportBtn) {
       exportBtn.addEventListener("click", () => {
         exportToAnki();
+      });
+    }
+
+    // Mass Edit button
+    if (massEditBtn) {
+      massEditBtn.addEventListener("click", () => {
+        if (deckBuilderState.isMassEditMode) {
+          exitMassEditMode();
+        } else {
+          if (confirm("Switch to mass edit mode? This will change the layout to show all cards with individual forms.")) {
+            enterMassEditMode();
+          }
+        }
+      });
+    }
+
+    // Mass Edit Cancel button
+    if (massEditCancelBtn) {
+      massEditCancelBtn.addEventListener("click", () => {
+        if (confirm("Discard all changes in mass edit mode?")) {
+          exitMassEditMode();
+        }
+      });
+    }
+
+    // Mass Edit Save button
+    if (massEditSaveBtn) {
+      massEditSaveBtn.addEventListener("click", () => {
+        saveAllMassEditChanges();
       });
     }
 
@@ -1788,9 +1829,15 @@ export async function initMemoryTool(deps, context = {}) {
      } else if (front.isAnalysis) {
        flashcardContent.innerHTML = `<div class="analysis-preview">${formatAnalysisForDisplay(front.content || "")}</div>`;
      } else if (front.isQuote) {
-       flashcardContent.innerHTML = `<div class="quote">${escapeHtml(front.content || "")}</div>`;
-       const quoteData = flashcardData.front?.quoteData;
-       if (quoteData && !quoteData.meta?.tags?.includes("custom-deck")) {
+       flashcardContent.innerHTML = `<div class="quote" id="front-quote-container">${getFormattedQuote({ quote: front.content || "" })}</div>`;
+        const quoteData = flashcardData.front?.quoteData;
+        if (quoteData?.link?.sourceId) {
+          getNode(quoteData.link.sourceId).then(source => {
+            const el = document.getElementById("front-quote-container");
+            if (el) el.innerHTML = getFormattedQuote(quoteData, source);
+          });
+        }
+        if (quoteData && !quoteData.meta?.tags?.includes("custom-deck")) {
          flashcardContent.innerHTML += `<div class="quote-meta">From: ${escapeHtml(quoteData.section || "unknown source")}</div>`;
        }
        // Show priority subtly in corner
@@ -1805,7 +1852,13 @@ export async function initMemoryTool(deps, context = {}) {
 // Back content - Only populate if flipped to prevent spoiling the next card during transitions
     if (state.isFlipped) {
       if (back.isQuote) {
-        flashcardBackContent.innerHTML = `<div class="quote">${escapeHtml(back.content || "")}</div>`;
+        flashcardBackContent.innerHTML = `<div class="quote" id="back-quote-container">${getFormattedQuote({ quote: back.content || "" })}</div>`;
+        if (back.quoteData?.link?.sourceId) {
+          getNode(back.quoteData.link.sourceId).then(source => {
+            const el = document.getElementById("back-quote-container");
+            if (el) el.innerHTML = getFormattedQuote(back.quoteData, source);
+          });
+        }
         if (back.quoteData && !back.quoteData.meta?.tags?.includes("custom-deck")) {
           flashcardBackContent.innerHTML += `<div class="quote-meta">From: ${escapeHtml(back.quoteData.section || "unknown source")}</div>`;
         }
@@ -2960,6 +3013,294 @@ export async function initMemoryTool(deps, context = {}) {
     }
   }
 
+  // ========== MASS EDIT MODE ==========
+
+  function enterMassEditMode() {
+    deckBuilderState.isMassEditMode = true;
+    deckBuilderState.massEditData = JSON.parse(JSON.stringify(deckBuilderState.cards)); // Deep copy
+
+    // Toggle UI
+    const deckBuilderBody = document.querySelector(".deck-builder-body");
+    if (deckBuilderBody) {
+      deckBuilderBody.classList.add("mass-edit-mode");
+    }
+
+    // Hide sidebar, hide main area's child elements (header, forms), show mass edit container
+    const mainArea = document.querySelector(".deck-main-area");
+
+    // Hide the header, import view, and card edit form (but NOT the main area itself)
+    if (mainArea) {
+      const header = mainArea.querySelector(".deck-main-header");
+      const importView = mainArea.querySelector("#importView");
+      const cardEditForm = mainArea.querySelector("#cardEditForm");
+      if (header) header.style.display = "none";
+      if (importView) importView.style.display = "none";
+      if (cardEditForm) cardEditForm.style.display = "none";
+    }
+
+    if (massEditContainer) massEditContainer.style.display = "flex";
+
+    // Update button text
+    if (massEditBtn) {
+      massEditBtn.textContent = "Normal Mode";
+      massEditBtn.style.borderColor = "rgba(44,255,179,0.4)";
+      massEditBtn.style.color = "var(--accent)";
+    }
+
+    renderMassEditCards();
+  }
+
+  function exitMassEditMode() {
+    deckBuilderState.isMassEditMode = false;
+    deckBuilderState.massEditData = null;
+
+    // Toggle UI
+    const deckBuilderBody = document.querySelector(".deck-builder-body");
+    if (deckBuilderBody) {
+      deckBuilderBody.classList.remove("mass-edit-mode");
+    }
+
+    // Show sidebar and restore main area's child elements, hide mass edit container
+    const mainArea = document.querySelector(".deck-main-area");
+    if (mainArea) {
+      mainArea.style.display = "";
+      const header = mainArea.querySelector(".deck-main-header");
+      const cardEditForm = mainArea.querySelector("#cardEditForm");
+      if (header) header.style.display = "";
+      if (cardEditForm) cardEditForm.style.display = "";
+    }
+    if (massEditContainer) massEditContainer.style.display = "none";
+
+    // Update button text
+    if (massEditBtn) {
+      massEditBtn.textContent = "Mass Edit";
+      massEditBtn.style.borderColor = "rgba(255,77,77,0.4)";
+      massEditBtn.style.color = "#ff4d4d";
+    }
+
+    renderFlashcardList();
+  }
+
+  function renderMassEditCards() {
+    if (!massEditCards) return;
+
+    massEditCards.innerHTML = "";
+    const cards = deckBuilderState.massEditData || deckBuilderState.cards;
+
+    cards.forEach((card, index) => {
+      const cardDiv = document.createElement("div");
+      cardDiv.className = "mass-edit-card";
+      cardDiv.dataset.index = index;
+
+      const layers = card.layers || [];
+      const priority = card.priority || 3;
+
+      cardDiv.innerHTML = `
+        <div class="mass-edit-card-header">
+          <span class="mass-edit-card-title">Card ${index + 1}</span>
+          <button class="delete-card-btn" data-index="${index}">Delete</button>
+        </div>
+        <div class="form-group">
+          <label>Front (Cue)</label>
+          <textarea class="mass-edit-cue" data-index="${index}" placeholder="Enter the question or prompt...">${escapeHtml(card.cueFront || "")}</textarea>
+        </div>
+        <div class="form-group">
+          <label>Back (Answer)</label>
+          <textarea class="mass-edit-quote" data-index="${index}" placeholder="Enter the answer or explanation...">${escapeHtml(card.quoteBack || "")}</textarea>
+        </div>
+        <div class="form-group">
+          <label>Priority</label>
+          <div class="priority-pills" data-index="${index}">
+            ${[1,2,3,4,5].map(p => {
+              const color = getPriorityColor(p);
+              const isActive = p === priority;
+              return `<button type="button" class="priority-pill ${isActive ? 'active' : ''}" 
+                data-priority="${p}" data-index="${index}"
+                style="color: ${isActive ? color : 'var(--text-muted)'}; border-color: ${isActive ? color : 'rgba(255,255,255,0.15)'};"
+                title="Set priority to ${['Very Low', 'Low', 'Medium', 'High', 'Very High'][p-1]}">${['Very Low', 'Low', 'Medium', 'High', 'Very High'][p-1]}</button>`;
+            }).join("")}
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Layers</label>
+          <div class="layer-controls" data-index="${index}">
+            <div class="layer-row">
+              <span class="layer-row-label">L1</span>
+              <div class="layer-pills-row">${renderMassEditLayerPills(1, index, layers)}</div>
+              <button type="button" class="layer-new-pill" data-level="1" data-index="${index}">+ New</button>
+            </div>
+            <div class="layer-row ${layers[0] ? '' : 'disabled'}">
+              <span class="layer-row-label">L2</span>
+              <div class="layer-pills-row">${renderMassEditLayerPills(2, index, layers)}</div>
+              <button type="button" class="layer-new-pill" data-level="2" data-index="${index}" ${layers[0] ? '' : 'disabled'}>+ New</button>
+            </div>
+            <div class="layer-row ${layers[0] && layers[1] ? '' : 'disabled'}">
+              <span class="layer-row-label">L3</span>
+              <div class="layer-pills-row">${renderMassEditLayerPills(3, index, layers)}</div>
+              <button type="button" class="layer-new-pill" data-level="3" data-index="${index}" ${layers[0] && layers[1] ? 'disabled' : ''}>+ New</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      massEditCards.appendChild(cardDiv);
+    });
+
+    // Attach event listeners
+    attachMassEditEventListeners();
+  }
+
+  function renderMassEditLayerPills(level, cardIndex, layers) {
+    // Get unique layer names for this level from all cards
+    const allCards = deckBuilderState.massEditData || deckBuilderState.cards;
+    const layerSet = new Set();
+
+    allCards.forEach(card => {
+      if (card.layers && card.layers[level - 1]) {
+        layerSet.add(card.layers[level - 1]);
+      }
+    });
+
+    const layerNames = Array.from(layerSet).sort();
+    const selectedLayer = layers[level - 1] || null;
+
+    return layerNames.map(name => {
+      const isActive = name === selectedLayer;
+      return `<button type="button" class="layer-pill ${isActive ? 'active' : ''}" 
+        data-level="${level}" data-layer="${escapeHtml(name)}" data-index="${cardIndex}">${escapeHtml(name)}</button>`;
+    }).join("");
+  }
+
+  function attachMassEditEventListeners() {
+    // Priority pill clicks
+    massEditCards.querySelectorAll(".priority-pill").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const index = parseInt(btn.dataset.index);
+        const priority = parseInt(btn.dataset.priority);
+        if (deckBuilderState.massEditData[index]) {
+          deckBuilderState.massEditData[index].priority = priority;
+        }
+
+        // Update UI
+        const cardDiv = massEditCards.querySelector(`[data-index="${index}"]`);
+        if (cardDiv) {
+          cardDiv.querySelectorAll(".priority-pill").forEach(p => {
+            const pVal = parseInt(p.dataset.priority);
+            const isActive = pVal === priority;
+            p.classList.toggle("active", isActive);
+            p.style.color = isActive ? getPriorityColor(pVal) : "var(--text-muted)";
+            p.style.borderColor = isActive ? getPriorityColor(pVal) : "rgba(255,255,255,0.15)";
+          });
+        }
+      });
+    });
+
+    // Layer pill clicks
+    massEditCards.querySelectorAll(".layer-pill").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const index = parseInt(btn.dataset.index);
+        const level = parseInt(btn.dataset.level);
+        const layerName = btn.dataset.layer;
+        if (deckBuilderState.massEditData[index]) {
+          const card = deckBuilderState.massEditData[index];
+          if (!card.layers) card.layers = [];
+          if (card.layers[level - 1] === layerName) {
+            // Deselect
+            card.layers[level - 1] = undefined;
+            card.layers.length = level - 1; // Truncate below
+          } else {
+            card.layers[level - 1] = layerName;
+            card.layers.length = level; // Truncate below
+          }
+          renderMassEditCards(); // Re-render to update cascade
+        }
+      });
+    });
+
+    // Layer new buttons
+    massEditCards.querySelectorAll(".layer-new-pill").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const index = parseInt(btn.dataset.index);
+        const level = parseInt(btn.dataset.level);
+        const cardDiv = massEditCards.querySelector(`[data-index="${index}"]`);
+        if (!cardDiv) return;
+
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "layer-input-inline";
+        input.placeholder = "Layer name...";
+        btn.parentNode.insertBefore(input, btn);
+        btn.style.display = "none";
+        input.focus();
+
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            const newLayer = input.value.trim();
+            if (newLayer && deckBuilderState.massEditData[index]) {
+              if (!deckBuilderState.massEditData[index].layers) {
+                deckBuilderState.massEditData[index].layers = [];
+              }
+              deckBuilderState.massEditData[index].layers[level - 1] = newLayer;
+              deckBuilderState.massEditData[index].layers.length = level;
+              renderMassEditCards();
+            }
+          }
+          if (e.key === "Escape") {
+            input.remove();
+            btn.style.display = "";
+          }
+        });
+      });
+    });
+
+    // Textarea changes
+    massEditCards.querySelectorAll(".mass-edit-cue").forEach(textarea => {
+      textarea.addEventListener("input", () => {
+        const index = parseInt(textarea.dataset.index);
+        if (deckBuilderState.massEditData[index]) {
+          deckBuilderState.massEditData[index].cueFront = textarea.value;
+        }
+      });
+    });
+
+    massEditCards.querySelectorAll(".mass-edit-quote").forEach(textarea => {
+      textarea.addEventListener("input", () => {
+        const index = parseInt(textarea.dataset.index);
+        if (deckBuilderState.massEditData[index]) {
+          deckBuilderState.massEditData[index].quoteBack = textarea.value;
+        }
+      });
+    });
+
+    // Delete buttons
+    massEditCards.querySelectorAll(".delete-card-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const index = parseInt(btn.dataset.index);
+        if (confirm("Delete this card?")) {
+          if (deckBuilderState.massEditData[index]) {
+            deckBuilderState.massEditData.splice(index, 1);
+            renderMassEditCards();
+          }
+        }
+      });
+    });
+  }
+
+  function saveAllMassEditChanges() {
+    if (!deckBuilderState.massEditData) return;
+
+    // Update main cards array
+    deckBuilderState.cards = [...deckBuilderState.massEditData];
+
+    // Update card count
+    if (cardCount) cardCount.textContent = deckBuilderState.cards.length;
+
+    exitMassEditMode();
+    renderFlashcardList();
+
+    alert(`Saved ${deckBuilderState.cards.length} cards!`);
+  }
+
   function processAnkiImport() {
     if (!ankiImportInput || !importFeedback) return;
 
@@ -3307,10 +3648,14 @@ export async function initMemoryTool(deps, context = {}) {
 
     // For AND mode: if we got here, all selected filters passed
     // For OR mode: if we got here and no match found yet, return false
+    // BUT if no filters are active, all cards should pass
+    const hasAnyFilter = filter.priorities.length > 0 || filter.tags.length > 0 || filter.layers.length > 0;
+    if (!hasAnyFilter) return true;
+
     if (isAND) {
-      return filter.priorities.length > 0 || filter.tags.length > 0 || filter.layers.length > 0;
+      return true; // All active filters passed
     } else {
-      return false; // No matching filter found
+      return false; // No matching filter found in OR mode
     }
   }
 
