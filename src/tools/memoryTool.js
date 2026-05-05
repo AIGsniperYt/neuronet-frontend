@@ -2997,6 +2997,7 @@ export async function initMemoryTool(deps, context = {}) {
 
   let _typewriterTimer = null;
   let _lastThoughtMsg = "";
+  let _lastGradeTime = 0;
   
 
   function generateSystemThought(manualGrade = null) {
@@ -3125,30 +3126,57 @@ export async function initMemoryTool(deps, context = {}) {
     return msg;
   }
 
-    function typewriteThought(text) {
+      function typewriteThought(text) {
     if (!systemThinkingText) return;
     clearTimeout(_typewriterTimer);
-    systemThinkingText.innerHTML = '<span class="cursor"></span>';
-    let i = 0;
-    const cursor = systemThinkingText.querySelector(".cursor");
 
+    // 1. Handle existing "current" thought
+    const prevCurrent = systemThinkingText.querySelector(".thought-line.current");
+    if (prevCurrent) {
+      // Instantly finish previous typewriter
+      prevCurrent.innerHTML = prevCurrent.dataset.fullText || "";
+      prevCurrent.classList.remove("current");
+      prevCurrent.classList.add("history");
+    }
+
+    // 2. Limit history (keep last 2 total)
+    const lines = systemThinkingText.querySelectorAll(".thought-line");
+    if (lines.length >= 2) {
+      lines[0].remove();
+    }
+
+    // 3. Create new current line
+    const newLine = document.createElement("div");
+    newLine.className = "thought-line current";
+    newLine.dataset.fullText = text;
+    systemThinkingText.appendChild(newLine);
+
+    let i = 0;
     const tick = () => {
       if (i >= text.length) {
-        if (cursor) cursor.remove();
-        systemThinkingText.innerHTML = text;
+        newLine.innerHTML = text;
         return;
       }
       const chunk = text.slice(0, i + 1);
-      systemThinkingText.innerHTML = `${chunk}<span class="cursor"></span>`;
+      newLine.innerHTML = `${chunk}<span class="cursor"></span>`;
       i++;
-      // Faster, 'alien' speed
-      const delay = 5 + Math.random() * 8;
+      const delay = 4 + Math.random() * 6;
       _typewriterTimer = setTimeout(tick, delay);
     };
     tick();
   }
 
-    function updateSystemThought(lastGrade = null) {
+      function updateSystemThought(lastGrade = null) {
+    const now = Date.now();
+    // If it's an automatic update (null grade), check if we're in the 2.5s grade protection window
+    if (lastGrade === null && now - _lastGradeTime < 2500) {
+      return;
+    }
+    
+    if (lastGrade !== null) {
+      _lastGradeTime = now;
+    }
+
     const thought = generateSystemThought(lastGrade);
     typewriteThought(thought);
 
