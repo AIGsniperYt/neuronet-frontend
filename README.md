@@ -9,3 +9,5 @@ For inquiries or requests for reuse, please contact the author directly.
 See the gh-pages branch for deployment code -
 I've chosen to keep the codebase transparent :)
 
+See the commit history for a nice detailed juicy changelog, I never bothered to start a proper one, sorry :P
+
