@@ -411,8 +411,4 @@ window.__neuronetCanvas = {
   getNodes: () => nodes,
 };
 
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", initCanvas);
-} else {
-  initCanvas();
-}
+export { initCanvas };

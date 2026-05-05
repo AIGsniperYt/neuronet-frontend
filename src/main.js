@@ -4,6 +4,12 @@ import { initAnalysisToolV2 } from "./tools/analysisTool.js";
 import { initMemoryTool } from "./tools/memoryTool.js";
 import { initMindmapTool } from "./tools/mindmapTool.js";
 import { performMigration } from "./migrations.js";
+import { initCanvas } from "./canvas.js";
+
+initCanvas();
+
+const canvasEl = window.__neuronetCanvas.getCanvas();
+const ctx = window.__neuronetCanvas.getCtx();
 
 const BACKEND = "https://neuronet-backend.onrender.com";
 let DB_READY = false;
@@ -933,6 +939,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Origin validation
   const ALLOWED_ORIGINS = [
     "http://127.0.0.1:5500",
+    "http://localhost:5173",
+    "http://localhost:4173",
     "https://aigsniperyt.github.io"
   ];
   const currentOrigin = window.location.origin;
@@ -992,8 +1000,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   loadingOverlay.classList.add("completed");
   loadingOverlay.style.display = "none";
 
-  if (canvas) {
-    canvas.style.filter = "brightness(0.85) contrast(1.15)";
+  if (canvasEl) {
+    canvasEl.style.filter = "brightness(0.85) contrast(1.15)";
   }
 
   const sidebarElDone = document.getElementById("sidebar");

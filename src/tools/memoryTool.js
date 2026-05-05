@@ -91,8 +91,9 @@ export async function initMemoryTool(deps, context = {}) {
   let nextToDeckBtn, addNewCardBtn, backToDeckInfoBtn, finishDeckBtn;
   let studyNewDeckBtn, backToLaunchpadBtn, flashcardList;
   let deckNameDisplay, cardCountDisplay, builderTitle;
-    // New: layer rows, import
+    // New: layer rows, import, export
    let importToggleBtn, ankiImportInput, processImportBtn, cancelImportBtn, importFeedback;
+   let exportBtn;
   // Middle UI elements
   let middleUI, middleHeader, middleBackBtn, middleSubjectName, middleStudyBtn;
   let middleModeSelector, andFilterBtn, orFilterBtn, filterModeHint;
@@ -178,6 +179,9 @@ export async function initMemoryTool(deps, context = {}) {
     processImportBtn = document.getElementById("processImportBtn");
     cancelImportBtn = document.getElementById("cancelImportBtn");
     importFeedback = document.getElementById("importFeedback");
+
+    // Export element
+    exportBtn = document.getElementById("exportBtn");
     // Layer row elements
     // (dynamically rendered, accessed via getElementById in render functions)
     // Card count display
@@ -427,6 +431,13 @@ export async function initMemoryTool(deps, context = {}) {
           importView.style.display = isVisible ? "none" : "block";
           if (cardEditForm) cardEditForm.style.display = isVisible ? "block" : "none";
         }
+      });
+    }
+
+    // Export button
+    if (exportBtn) {
+      exportBtn.addEventListener("click", () => {
+        exportToAnki();
       });
     }
 
@@ -2910,6 +2921,44 @@ export async function initMemoryTool(deps, context = {}) {
    }
 
   // ========== ANKI IMPORT ==========
+
+  async function exportToAnki() {
+    if (!ankiImportInput || !importFeedback) return;
+
+    // Get cards from current deck builder state
+    const cards = deckBuilderState.cards;
+    if (cards.length === 0) {
+      importFeedback.textContent = "No cards to export. Add some cards first.";
+      importFeedback.style.color = "#ff4d4d";
+      return;
+    }
+
+    // Show import view and hide card edit form
+    const importView = document.getElementById("importView");
+    const cardEditForm = document.getElementById("cardEditForm");
+    if (importView) importView.style.display = "block";
+    if (cardEditForm) cardEditForm.style.display = "none";
+
+    // Format cards as Anki tab-separated format
+    const ankiText = cards.map(card => {
+      const front = (card.cueFront || "").replace(/\t/g, ' ').replace(/\n/g, ' ');
+      const back = (card.quoteBack || "").replace(/\t/g, ' ').replace(/\n/g, ' ');
+      return `${front}\t${back}`;
+    }).join('\n');
+
+    // Show in the import textarea
+    ankiImportInput.value = ankiText;
+
+    // Auto-copy to clipboard
+    try {
+      await navigator.clipboard.writeText(ankiText);
+      importFeedback.textContent = `${cards.length} cards exported to Anki format and copied to clipboard!`;
+      importFeedback.style.color = "#3fd07d";
+    } catch (err) {
+      importFeedback.textContent = `${cards.length} cards exported to Anki format (could not copy to clipboard)`;
+      importFeedback.style.color = "#ffa500";
+    }
+  }
 
   function processAnkiImport() {
     if (!ankiImportInput || !importFeedback) return;
