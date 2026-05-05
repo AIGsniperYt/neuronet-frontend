@@ -11,4 +11,4 @@ I've chosen to keep the codebase transparent :)
 
 See the commit history for a nice detailed juicy changelog, I never bothered to start a proper one, sorry :P
 
-Documentation is nicely done in [project.md](project.md)   <============== !!!!
+## Documentation is nicely done in [project.md](project.md)   <============== !!!!
