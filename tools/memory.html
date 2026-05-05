@@ -24,6 +24,146 @@
     </div>
   </div>
 
+  <!-- Deck Builder Modal -->
+  <div id="deckBuilderModal" class="deck-builder-modal" style="display: none;">
+    <div class="deck-builder-overlay"></div>
+    <div class="deck-builder-container">
+      <div class="deck-builder-header">
+        <h2 id="builderTitle">Create New Deck</h2>
+        <button id="closeDeckBuilderBtn" class="close-btn">&times;</button>
+      </div>
+
+      <div class="deck-builder-content">
+        <!-- Steps will be shown conditionally -->
+
+        <!-- Step1: Deck Info -->
+        <div id="step1-deckInfo" class="builder-step active">
+          <h3>Deck Information</h3>
+          <div class="form-group">
+            <label for="deckNameInput">Deck Name</label>
+            <input type="text" id="deckNameInput" class="builder-input" placeholder="e.g., French Vocabulary, Biology Concepts">
+          </div>
+          <div class="form-group">
+            <label for="deckDescriptionInput">Description (Optional)</label>
+            <textarea id="deckDescriptionInput" class="builder-input" placeholder="Add a brief description..."></textarea>
+          </div>
+          <div class="builder-actions">
+            <button id="nextToDeckBtn" class="memory-btn primary">Next: Add Cards</button>
+          </div>
+        </div>
+
+        <!-- Step 2: Flashcard Builder with Sidebar Layout -->
+        <div id="step2-flashcards" class="builder-step" style="display: none;">
+          <div class="deck-builder-body" style="display:flex; flex-direction:row; flex:1; min-height:0;">
+
+            <!-- Left Sidebar: Flashcard List -->
+            <div class="deck-sidebar">
+              <div class="deck-sidebar-header">
+                <h4>Cards (<span id="cardCount">0</span>)</h4>
+              </div>
+              <div class="flashcard-builder-list" id="flashcardList"></div>
+            </div>
+
+            <!-- Main Area: Persistent Create/Edit Form -->
+            <div class="deck-main-area">
+              <div class="deck-main-header">
+                <h3 id="formTitle">Add New Card</h3>
+                <div style="display:flex; gap:8px;">
+                  <button id="massEditBtn" class="memory-btn" title="Toggle mass edit mode" style="border-color: rgba(255,77,77,0.4); color: #ff4d4d;">Mass Edit</button>
+                  <button id="exportBtn" class="memory-btn" title="Export to Anki format">Export</button>
+                  <button id="importToggleBtn" class="memory-btn" title="Import from Anki">Import</button>
+                </div>
+              </div>
+
+              <!-- Import View (toggled) -->
+              <div id="importView" style="display: none;">
+                <div class="form-group">
+                  <label for="ankiImportInput">Paste Anki cards (one per line: Question[TAB]Answer)</label>
+                  <textarea id="ankiImportInput" class="builder-input anki-import-area" placeholder="Question[TAB]Answer&#10;Question2[TAB]Answer2"></textarea>
+                </div>
+                <div class="builder-actions">
+                  <button id="processImportBtn" class="memory-btn primary">Process Import</button>
+                  <button id="cancelImportBtn" class="memory-btn">Cancel</button>
+                </div>
+                <div id="importFeedback" style="margin-top: 8px; font-size: 0.85rem;"></div>
+              </div>
+
+              <!-- Card Edit Form (persistent) -->
+              <div id="cardEditForm">
+                <div class="form-group">
+                  <label for="cueInput">Front of Card (Question/Cue)</label>
+                  <textarea id="cueInput" class="builder-input" placeholder="Enter the question or prompt..."></textarea>
+                </div>
+                <div class="form-group">
+                  <label for="quoteInput">Back of Card (Answer)</label>
+                  <textarea id="quoteInput" class="builder-input" placeholder="Enter the answer or explanation..."></textarea>
+                </div>
+                <div class="form-group">
+                  <label>Priority</label>
+                  <div id="priorityPills" class="priority-pills">
+                    <!-- Pills rendered by JS -->
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>Layers</label>
+                  <div id="layerRowsContainer">
+                    <div class="layer-row" id="layer1Row">
+                      <span class="layer-row-label">L1</span>
+                      <div class="layer-pills-row" id="layer1Pills"></div>
+                      <button type="button" class="layer-new-pill" data-level="1">+ New</button>
+                    </div>
+                    <div class="layer-row disabled" id="layer2Row">
+                      <span class="layer-row-label">L2</span>
+                      <div class="layer-pills-row" id="layer2Pills"></div>
+                      <button type="button" class="layer-new-pill" data-level="2" disabled>+ New</button>
+                    </div>
+                    <div class="layer-row disabled" id="layer3Row">
+                      <span class="layer-row-label">L3</span>
+                      <div class="layer-pills-row" id="layer3Pills"></div>
+                      <button type="button" class="layer-new-pill" data-level="3" disabled>+ New</button>
+                    </div>
+                  </div>
+                </div>
+                <div class="builder-sticky-actions">
+                  <div>
+                    <button id="backToDeckInfoBtn" class="memory-btn">Back</button>
+                  </div>
+                  <div style="display:flex; gap:8px;">
+                    <button id="clearFormBtn" class="memory-btn">Clear</button>
+                    <button id="deleteCardBtn" class="memory-btn flashcard-item-btn" style="display: none;">Delete</button>
+                    <button id="saveCardBtn" class="memory-btn primary" disabled>Save Card</button>
+                    <button id="finishDeckBtn" class="memory-btn primary">Finish Deck</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Mass Edit Container (hidden by default) -->
+              <div id="massEditContainer" style="display:none; width:100%; overflow-y:auto; padding:16px;">
+                <div id="massEditCards"></div>
+                <div class="mass-edit-sticky-actions">
+                  <button id="massEditCancelBtn" class="memory-btn">Cancel</button>
+                  <button id="massEditSaveBtn" class="memory-btn primary">Save All Changes</button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 3: Success -->
+        <div id="step3-success" class="builder-step" style="display: none;">
+          <div class="success-message">
+            <div class="success-icon">✓</div>
+            <h3>Deck Created!</h3>
+            <p id="successMessage">Your deck "<span id="deckNameDisplay"></span>" has been created with <span id="cardCountDisplay">0</span> cards.</p>
+            <button id="studyNewDeckBtn" class="memory-btn primary">Study New Deck</button>
+            <button id="backToLaunchpadBtn" class="memory-btn">Back to Decks</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Middle UI Layer (between Launchpad and Study) -->
   <div id="middleUI" style="display: none;">
     <div id="middleHeader">
@@ -59,6 +199,7 @@
     </div>
   </div>
 
+  <!-- Memory Content Area -->
   <div id="memoryContent" style="display: none;">
     <div id="memoryMainArea">
       <div id="roundProgress"></div>
@@ -101,7 +242,7 @@
       </div>
       <div id="evidenceFeedback"></div>
     </div>
-  </div><!-- /memoryMainArea -->
+  </div>
 
   <!-- Stats Panel - Right Sidebar -->
   <div id="memoryStats">
@@ -118,132 +259,6 @@
       <div id="systemThinkingText" class="system-thinking-text"></div>
     </div>
     <div id="statsContent"></div>
-  </div>
-
-  <!-- Deck Builder Modal -->
-  <div id="deckBuilderModal" class="deck-builder-modal" style="display: none;">
-    <div class="deck-builder-overlay"></div>
-    <div class="deck-builder-container">
-      <div class="deck-builder-header">
-        <h2 id="builderTitle">Create New Deck</h2>
-        <button id="closeDeckBuilderBtn" class="close-btn">&times;</button>
-      </div>
-
-      <div id="deckBuilderContent" class="deck-builder-content">
-        <!-- Steps will be shown conditionally -->
-
-        <!-- Step 1: Deck Info -->
-        <div id="step1-deckInfo" class="builder-step active">
-          <h3>Deck Information</h3>
-          <div class="form-group">
-            <label for="deckNameInput">Deck Name</label>
-            <input type="text" id="deckNameInput" class="builder-input" placeholder="e.g., French Vocabulary, Biology Concepts">
-          </div>
-          <div class="form-group">
-            <label for="deckDescriptionInput">Description (Optional)</label>
-            <textarea id="deckDescriptionInput" class="builder-input" placeholder="Add a brief description..."></textarea>
-          </div>
-          <div class="builder-actions">
-            <button id="nextToDeckBtn" class="memory-btn primary">Next: Add Cards</button>
-          </div>
-        </div>
-
-        <!-- Step 2: Flashcard Builder with Sidebar Layout -->
-        <div id="step2-flashcards" class="builder-step" style="display: none;">
-          <div class="deck-builder-body" style="display:flex; flex-direction:row; flex:1; min-height:0;">
-            <!-- Left Sidebar: Flashcard List -->
-            <div class="deck-sidebar">
-              <div class="deck-sidebar-header">
-                <h4>Cards (<span id="cardCount">0</span>)</h4>
-              </div>
-              <div class="flashcard-builder-list" id="flashcardList"></div>
-            </div>
-
-            <!-- Main Area: Persistent Create/Edit Form -->
-            <div class="deck-main-area">
-              <div class="deck-main-header">
-                <h3 id="formTitle">Add New Card</h3>
-                <button id="importToggleBtn" class="memory-btn" title="Import from Anki">Import</button>
-              </div>
-
-              <!-- Import View (toggled) -->
-              <div id="importView" style="display: none;">
-                <div class="form-group">
-                  <label for="ankiImportInput">Paste Anki cards (one per line: Question[TAB]Answer)</label>
-                  <textarea id="ankiImportInput" class="builder-input anki-import-area" placeholder="Question[TAB]Answer&#10;Question2[TAB]Answer2"></textarea>
-                </div>
-                <div class="builder-actions">
-                  <button id="processImportBtn" class="memory-btn primary">Process Import</button>
-                  <button id="cancelImportBtn" class="memory-btn">Cancel</button>
-                </div>
-                <div id="importFeedback" style="margin-top: 8px; font-size: 0.85rem;"></div>
-              </div>
-
-              <!-- Card Edit Form (persistent) -->
-              <div id="cardEditForm">
-                <div class="form-group">
-                  <label for="cueInput">Front of Card (Question/Cue)</label>
-                  <textarea id="cueInput" class="builder-input" placeholder="Enter the question or prompt..."></textarea>
-                </div>
-                <div class="form-group">
-                  <label for="quoteInput">Back of Card (Answer)</label>
-                  <textarea id="quoteInput" class="builder-input" placeholder="Enter the answer or explanation..."></textarea>
-                </div>
-                <div class="form-group">
-                  <label>Priority</label>
-                  <div id="priorityPills" class="priority-pills">
-                    <!-- Pills rendered by JS -->
-                  </div>
-                </div>
-        <div class="form-group">
-          <label>Layers</label>
-          <div id="layerRowsContainer">
-            <div class="layer-row" id="layer1Row">
-              <span class="layer-row-label">L1</span>
-              <div class="layer-pills-row" id="layer1Pills"></div>
-              <button type="button" class="layer-new-pill" data-level="1">+ New</button>
-            </div>
-            <div class="layer-row disabled" id="layer2Row">
-              <span class="layer-row-label">L2</span>
-              <div class="layer-pills-row" id="layer2Pills"></div>
-              <button type="button" class="layer-new-pill" data-level="2" disabled>+ New</button>
-            </div>
-            <div class="layer-row disabled" id="layer3Row">
-              <span class="layer-row-label">L3</span>
-              <div class="layer-pills-row" id="layer3Pills"></div>
-              <button type="button" class="layer-new-pill" data-level="3" disabled>+ New</button>
-            </div>
-          </div>
-        </div>
-                <div class="builder-sticky-actions">
-                  <div>
-                    <button id="backToDeckInfoBtn" class="memory-btn">Back</button>
-                  </div>
-                  <div style="display:flex; gap:8px;">
-                    <button id="clearFormBtn" class="memory-btn">Clear</button>
-                    <button id="deleteCardBtn" class="memory-btn flashcard-item-btn" style="display: none;">Delete</button>
-                    <button id="saveCardBtn" class="memory-btn primary" disabled>Save Card</button>
-                    <button id="finishDeckBtn" class="memory-btn primary">Finish Deck</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          </div>
-
-        <!-- Step 3: Success -->
-        <div id="step3-success" class="builder-step" style="display: none;">
-          <div class="success-message">
-            <div class="success-icon">✓</div>
-            <h3>Deck Created!</h3>
-            <p id="successMessage">Your deck "<span id="deckNameDisplay"></span>" has been created with <span id="cardCountDisplay">0</span> cards.</p>
-            <button id="studyNewDeckBtn" class="memory-btn primary">Study New Deck</button>
-            <button id="backToLaunchpadBtn" class="memory-btn">Back to Decks</button>
-          </div>
-        </div>
-      </div>
-    </div>
   </div>
 
 </div>
@@ -1993,5 +2008,213 @@
     display: flex;
     gap: 12px;
     flex-wrap: wrap;
+  }
+
+  /* Mass Edit Mode Styles */
+  .mass-edit-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+    animation: fadeIn 0.3s ease;
+  }
+
+  .mass-edit-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .mass-edit-card-title {
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+
+  .mass-edit-card .form-group {
+    margin-bottom: 12px;
+  }
+
+  .mass-edit-card .form-group label {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--text-main);
+    font-weight: 500;
+    font-size: 0.85rem;
+  }
+
+  .mass-edit-card textarea {
+    width: 100%;
+    padding: 10px 12px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    color: var(--text-main);
+    font-family: inherit;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+    box-sizing: border-box;
+    resize: vertical;
+    min-height: 60px;
+  }
+
+  .mass-edit-card textarea:focus {
+    background: rgba(44,255,179,0.08);
+    border-color: var(--accent-soft);
+    box-shadow: 0 0 0 2px rgba(44,255,179,0.2);
+    outline: none;
+  }
+
+  .mass-edit-card .priority-pills,
+  .mass-edit-card .layer-row {
+    margin-top: 4px;
+  }
+
+  .mass-edit-sticky-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 10px 16px;
+    background: rgba(10,10,10,0.85);
+    backdrop-filter: blur(10px);
+    font-size: 0.8rem;
+    font-family: inherit;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+
+  /* Mass Edit Mode Layout Transitions */
+  .deck-sidebar {
+    transition: transform 0.3s ease, opacity 0.3s ease;
+  }
+
+  .deck-builder-body.mass-edit-mode .deck-sidebar {
+    transform: translateX(-100%);
+    opacity: 0;
+    pointer-events: none;
+    position: absolute;
+  }
+
+  .deck-builder-body.mass-edit-mode .deck-main-area {
+    flex: 1;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .deck-builder-body.mass-edit-mode #massEditContainer {
+    display: flex !important;
+  }
+
+  .mass-edit-card {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+
+  .mass-edit-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+
+  .mass-edit-card-title {
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+
+  #massEditContainer {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1;
+  }
+
+  #massEditCards {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+  }
+
+  .mass-edit-card .layer-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .mass-edit-card .layer-pills-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .mass-edit-card .layer-pill {
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-family: inherit;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+
+  .mass-edit-card .layer-pill.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(44,255,179,0.12);
+    font-weight: 600;
+  }
+
+  .mass-edit-card .layer-new-pill {
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px dashed rgba(255,255,255,0.2);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-family: inherit;
+    transition: all 0.15s ease;
+  }
+
+  .mass-edit-card .layer-new-pill:hover:not(:disabled) {
+    border-color: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .mass-edit-card .layer-new-pill:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  .mass-edit-card .delete-card-btn {
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 1px solid rgba(255,77,77,0.3);
+    background: rgba(255,77,77,0.1);
+    color: #ff4d4d;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-family: inherit;
+    transition: all 0.2s ease;
+  }
+
+  .mass-edit-card .delete-card-btn:hover {
+    background: rgba(255,77,77,0.2);
+    border-color: rgba(255,77,77,0.5);
   }
 </style>
