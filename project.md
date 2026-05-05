@@ -1,8 +1,8 @@
 # NeuroNet Developer Specification
 
-**Version**: 5.7  
+**Version**: 6.0  
 **Date**: May 5, 2026  
-**Status**: Production-ready with SSS (Semantic Search System) anchoring, complete tool implementations (Analysis v2, Memory SuperProgram, Mindmap), bidirectional quote/analysis linking, layer hierarchy navigation, advanced source editor, and full feature parity across codebase, as well as advanced lite deckbuilder with layer categorising and priority heap ordering as well as a specific study filter system
+**Status**: Production-ready with SSS (Semantic Search System) anchoring, complete tool implementations (Analysis v2, Memory SuperProgram, Mindmap), bidirectional quote/analysis linking, layer hierarchy navigation, advanced source editor, full feature parity across codebase, advanced lite deckbuilder with layer categorising and priority heap ordering, a specific study filter system, and an adaptive learning layer that personalises memory scheduling per user
 
 ---
 
@@ -65,7 +65,7 @@ neuronet/
 │   └── models/
 │       ├── Node.js
 │       └── User.js
-└── plan.md   # This file   
+└── project.md   # This file   
 ```
 
 ### 2.3 Background Canvas Animation (`canvas.js`)
@@ -591,6 +591,18 @@ const state = {
 - **Integration**: Factors into `computePriority()` via `(priority - 1) * 2` boost
 - **Colors**: P1=#9aa4ad (gray), P2=#4ba3ff (blue), P3=#3fd07d (green), P4=#ff9b39 (orange), P5=#ff4d4d (red)
 
+**Adaptive Learning Layer (v6.0)**:
+
+- **Purpose**: Adds a context-aware agent layer above the SuperProgram scheduler so the system can distinguish early learning noise from genuine long-term weakness.
+- **User profile calibration**: Stores a persistent `userProfile` in `localStorage` with learning speed, noise tolerance, stability gain, forgetting resistance, heap sensitivity, expected trials to mastery, and dynamic phase thresholds.
+- **Learning phases**: Each card derives and persists `L_phase` as `new`, `warming`, `stabilising`, `stable`, or `mastered`.
+- **Early learning protection**: Cards with fewer than 3 reviews are gated from global "bad session" judgement. A poor first pass updates only the local card model instead of punishing the whole session.
+- **Adaptive weights**: The fixed SuperProgram constants are scaled by phase and user profile, producing cached per-session values such as `alphaEffective`, `gammaEffective`, `heapFactor`, and `phaseMultiplier`.
+- **Heap-size awareness**: Large decks use conservative interval scaling via `log(heapSize + 1)` so heavy study loads do not over-expand intervals too quickly.
+- **MoE-style scheduling**: The memory tool can switch from Global SRS Mode into Focused Block Mode when the heap is large or many cards are still early-stage.
+- **Focused blocks**: Blocks cluster related cards by subject/layer/tag/difficulty, drill a small subset, and occasionally interleave older cards to prevent false mastery.
+- **Profile evolution**: After every review, the system updates expected trials to mastery, stability gain, learning speed, forgetting resistance, and phase thresholds through smoothing.
+
 **Deck Builder**:
 
 - **Sidebar layout**: 260px left sidebar + persistent form on right
@@ -634,7 +646,7 @@ const state = {
 
 - Located in stats sidebar right side
 - Typewriter effect with 5-13ms per character speed
-- Generates contextual thoughts based on: last grade, card state, heap size, streak, mode
+- Generates contextual thoughts based on: last grade, card state, heap size, streak, mode, learning phase, and focused-block status
 - Triggers background canvas impulses via `window.__neuronetCanvas`
 
 **Keyboard Shortcuts**:
@@ -895,9 +907,7 @@ await linkAnalysisToQuote(quoteId, analysisId);
 
 ## 9. Known Issues
 
-1. **Analysis deletion**: Must properly remove from DB and clean up quote references
-2. **Quote highlighting**: Multi-line selection issues in some cases
-3. **Mindmap performance**: Large datasets may need optimization
+1. **Mindmap performance**: Large datasets may need optimization
 
 ---
 
@@ -1260,7 +1270,7 @@ I ∈ [0.1, 365]
 ### 11.10 Priority Scheduling
 
 ```
-priority = 1 + overdueDays + U * 0.8 + (quotePriority - 1) * 2
+priority = (1 + overdueDays + U * 0.8 + phaseBoost + (quotePriority - 1) * 2) / sqrt(heapFactor)
 ```
 
 Where:
@@ -1268,10 +1278,186 @@ Where:
 - `overdueDays = (now - nextReview) / 86400000` (can be negative for future reviews)
 - `U` = uncertainty (0 to 1)
 - `quotePriority` = 1-5 scale (adds 0 to 8 boost)
+- `phaseBoost` nudges early-stage cards upward and mastered cards downward
+- `heapFactor = max(1, log(heapSize + 1))`
 
 New cards (no nextReview): `overdueDays = 0` (treated as exactly due)
 
-### 11.11 Conceptual Outcome
+### 11.11 Adaptive Learning Agent Layer
+
+Version 6.0 adds an agent layer above the mathematical SuperProgram model. The original engine still owns the core memory state (`S`, `D`, `U`, `interval`, `nextReview`), but the agent layer interprets the human learning context before applying updates.
+
+The central rule is:
+
+> Early inconsistency is not the same thing as long-term weakness.
+
+This matters because different users stabilise knowledge at different speeds. One learner may master a quote after two exposures; another may need six repetitions before recall stops being noisy. The scheduler now treats that early period as a protected learning phase.
+
+#### Card Learning Phase
+
+Each card derives a phase:
+
+```
+L_phase in ["new", "warming", "stabilising", "stable", "mastered"]
+```
+
+Phase is based on review count, recent grade pattern, uncertainty, stability, and easy streak:
+
+| Phase | Meaning |
+|-------|---------|
+| `new` | No reviews yet |
+| `warming` | First few exposures, signal is still forming |
+| `stabilising` | Recall has enough data to adapt, but may still vary |
+| `stable` | Low uncertainty or consistent easy recall |
+| `mastered` | High stability plus repeated easy outcomes |
+
+Persisted card metadata:
+
+```js
+meta.L_phase
+meta.easyStreak
+meta.recentGrades // bounded recent history, not an unbounded log
+```
+
+#### User Profile Calibration
+
+The memory tool keeps a persistent profile in `localStorage`:
+
+```js
+userProfile = {
+  learningSpeedFactor,
+  retentionCurveSlope,
+  noiseTolerance,
+  stabilityGainRate,
+  forgettingResistance,
+  optimalRepetitionRange,
+  expectedTrialsToMastery,
+  heapSensitivity,
+  baseRetentionStrength,
+  phaseThresholds,
+  phaseDistributionHistory
+}
+```
+
+This profile is not a replacement for card memory. It is a personalisation layer that answers questions like:
+
+- How quickly does this user usually stabilise new material?
+- How much early inconsistency should be tolerated?
+- How aggressively should intervals grow under a large heap?
+- How many repetitions should the system expect before mastery?
+
+After every review, `updateUserLearningModel()` smooths the profile based on grade, time-to-recall, phase, heap size, and stability delta.
+
+#### Adaptive Weights
+
+The old constants are now treated as base values. The effective update strength is adjusted by phase and user profile:
+
+```
+alphaEffective = alpha * learningSpeedFactor * phaseMultiplier * stabilityGainRate
+gammaEffective = gamma * phaseMultiplier / forgettingResistance
+```
+
+Phase multipliers:
+
+| Phase | Behaviour |
+|-------|-----------|
+| `new` | Conservative updates, avoid overreacting |
+| `warming` | Gentle adaptation |
+| `stabilising` | Normal-to-slightly-strong adaptation |
+| `stable` | Faster interval growth when recall is reliable |
+| `mastered` | Maintenance rather than aggressive drilling |
+
+Effective weights are cached per session and phase so a batch behaves consistently:
+
+```js
+weightCache = {
+  alphaEffective,
+  betaEffective,
+  gammaEffective,
+  heapFactor,
+  phaseMultiplier,
+  intervalScale
+}
+```
+
+#### Early Learning Gate
+
+For cards with fewer than 3 reviews:
+
+```js
+if (reviewCount < 3) {
+  disableGlobalSessionJudgement()
+}
+```
+
+In implementation terms, early cards still update their own `S`, `D`, `U`, and interval, but low session accuracy messages and global bad-session interpretations are suppressed until the card has enough history.
+
+#### Heap Size Context
+
+Large heaps change the meaning of learning intensity. The scheduler now computes:
+
+```
+heapFactor = max(1, log(heapSize + 1))
+intervalScale = 1 / (heapFactor * heapSensitivity)
+```
+
+This keeps small decks responsive while making large decks more conservative.
+
+#### Global SRS vs Focused Block Mode
+
+The scheduler can choose between two modes:
+
+| Mode | Purpose |
+|------|---------|
+| Global SRS | Default mode; optimise across the full heap |
+| Focused Block | Select a local cluster for repeated reinforcement |
+
+Focused Block Mode activates when the heap is large or many cards are still in early phases. Blocks are selected using:
+
+- Subject/layer grouping
+- Tag clustering
+- Difficulty similarity
+- Phase similarity
+
+Even in block mode, old cards are occasionally injected:
+
+```js
+if (Math.random() < 0.15) injectRandomPastCard()
+```
+
+This prevents the system from mistaking short-term block fluency for durable mastery.
+
+#### Block Completion
+
+A focused block is considered learned when:
+
+```
+averageEasyStreak >= targetStreak
+averageUncertainty < stableUncertaintyThreshold
+```
+
+Once a block approaches completion, interleaving pressure increases so the learner reconnects the block with the wider heap.
+
+#### Implementation Hooks
+
+The adaptive layer is implemented through the following hooks in `memoryTool.js`:
+
+```js
+getUserLearningPhase(card)
+getAdaptiveWeights(userProfile, phase, heapSize)
+selectLearningMode(cards, userProfile)
+updateUserLearningModel(userProfile, outcome)
+enqueueLearningCards(cards, nowMs)
+isFocusedBlockComplete()
+```
+
+These hooks integrate with:
+
+- `updateCardMemoryState()` - applies adaptive weights to card state
+- `computePriority()` - adds phase and heap-size context to heap priority
+- `generateSystemThought()` - explains learning phase and focused-block behaviour in the UI
+
+### 11.12 Conceptual Outcome
 
 This system behaves like a unified model of:
 
@@ -1279,14 +1465,20 @@ This system behaves like a unified model of:
 - Anki-style repetition
 - Cognitive time-based retrieval modelling
 - Adaptive difficulty tutoring
+- Personalised learning curve estimation
+- MoE-inspired focused reinforcement blocks
 
-### 11.12 Key Insight
+### 11.13 Key Insight
 
 Memory is not stored as correctness.
 
 It is stored as:
 
 > stability × timing × uncertainty dynamics
+
+Version 6.0 extends this:
+
+> NeuroNet does not only adapt cards to memory. It adapts the structure of learning to the specific human using it.
 
 ---
 

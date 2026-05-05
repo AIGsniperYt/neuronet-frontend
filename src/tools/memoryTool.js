@@ -34,6 +34,84 @@ export async function initMemoryTool(deps, context = {}) {
     window.__neuronetMemoryCleanup();
   }
 
+  function getDefaultUserLearningProfile() {
+    return {
+      learningSpeedFactor: 1,
+      retentionCurveSlope: 1,
+      noiseTolerance: 0.65,
+      stabilityGainRate: 1,
+      forgettingResistance: 1,
+      optimalRepetitionRange: [3, 5],
+      expectedTrialsToMastery: 5,
+      heapSensitivity: 1,
+      baseRetentionStrength: 1,
+      phaseThresholds: {
+        warmingReviews: 2,
+        stabilisingReviews: 5,
+        stableUncertainty: 0.32,
+        masteredStability: 8,
+        masteredEasyStreak: 3
+      },
+      phaseDistributionHistory: {},
+      updatedAt: Date.now()
+    };
+  }
+
+  function loadUserLearningProfile() {
+    const defaults = getDefaultUserLearningProfile();
+    try {
+      const raw = window.localStorage?.getItem("neuronet:userLearningProfile");
+      if (!raw) return defaults;
+      const parsed = JSON.parse(raw);
+      return normalizeUserLearningProfile(parsed, defaults);
+    } catch (error) {
+      console.warn("Failed to load NeuroNet learning profile:", error);
+      return defaults;
+    }
+  }
+
+  function normalizeUserLearningProfile(profile = {}, defaults = getDefaultUserLearningProfile()) {
+    const merged = {
+      ...defaults,
+      ...profile,
+      phaseThresholds: {
+        ...defaults.phaseThresholds,
+        ...(profile.phaseThresholds || {})
+      },
+      phaseDistributionHistory: {
+        ...defaults.phaseDistributionHistory,
+        ...(profile.phaseDistributionHistory || {})
+      }
+    };
+    merged.learningSpeedFactor = clampNumber(Number(merged.learningSpeedFactor), 0.45, 1.8);
+    merged.retentionCurveSlope = clampNumber(Number(merged.retentionCurveSlope), 0.5, 1.8);
+    merged.noiseTolerance = clampNumber(Number(merged.noiseTolerance), 0.25, 0.95);
+    merged.stabilityGainRate = clampNumber(Number(merged.stabilityGainRate), 0.5, 1.8);
+    merged.forgettingResistance = clampNumber(Number(merged.forgettingResistance), 0.5, 1.8);
+    merged.expectedTrialsToMastery = clampNumber(Number(merged.expectedTrialsToMastery), 2, 12);
+    merged.heapSensitivity = clampNumber(Number(merged.heapSensitivity), 0.45, 1.8);
+    merged.baseRetentionStrength = clampNumber(Number(merged.baseRetentionStrength), 0.5, 2);
+    if (!Array.isArray(merged.optimalRepetitionRange)) {
+      merged.optimalRepetitionRange = defaults.optimalRepetitionRange;
+    }
+    merged.optimalRepetitionRange = [
+      clampNumber(Number(merged.optimalRepetitionRange[0]), 2, 8),
+      clampNumber(Number(merged.optimalRepetitionRange[1]), 3, 14)
+    ];
+    if (merged.optimalRepetitionRange[1] < merged.optimalRepetitionRange[0]) {
+      merged.optimalRepetitionRange[1] = merged.optimalRepetitionRange[0] + 1;
+    }
+    return merged;
+  }
+
+  function saveUserLearningProfile(profile) {
+    try {
+      window.localStorage?.setItem("neuronet:userLearningProfile", JSON.stringify(profile));
+    } catch (error) {
+      console.warn("Failed to save NeuroNet learning profile:", error);
+    }
+  }
+
   const state = {
     view: contextSubject ? "study" : "launchpad",
     currentSubject: contextSubject || "",
@@ -49,8 +127,12 @@ export async function initMemoryTool(deps, context = {}) {
       shownAt: null,
       revealedAt: null,
       suppressDBChange: 0,
-      lastGradeReaction: null
+      lastGradeReaction: null,
+      weightCache: new Map(),
+      learningMode: "global-srs",
+      focusedBlockKeys: new Set()
     },
+    userProfile: loadUserLearningProfile(),
     stats: {
       totalStudied: 0,
       correctAnswers: 0,
@@ -718,11 +800,24 @@ export async function initMemoryTool(deps, context = {}) {
     const persistRecord = isBlurt ? currentCard.targetRecord : currentCard.record;
     if (!persistKind || !persistRecord) return;
 
+    const heapSize = (state.session.heap?.size?.() || 0) + state.flashcards.length;
+    const phase = getUserLearningPhase(currentCard, state.userProfile);
+    const weights = getSessionWeightCache(currentCard, phase, heapSize);
+    const previousMemoryState = { ...currentCard.memoryState };
     const updatedMemoryState = updateCardMemoryState(
       currentCard.memoryState,
-      { grade, responseTimeMs, confidence: null },
+      { grade, responseTimeMs, confidence: null, phase, weights },
       nowMs
     );
+    state.userProfile = updateUserLearningModel(state.userProfile, {
+      previousMemoryState,
+      updatedMemoryState,
+      grade,
+      responseTimeMs,
+      phase,
+      heapSize
+    });
+    saveUserLearningProfile(state.userProfile);
 
     currentCard.review.graded = true;
     currentCard.review.grade = grade;
@@ -975,6 +1070,9 @@ export async function initMemoryTool(deps, context = {}) {
     state.session.shownAt = null;
     state.session.revealedAt = null;
     state.session.suppressDBChange = 0;
+    state.session.weightCache = new Map();
+    state.session.learningMode = "global-srs";
+    state.session.focusedBlockKeys = new Set();
 
     if (state.currentMode === "quote-learning") {
       await buildQuoteLearningQueue();
@@ -1123,6 +1221,9 @@ export async function initMemoryTool(deps, context = {}) {
       timeVariance: clampNumber(Number(meta.timeVariance ?? 0.7), 0, 1000),
       consistency: clampNumber(Number(meta.consistency ?? 0.7), 0, 1),
       confidence: clampNumber(Number(meta.confidence ?? 0.7), 0, 1),
+      L_phase: meta.L_phase || null,
+      easyStreak: Number.isFinite(Number(meta.easyStreak)) ? Number(meta.easyStreak) : 0,
+      recentGrades: Array.isArray(meta.recentGrades) ? meta.recentGrades.slice(-6) : [],
       lastGrade: meta.lastGrade || null
     };
   }
@@ -1142,13 +1243,79 @@ export async function initMemoryTool(deps, context = {}) {
       timeVariance: memoryState.timeVariance,
       consistency: memoryState.consistency,
       confidence: memoryState.confidence,
+      L_phase: memoryState.L_phase,
+      easyStreak: memoryState.easyStreak,
+      recentGrades: memoryState.recentGrades,
       lastGrade: memoryState.lastGrade
     };
   }
 
-  function updateCardMemoryState(memoryState, { grade, responseTimeMs, confidence }, nowMs) {
+  function getUserLearningPhase(cardOrMemoryState, userProfile = state.userProfile) {
+    const ms = cardOrMemoryState?.memoryState || cardOrMemoryState || {};
+    const reviewCount = Number(ms.reviewCount || 0);
+    const recentGrades = Array.isArray(ms.recentGrades) ? ms.recentGrades : [];
+    const easyCount = recentGrades.filter((g) => g === "easy").length;
+    const gradeVariety = new Set(recentGrades).size;
+    const easyStreak = Number(ms.easyStreak || 0);
+    const thresholds = userProfile.phaseThresholds || getDefaultUserLearningProfile().phaseThresholds;
+
+    if (reviewCount === 0) return "new";
+    if (reviewCount <= thresholds.warmingReviews) return "warming";
+    if (Number(ms.S || 0) >= thresholds.masteredStability && easyStreak >= thresholds.masteredEasyStreak && Number(ms.U ?? 1) < thresholds.stableUncertainty) {
+      return "mastered";
+    }
+    if ((easyCount >= Math.max(2, recentGrades.length - 1) && Number(ms.U ?? 1) <= thresholds.stableUncertainty) || easyStreak >= thresholds.masteredEasyStreak) {
+      return "stable";
+    }
+    if (reviewCount <= Math.max(thresholds.stabilisingReviews, Math.round(userProfile.expectedTrialsToMastery || 5)) || gradeVariety > 1) {
+      return "stabilising";
+    }
+    return Number(ms.U ?? 1) <= thresholds.stableUncertainty ? "stable" : "stabilising";
+  }
+
+  function getPhaseMultiplier(phase) {
+    switch (phase) {
+      case "new": return 0.45;
+      case "warming": return 0.85;
+      case "stabilising": return 1.1;
+      case "stable": return 1.35;
+      case "mastered": return 0.9;
+      default: return 1;
+    }
+  }
+
+  function getAdaptiveWeights(userProfile, phase, heapSize = 0) {
+    const heapFactor = Math.max(1, Math.log((heapSize || 0) + 1));
+    const phaseMultiplier = getPhaseMultiplier(phase);
+    const learningSpeed = clampNumber(Number(userProfile.learningSpeedFactor || 1), 0.45, 1.8);
+    const stabilityGain = clampNumber(Number(userProfile.stabilityGainRate || 1), 0.5, 1.8);
+    const forgettingResistance = clampNumber(Number(userProfile.forgettingResistance || 1), 0.5, 1.8);
+    const heapSensitivity = clampNumber(Number(userProfile.heapSensitivity || 1), 0.45, 1.8);
+
+    return {
+      alphaEffective: 0.25 * learningSpeed * phaseMultiplier * stabilityGain,
+      betaEffective: 0.2 * learningSpeed * phaseMultiplier,
+      gammaEffective: 0.2 * phaseMultiplier / forgettingResistance,
+      heapFactor,
+      phaseMultiplier,
+      intervalScale: 1 / Math.max(1, heapFactor * heapSensitivity)
+    };
+  }
+
+  function getSessionWeightCache(card, phase, heapSize) {
+    const key = `${getCardQueueKey(card) || "card"}:${phase}`;
+    const cached = state.session.weightCache?.get(key);
+    if (cached) return cached;
+    const weights = getAdaptiveWeights(state.userProfile, phase, heapSize);
+    state.session.weightCache?.set(key, weights);
+    return weights;
+  }
+
+  function updateCardMemoryState(memoryState, { grade, responseTimeMs, confidence, phase = null, weights = null }, nowMs) {
     const gradeNorm = grade === "easy" ? 1 : grade === "kinda" ? 0 : -1;
     const gradeAbs = Math.abs(gradeNorm);
+    const effectivePhase = phase || getUserLearningPhase(memoryState);
+    const adaptiveWeights = weights || getAdaptiveWeights(state.userProfile, effectivePhase, state.session.heap?.size?.() || 0);
 
     const expectedSeconds = clampNumber(Number(memoryState.expectedTime ?? 4), 1, 120);
     const actualSeconds = clampNumber(Number(responseTimeMs ?? 4000) / 1000, 0.2, 240);
@@ -1157,22 +1324,24 @@ export async function initMemoryTool(deps, context = {}) {
     const T_effect = 1 / (1 + Math.exp(2 * (TF - 1)));
 
     let S = memoryState.S;
-    S = S * (1 + 0.25 * gradeNorm * T_effect) - 0.15 * (1 - T_effect) * (gradeAbs + 0.2);
+    S = S * (1 + adaptiveWeights.alphaEffective * gradeNorm * T_effect) - 0.15 * (1 - T_effect) * (gradeAbs + 0.2);
     S = clampNumber(S, 0.1, 1000);
 
     let D = memoryState.D;
-    D = D * (1 - 0.2 * gradeNorm * T_effect) + 0.1 * (1 - gradeAbs) * (1 - T_effect);
+    D = D * (1 - adaptiveWeights.betaEffective * gradeNorm * T_effect) + 0.1 * (1 - gradeAbs) * (1 - T_effect);
     D = clampNumber(D, 0.1, 1000);
 
     let consistency = clampNumber(memoryState.consistency ?? 0.7, 0, 1);
     consistency = clampNumber(consistency + 0.05 * gradeNorm * T_effect - 0.02 * (1 - T_effect), 0, 1);
 
     let U = memoryState.U;
-    U = U + 0.2 * (1 - consistency) + 0.15 * (1 - T_effect);
+    U = U + adaptiveWeights.gammaEffective * (1 - consistency) + 0.15 * (1 - T_effect);
     U = clampNumber(U, 0, 1);
 
     const I_base = S / (D + 0.5);
-    let intervalDays = I_base * (1 + 0.8 * gradeNorm * T_effect);
+    const earlyLearningGate = Number(memoryState.reviewCount || 0) < 3;
+    const earlyMultiplier = earlyLearningGate ? (gradeNorm < 0 ? 0.9 : 1.05) : (1 + 0.8 * gradeNorm * T_effect);
+    let intervalDays = I_base * earlyMultiplier * adaptiveWeights.intervalScale;
     intervalDays = clampNumber(intervalDays, 0.1, 365);
 
     const intervalMs = intervalDays * 86400000;
@@ -1187,6 +1356,9 @@ export async function initMemoryTool(deps, context = {}) {
     const reviewCount = (memoryState.reviewCount ?? 0) + 1;
     const confidenceBase = confidence ?? memoryState.confidence ?? 0.7;
     const confidenceOut = clampNumber(confidenceBase + 0.06 * gradeNorm - 0.03 * (1 - T_effect), 0, 1);
+    const recentGrades = [...(Array.isArray(memoryState.recentGrades) ? memoryState.recentGrades : []), grade].slice(-6);
+    const easyStreak = grade === "easy" ? Number(memoryState.easyStreak || 0) + 1 : 0;
+    const L_phase = getUserLearningPhase({ ...memoryState, S, U, reviewCount, recentGrades, easyStreak });
 
     return {
       ...memoryState,
@@ -1201,11 +1373,62 @@ export async function initMemoryTool(deps, context = {}) {
       timeVariance,
       consistency,
       confidence: confidenceOut,
+      L_phase,
+      easyStreak,
+      recentGrades,
       lastGrade: grade
     };
   }
 
-  function computePriority(memoryState, nowMs, quotePriority = null) {
+  function updateUserLearningModel(userProfile, outcome) {
+    const profile = normalizeUserLearningProfile(userProfile);
+    const previous = outcome.previousMemoryState || {};
+    const updated = outcome.updatedMemoryState || {};
+    const gradeNorm = outcome.grade === "easy" ? 1 : outcome.grade === "kinda" ? 0 : -1;
+    const expectedSeconds = clampNumber(Number(previous.expectedTime ?? 4), 1, 120);
+    const actualSeconds = clampNumber(Number(outcome.responseTimeMs ?? 4000) / 1000, 0.2, 240);
+    const timeEffect = 1 / (1 + Math.exp(2 * ((actualSeconds / expectedSeconds) - 1)));
+    const stabilityDelta = Number(updated.S || 0) - Number(previous.S || 0);
+    const alpha = 0.08;
+
+    const speedTarget = gradeNorm > 0 && timeEffect > 0.5 ? 1.18 : gradeNorm < 0 && (previous.reviewCount || 0) >= 3 ? 0.9 : 1;
+    profile.learningSpeedFactor = clampNumber(profile.learningSpeedFactor * (1 - alpha) + speedTarget * alpha, 0.45, 1.8);
+
+    const stabilityTarget = stabilityDelta > 0 ? 1.12 : gradeNorm < 0 ? 0.92 : 1;
+    profile.stabilityGainRate = clampNumber(profile.stabilityGainRate * 0.93 + stabilityTarget * 0.07, 0.5, 1.8);
+
+    const forgettingTarget = gradeNorm < 0 && (previous.reviewCount || 0) >= 3 ? 0.9 : gradeNorm > 0 ? 1.08 : 1;
+    profile.forgettingResistance = clampNumber(profile.forgettingResistance * 0.94 + forgettingTarget * 0.06, 0.5, 1.8);
+
+    const noiseTarget = (previous.reviewCount || 0) < 3 ? 0.8 : outcome.grade === "kinda" ? 0.7 : 0.6;
+    profile.noiseTolerance = clampNumber(profile.noiseTolerance * 0.94 + noiseTarget * 0.06, 0.25, 0.95);
+
+    const mastered = updated.L_phase === "mastered" || updated.L_phase === "stable";
+    const trialsTarget = mastered ? clampNumber(Number(updated.reviewCount || profile.expectedTrialsToMastery), 2, 12) : clampNumber(Number(updated.reviewCount || 1) + 2, 2, 12);
+    profile.expectedTrialsToMastery = clampNumber(profile.expectedTrialsToMastery * 0.9 + trialsTarget * 0.1, 2, 12);
+    profile.optimalRepetitionRange = [
+      clampNumber(Math.round(profile.expectedTrialsToMastery - 1), 2, 8),
+      clampNumber(Math.round(profile.expectedTrialsToMastery + 2), 3, 14)
+    ];
+
+    const heapTarget = outcome.heapSize > 100 ? 1.2 : outcome.heapSize < 20 ? 0.8 : 1;
+    profile.heapSensitivity = clampNumber(profile.heapSensitivity * 0.95 + heapTarget * 0.05, 0.45, 1.8);
+
+    const phase = updated.L_phase || outcome.phase || "new";
+    profile.phaseDistributionHistory[phase] = (profile.phaseDistributionHistory[phase] || 0) + 1;
+    profile.phaseThresholds = {
+      ...profile.phaseThresholds,
+      warmingReviews: clampNumber(Math.round(Math.min(3, Math.max(1, profile.expectedTrialsToMastery * 0.35))), 1, 3),
+      stabilisingReviews: clampNumber(Math.round(profile.expectedTrialsToMastery), 3, 8),
+      stableUncertainty: clampNumber(0.35 + (profile.noiseTolerance - 0.65) * 0.2, 0.25, 0.5),
+      masteredStability: clampNumber(7 + (profile.expectedTrialsToMastery - 5) * 0.6, 5, 12),
+      masteredEasyStreak: clampNumber(Math.round(profile.expectedTrialsToMastery / 2), 2, 5)
+    };
+    profile.updatedAt = Date.now();
+    return normalizeUserLearningProfile(profile);
+  }
+
+  function computePriority(memoryState, nowMs, quotePriority = null, context = {}) {
     let overdueDays;
     if (Number.isFinite(Number(memoryState.nextReview)) && memoryState.nextReview > 0) {
       overdueDays = (nowMs - Number(memoryState.nextReview)) / 86400000;
@@ -1214,7 +1437,11 @@ export async function initMemoryTool(deps, context = {}) {
       overdueDays = 0;
     }
     const U = clampNumber(Number(memoryState.U ?? 0.5), 0, 1);
-    let result = 1 + overdueDays + U * 0.8;
+    const phase = context.phase || getUserLearningPhase(memoryState);
+    const heapSize = Number(context.heapSize ?? state.session.heap?.size?.() ?? 0);
+    const heapFactor = Math.max(1, Math.log(heapSize + 1));
+    const phaseBoost = phase === "new" ? 0.6 : phase === "warming" ? 0.45 : phase === "stabilising" ? 0.3 : phase === "mastered" ? -0.4 : 0;
+    let result = 1 + overdueDays + U * 0.8 + phaseBoost;
 
     // Factor in quote priority (1-5 scale, 5 = highest user priority)
     if (quotePriority !== null && quotePriority !== undefined) {
@@ -1222,17 +1449,120 @@ export async function initMemoryTool(deps, context = {}) {
       result += (p - 1) * 2; // Priority 5 adds 8.0 boost, Priority 1 adds 0
     }
 
-    return result;
+    return result / Math.sqrt(heapFactor);
+  }
+
+  function selectLearningMode(heapOrCards, userProfile = state.userProfile) {
+    const cards = Array.isArray(heapOrCards)
+      ? heapOrCards
+      : (heapOrCards?.items || []).map((item) => item.card).filter(Boolean);
+    const heapSize = cards.length;
+    if (heapSize < 20) return "global-srs";
+
+    const earlyCount = cards.filter((card) => {
+      const phase = getUserLearningPhase(card, userProfile);
+      return phase === "new" || phase === "warming" || phase === "stabilising";
+    }).length;
+    const earlyRatio = heapSize > 0 ? earlyCount / heapSize : 0;
+    const expectedTrials = Number(userProfile.expectedTrialsToMastery || 5);
+
+    if (heapSize > 100 && earlyRatio > 0.25) return "focused-block";
+    if (expectedTrials >= 6 && earlyCount >= 12) return "focused-block";
+    return "global-srs";
+  }
+
+  function getCardClusterKey(card) {
+    const path = card?.record?.meta?.hierarchyPath || card?.targetRecord?.meta?.hierarchyPath || [];
+    if (path[1]) return `layer:${path[1]}`;
+    const tags = card?.record?.meta?.tags || card?.record?.tags || card?.targetRecord?.meta?.tags || [];
+    if (tags[0]) return `tag:${tags[0]}`;
+    const difficulty = Math.round(Number(card?.memoryState?.D || 1));
+    return `difficulty:${difficulty}`;
+  }
+
+  function selectFocusedBlock(cards, userProfile = state.userProfile) {
+    if (!Array.isArray(cards) || cards.length === 0) return { block: [], remainder: [] };
+    const groups = new Map();
+    cards.forEach((card) => {
+      const phase = getUserLearningPhase(card, userProfile);
+      const clusterKey = `${phase}:${getCardClusterKey(card)}`;
+      if (!groups.has(clusterKey)) groups.set(clusterKey, []);
+      groups.get(clusterKey).push(card);
+    });
+
+    const sortedGroups = [...groups.values()].sort((a, b) => {
+      const aScore = a.length + a.reduce((sum, card) => sum + Number(card.memoryState?.U || 0), 0);
+      const bScore = b.length + b.reduce((sum, card) => sum + Number(card.memoryState?.U || 0), 0);
+      return bScore - aScore;
+    });
+
+    const speed = clampNumber(Number(userProfile.learningSpeedFactor || 1), 0.45, 1.8);
+    const maxBlockSize = clampNumber(Math.round(8 * speed), 5, 16);
+    const block = sortedGroups[0]?.slice(0, maxBlockSize) || cards.slice(0, maxBlockSize);
+    const blockKeys = new Set(block.map(getCardQueueKey).filter(Boolean));
+    const remainder = cards.filter((card) => !blockKeys.has(getCardQueueKey(card)));
+    return { block, remainder };
+  }
+
+  function enqueueLearningCards(cards, nowMs) {
+    let activeCards = Array.isArray(cards) ? cards : [];
+    state.session.surprisePool = [];
+    state.session.learningMode = selectLearningMode(activeCards, state.userProfile);
+    state.session.focusedBlockKeys = new Set();
+
+    if (state.session.learningMode === "focused-block") {
+      const { block, remainder } = selectFocusedBlock(activeCards, state.userProfile);
+      activeCards = block;
+      state.session.surprisePool = remainder;
+      state.session.focusedBlockKeys = new Set(block.map(getCardQueueKey).filter(Boolean));
+    }
+
+    const heapSize = activeCards.length + state.session.surprisePool.length;
+    activeCards.forEach((card) => {
+      const phase = getUserLearningPhase(card, state.userProfile);
+      card.memoryState.L_phase = phase;
+      const quotePriority = card.memoryKind === "quote" || card.targetKind === "quote"
+        ? (card.record?.priority ?? card.targetRecord?.priority ?? null)
+        : null;
+      const priority = computePriority(card.memoryState, nowMs, quotePriority, { phase, heapSize });
+      state.session.heap.push({ priority, card });
+    });
+  }
+
+  function isFocusedBlockComplete() {
+    if (state.session.learningMode !== "focused-block" || !state.session.focusedBlockKeys?.size) return false;
+    const blockCards = [
+      ...state.flashcards,
+      ...(state.session.heap?.items || []).map((item) => item.card)
+    ].filter((card) => state.session.focusedBlockKeys.has(getCardQueueKey(card)));
+    if (blockCards.length === 0) return false;
+    const avgEasyStreak = blockCards.reduce((sum, card) => sum + Number(card?.memoryState?.easyStreak || 0), 0) / blockCards.length;
+    const avgUncertainty = blockCards.reduce((sum, card) => sum + Number(card?.memoryState?.U ?? 1), 0) / blockCards.length;
+    const targetStreak = clampNumber(Math.round(state.userProfile.expectedTrialsToMastery / 2), 3, 5);
+    const threshold = state.userProfile.phaseThresholds?.stableUncertainty ?? 0.32;
+    return avgEasyStreak >= targetStreak && avgUncertainty < threshold;
   }
 
   async function maybeEnqueueSurpriseCard() {
-    if (state.currentMode !== "quote-learning" && state.currentMode !== "analysis-learning") return;
+    if (state.currentMode !== "quote-learning" && state.currentMode !== "analysis-learning" && state.currentMode !== "blurt") return;
     if (!state.session.heap) return;
     if (!Array.isArray(state.session.surprisePool) || state.session.surprisePool.length === 0) return;
-    if (Math.random() > 0.08) return;
+    const injectionRate = isFocusedBlockComplete() ? 1 : (state.session.learningMode === "focused-block" ? 0.15 : 0.08);
+    if (Math.random() > injectionRate) return;
 
     const idx = Math.floor(Math.random() * state.session.surprisePool.length);
     const candidate = state.session.surprisePool.splice(idx, 1)[0];
+    if (candidate?.review && candidate?.memoryState) {
+      if (state.flashcards.some((c) => getCardQueueKey(c) === getCardQueueKey(candidate)) || state.session.heap.hasCard(candidate)) return;
+      const phase = getUserLearningPhase(candidate, state.userProfile);
+      const quotePriority = candidate.memoryKind === "quote" ? (candidate.record?.priority ?? null) : null;
+      const priority = computePriority(candidate.memoryState, Date.now(), quotePriority, {
+        phase,
+        heapSize: (state.session.heap?.size?.() || 0) + state.session.surprisePool.length
+      }) + 0.7;
+      state.session.heap.push({ priority, card: candidate });
+      return;
+    }
     if (!candidate?.record?.id) return;
 
     const alreadySeen = state.flashcards.some((c) => c?.record?.id === candidate.record.id || c?.id === candidate.record.id);
@@ -1372,11 +1702,7 @@ export async function initMemoryTool(deps, context = {}) {
       });
     }
 
-    filteredCards.forEach((card) => {
-      const quotePriority = card.record?.priority ?? null;
-      const priority = computePriority(card.memoryState, nowMs, quotePriority);
-      state.session.heap.push({ priority, card });
-    });
+    enqueueLearningCards(filteredCards, nowMs);
   }
 
   function getCueForQuote(quote, cueNode = null) {
@@ -1429,11 +1755,7 @@ export async function initMemoryTool(deps, context = {}) {
       });
     }
 
-    filteredCards.forEach((card) => {
-      // Analysis nodes don't have quote priority, but we could compute from referenced quotes
-      const priority = computePriority(card.memoryState, nowMs);
-      state.session.heap.push({ priority, card });
-    });
+    enqueueLearningCards(filteredCards, nowMs);
   }
 
   async function buildBlurtQueue() {
@@ -1511,6 +1833,7 @@ export async function initMemoryTool(deps, context = {}) {
       });
     }
 
+    const cards = [];
     subjectCues.forEach((cue) => {
       let targetKind = null;
       let targetRecord = null;
@@ -1547,9 +1870,9 @@ export async function initMemoryTool(deps, context = {}) {
         memoryState
       };
 
-      const priority = computePriority(memoryState, nowMs, cue.quoteId ? (quotesById.get(cue.quoteId)?.priority ?? null) : null);
-      state.session.heap.push({ priority, card });
+      cards.push(card);
     });
+    enqueueLearningCards(cards, nowMs);
   }
 
   async function loadEvidenceMatchingFlashcards() {
@@ -2232,6 +2555,8 @@ export async function initMemoryTool(deps, context = {}) {
     const D = ms.D ?? 1;
     const interval = ms.interval || 0;
     const mode = state.currentMode;
+    const learningMode = state.session.learningMode || "global-srs";
+    const phase = ms.L_phase || getUserLearningPhase(card, state.userProfile);
     const isNew = reviewCount === 0;
 
     // Build a pool of contextual messages based on state
@@ -2259,6 +2584,10 @@ export async function initMemoryTool(deps, context = {}) {
       pool.push("New item. No prior review data — using default SRS parameters.");
     } else if (reviewCount === 1) {
       pool.push("Second review. Building early stability from the first pass.");
+    } else if (phase === "stabilising") {
+      pool.push("Stabilising phase. Inconsistent early recall is treated as learning noise, not failure.");
+    } else if (phase === "mastered") {
+      pool.push("Mastered phase detected. Scheduling is now preserving retention rather than drilling.");
     } else if (reviewCount >= 10) {
       pool.push(`Mature memory. ${reviewCount} reviews logged — long-term retention forming.`);
     } else if (reviewCount >= 5) {
@@ -2283,10 +2612,13 @@ export async function initMemoryTool(deps, context = {}) {
     } else if (heapSize > 10) {
       pool.push(`${heapSize} items queued. Prioritising highest-urgency cards first.`);
     }
+    if (learningMode === "focused-block") {
+      pool.push("Focused block mode active. Reinforcing a related subset while occasionally interleaving older cards.");
+    }
     if (state.stats.streak >= 5) {
       pool.push(`${state.stats.streak}-card streak. Recall quality is strong this session.`);
     }
-    if (state.stats.totalStudied > 0 && state.stats.correctAnswers / state.stats.totalStudied < 0.4) {
+    if (reviewCount >= 3 && state.stats.totalStudied > 0 && state.stats.correctAnswers / state.stats.totalStudied < 0.4) {
       pool.push("Session accuracy is low. Consider shorter intervals or a review break.");
     }
 
