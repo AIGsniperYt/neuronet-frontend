@@ -1,8 +1,8 @@
 # NeuroNet Developer Specification
 
-**Version**: 6.1  
-**Date**: May 5, 2026  
-**Status**: Production-ready with SSS (Semantic Search System) anchoring, complete tool implementations (Analysis v2, Memory SuperProgram, Mindmap), bidirectional quote/analysis linking, layer hierarchy navigation, advanced source editor, full feature parity across codebase, advanced lite deckbuilder with layer categorising and priority heap ordering, a specific study filter system, an adaptive learning layer that personalises memory scheduling per user, and a Learning Router that selects cold/warm learning strategy before heap construction
+**Version**: 6.2  
+**Date**: May 6, 2026  
+**Status**: Production-ready with SSS (Semantic Search System) anchoring, complete tool implementations (Analysis v2, Memory SuperProgram, Mindmap), bidirectional quote/analysis linking, layer hierarchy navigation, advanced source editor, full feature parity across codebase, advanced lite deckbuilder with layer categorising and priority heap ordering, a specific study filter system, an adaptive learning layer that personalises memory scheduling per user, a Learning Router that selects cold/warm learning strategy, and a multi-mode Sidebar System for context-aware intelligence (Focus, Router, Inspect, Explore)
 
 ---
 
@@ -686,12 +686,32 @@ const deckBuilderState = {
 - Cards popped by highest priority (overdue + uncertainty + quote priority boost)
 - Surprise cards inserted with +0.7 priority boost (8% chance)
 
-**Stats Panel**:
+**Sidebar Mode System**:
 
-- Right sidebar slides in from right
-- Stats Grid: Total Studied, Correct, Streak, Best Streak, Accuracy %
-- Priority Distribution: P1-P5 counts with color-coded pills
-- Heap Queue Display: Sorted by priority, shows rank, label, priority value, due date, interval, last grade
+The stats panel has been upgraded into a multi-mode intelligence surface controlled by a tab switcher at the top of the sidebar.
+
+1. **Focus Mode (Default)**:
+   - Study HUD showing session stats (Correct, Streak, Accuracy).
+   - Route Strip: Displays current Learning Route, Scope, and Heap size.
+   - Heap Queue: Real-time priority-ordered list of upcoming cards.
+
+2. **Router Mode**:
+   - Visualization of the Learning Router's decision logic.
+   - Strategy Banner: Explains why the current route (Cold/Warm) and mode (Global/Focused/Sweep) was selected.
+   - Decision Trace: Detailed steps showing internal metrics (Uncertainty, Phase ratios) that drove the selection.
+   - Live Metrics: Real-time monitoring of re-route counts and system-wide uncertainty.
+
+3. **Inspect Mode**:
+   - Deep-dive metadata for individual flashcards (triggered via card clicks or "Inspect" button).
+   - Memory State: S/D/U values with visual uncertainty bars.
+   - Priority Score Breakdown: Shows how the final score is calculated (Base + Overdue + Uncertainty + Phase Boost + Priority Stars).
+   - Review Timeline: Visual history of recent grades and intervals.
+
+4. **Explore Mode**:
+   - System-wide card browser for the current subject.
+   - Filter Chips: Browse by kind (Quote/Analysis) or learning phase (New, Stabilising, Mastered).
+   - Card List: Paginated results showing card preview and metadata.
+   - Quick Action: Start a new study session directly from the explorer.
 
 **SuperProgram Formulas**: See Section 11 for complete mathematical model (Core State, Time Model, Grade Encoding, Update Equations, Recall Model, Scheduling Rule, Full Update Function).
 
@@ -1537,6 +1557,68 @@ Focused Block Mode selects local clusters using:
 - Quote/analysis graph density
 
 Even in local modes, old or out-of-scope cards are occasionally interleaved through `interleaveRate` so the system does not mistake local fluency for durable mastery.
+
+#### Learning Router UI Legend
+
+The Memory Tool stats/sidebar exposes the active route so the user can see why the current study queue feels the way it does.
+
+Display shape:
+
+```text
+mode | startType | heapConstruction | samplingStrategy | sampleSize/heapSize structural sample
+```
+
+Example:
+
+```text
+focused_block | cold_start | local | mixed | 36/36 structural sample
+```
+
+Definitions:
+
+| Label | Meaning |
+|-------|---------|
+| `mode` | The selected learning mode: `global_srs`, `focused_block`, `rapid_sweep`, or `repair_cycle` |
+| `startType` | Whether the router classified the session as `cold_start` / `cold_import` style learning or `warm_start` / `warm_knowledge` consolidation |
+| `heapConstruction` | How the active heap was built before scheduling |
+| `samplingStrategy` | Which signals were used to inspect and choose the active scope |
+| `structural sample` | The bounded metadata sample used to infer deck structure before building the active heap |
+
+Heap construction labels:
+
+| Label | Meaning |
+|-------|---------|
+| `global` | Use the whole filtered deck as the active heap |
+| `local` | Build a smaller heap from one focused area, such as a cluster, layer, tag, or weak region |
+| `clustered` | Build around fragile or decaying clusters, usually for repair cycles |
+| `sampled` | Build from a bounded sample rather than the whole deck, usually for rapid sweep |
+
+Sampling strategy labels:
+
+| Label | Meaning |
+|-------|---------|
+| `priority` | Bias toward quote/card priority |
+| `stratified` | Spread the sample across layers, tags, clusters, subjects, and priority bands |
+| `uncertainty` | Bias toward cards with high uncertainty, recent failure, or unstable memory state |
+| `mixed` | Blend priority, uncertainty, tags, layers, clusters, phase, and quote/analysis graph structure |
+
+Structural sample counter:
+
+```text
+sampleSize/heapSize structural sample
+```
+
+The first number is how many cards the router inspected for structural discovery. The second number is how many candidate cards were available for the route/session.
+
+Examples:
+
+| Counter | Meaning |
+|---------|---------|
+| `36/36 structural sample` | Small enough candidate set that all 36 cards were inspected |
+| `56/200 structural sample` | Large candidate set; the router inspected 56 cards instead of running a full pass |
+| `45/45 structural sample` | Full structural inspection because the bounded sample limit was larger than the deck |
+
+The structural sample is not the same as the study heap. It is a router observation pass over metadata such as priority, tags, layers, phase, uncertainty, and clusters. On large decks, `sampleSize` should not exceed `heapSize`; if a UI ever shows a value like `56/45`, that indicates a display/accounting bug rather than intended router behaviour.
 
 #### Block Completion
 

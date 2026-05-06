@@ -30,6 +30,16 @@ export async function initMemoryTool(deps, context = {}) {
 
   const { subject: contextSubject } = context;
 
+  const SIDEBAR_MODES = {
+    FOCUS: "focus",
+    ROUTER: "router",
+    INSPECT: "inspect",
+    EXPLORE: "explore"
+  };
+
+  const ROUTER_DEBUG_MAX_STEPS = 20;
+  const EXPLORER_PAGE_SIZE = 30;
+
   if (typeof window.__neuronetMemoryCleanup === "function") {
     window.__neuronetMemoryCleanup();
   }
@@ -161,6 +171,23 @@ export async function initMemoryTool(deps, context = {}) {
       priorities: [],
       tags: [],
       layers: []
+    },
+    // Sidebar mode system
+    sidebarMode: SIDEBAR_MODES.FOCUS,
+    inspectedCardId: null,
+    explorerFilter: null,
+    explorerPage: 0,
+    explorerCards: [],
+    explorerLoading: false,
+    routerDebug: {
+      startType: null,
+      heapSize: 0,
+      earlyPhaseRatio: 0,
+      selectedRoute: null,
+      avgUncertainty: 0,
+      modeSwitchFrequency: 0,
+      reasoningSteps: [],
+      explanation: ""
     }
   };
 
@@ -365,13 +392,13 @@ export async function initMemoryTool(deps, context = {}) {
       let statsInterval = null;
 
       const openStats = () => {
-        renderStats();
+        renderSidebar();
         updateSystemThought();
         if (memoryStats) memoryStats.classList.add("open");
         if (!statsInterval) {
           statsInterval = setInterval(() => {
             if (memoryStats && memoryStats.classList.contains("open")) {
-              renderStats();
+              renderSidebar();  // was renderStats()
             } else {
               clearInterval(statsInterval);
               statsInterval = null;
@@ -418,6 +445,66 @@ export async function initMemoryTool(deps, context = {}) {
     if (gradeEasyBtn) {
       gradeEasyBtn.addEventListener("click", async () => {
         await gradeCurrentCard("easy");
+      });
+    }
+
+    // Sidebar tab event binding
+    const sidebarModeTabs = document.getElementById("sidebarModeTabs");
+    if (sidebarModeTabs && !sidebarModeTabs.dataset.bound) {
+      sidebarModeTabs.dataset.bound = "1";
+      sidebarModeTabs.addEventListener("click", (event) => {
+        const btn = event.target.closest("[data-mode]");
+        if (!btn) return;
+        setSidebarMode(btn.dataset.mode);
+      });
+    }
+
+    // Stats content event delegation (inspect, filter, page, study buttons)
+    if (statsContent && !statsContent.dataset.sidebarBound) {
+      statsContent.dataset.sidebarBound = "1";
+      statsContent.addEventListener("click", async (event) => {
+        const inspectBtn = event.target.closest("[data-inspect-card]");
+        if (inspectBtn) {
+          inspectCard(inspectBtn.dataset.inspectCard);
+          return;
+        }
+        const filterBtn = event.target.closest("[data-explorer-filter]");
+        if (filterBtn) {
+          state.explorerFilter = filterBtn.dataset.explorerFilter || null;
+          state.explorerPage = 0;
+          renderSidebar();
+          return;
+        }
+        const pageBtn = event.target.closest("[data-explorer-page]");
+        if (pageBtn) {
+          state.explorerPage = Math.max(0, Number(pageBtn.dataset.explorerPage || 0));
+          renderSidebar();
+          return;
+        }
+        const studyBtn = event.target.closest("[data-study-subject]");
+        if (studyBtn) {
+          const subject = studyBtn.dataset.studySubject || "";
+          if (!subject) return;
+          state.currentSubject = subject;
+          state.currentMode = "quote-learning";
+          state.sessionFilter = null;
+          state.view = "study";
+          state.sidebarMode = SIDEBAR_MODES.FOCUS;
+          await loadFlashcards();
+          renderUI();
+          renderSidebar();
+        }
+      });
+    }
+
+    // Flashcard inspect button handler
+    if (flashcard) {
+      flashcard.addEventListener("click", (e) => {
+        if (e.target.closest("[data-inspect-current]")) {
+          const current = state.flashcards[state.currentIndex];
+          inspectCard(getSidebarCardId(current));
+          return;
+        }
       });
     }
 
@@ -1934,6 +2021,9 @@ export async function initMemoryTool(deps, context = {}) {
     }, state.userProfile);
     state.session.learningMode = state.session.learningRoute.mode;
 
+    // Update router debug info
+    updateRouterDebug(state.session.learningRoute, state.session.systemState, []);
+
     const { activeCards, remainder } = buildActiveHeap(state.session.learningRoute, allCards);
     state.session.surprisePool = remainder;
     if (state.session.learningRoute.mode === "focused_block") {
@@ -1960,6 +2050,9 @@ export async function initMemoryTool(deps, context = {}) {
     }, state.userProfile);
     state.session.learningMode = state.session.learningRoute.mode;
     state.session.routeRerouteCounter = Number(state.session.routeRerouteCounter || 0) + 1;
+
+    // Update router debug info
+    updateRouterDebug(state.session.learningRoute, state.session.systemState, []);
 
     const { activeCards, remainder } = buildActiveHeap(state.session.learningRoute, remaining);
     state.session.surprisePool = remainder;
@@ -2993,6 +3086,529 @@ export async function initMemoryTool(deps, context = {}) {
     `;
   }
 
+  // ─── Sidebar Mode System ───────────────────────────────────────────────
+
+  function setSidebarMode(mode) {
+    if (!Object.values(SIDEBAR_MODES).includes(mode)) return;
+    if (state.sidebarMode === mode) {
+      state.sidebarMode = SIDEBAR_MODES.FOCUS;
+    } else {
+      state.sidebarMode = mode;
+    }
+
+    // Update tab active states
+    const tabBar = document.getElementById("sidebarModeTabs");
+    if (tabBar) {
+      tabBar.querySelectorAll(".sidebar-tab").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.mode === state.sidebarMode);
+      });
+    }
+    // Update header title
+    const headerTitle = document.getElementById("sidebarHeaderTitle");
+    const modeLabels = { focus: "Focus", router: "Router", inspect: "Inspect", explore: "Explore" };
+    if (headerTitle) headerTitle.textContent = modeLabels[state.sidebarMode] || "Focus";
+    // System thinking only visible in focus mode
+    const systemThinking = document.getElementById("systemThinking");
+    if (systemThinking) {
+      systemThinking.style.display = state.sidebarMode === SIDEBAR_MODES.FOCUS ? "" : "none";
+    }
+    renderSidebar();
+  }
+
+  function renderSidebar() {
+    // Refresh the outer statsContent reference
+    statsContent = document.getElementById("statsContent");
+    if (!statsContent) return;
+
+    switch (state.sidebarMode) {
+      case SIDEBAR_MODES.FOCUS:
+        renderFocusMode();
+        break;
+      case SIDEBAR_MODES.ROUTER:
+        renderRouterMode();
+        break;
+      case SIDEBAR_MODES.INSPECT:
+        renderInspectMode();
+        break;
+      case SIDEBAR_MODES.EXPLORE:
+        renderExploreMode();
+        break;
+      default:
+        renderFocusMode();
+    }
+  }
+
+  function renderFocusMode() {
+    if (!statsContent) return;
+    const route = state.session.learningRoute;
+    let routeStrip = "";
+    if (route) {
+      const startLabel = formatSidebarLabel(route.startType || "");
+      const routeLabel = formatSidebarLabel(route.mode || "");
+      const scopeLabel = getRouteScopeLabel(route);
+      const heapSize = state.session.heap?.size?.() || 0;
+      routeStrip = `
+        <div class="focus-router-strip">
+          <div class="focus-router-strip-row">
+            <span class="focus-router-strip-label">Route</span>
+            <span class="focus-router-strip-value">${escapeHtml(startLabel)} \u2192 ${escapeHtml(routeLabel)}</span>
+          </div>
+          <div class="focus-router-strip-row">
+            <span class="focus-router-strip-label">Scope</span>
+            <span class="focus-router-strip-value">${escapeHtml(scopeLabel)}</span>
+          </div>
+          <div class="focus-router-strip-row">
+            <span class="focus-router-strip-label">Heap</span>
+            <span class="focus-router-strip-value">${heapSize}</span>
+          </div>
+        </div>`;
+    }
+    // Delegate to existing stats renderer but inject the strip first
+    renderStats();
+    if (statsContent && routeStrip) {
+      statsContent.insertAdjacentHTML("afterbegin", routeStrip);
+    }
+  }
+
+  function renderRouterMode() {
+    if (!statsContent) return;
+    const rd = state.routerDebug;
+    if (!rd || !rd.selectedRoute) {
+      statsContent.innerHTML = `
+        <div class="inspect-placeholder">
+          <div class="inspect-placeholder-icon">\u2b21</div>
+          <div>No route selected yet.<br>Start studying to see router reasoning.</div>
+        </div>`;
+      return;
+    }
+    const routeLabel = formatSidebarLabel(rd.selectedRoute);
+    const startLabel = formatSidebarLabel(rd.startType || "");
+    const stepsHTML = rd.reasoningSteps.length > 0
+      ? rd.reasoningSteps.map(step => `
+        <div class="router-step">
+          <span class="step-label">${escapeHtml(String(step.label || ""))}</span>
+          <span class="step-value">${escapeHtml(String(step.value ?? ""))}</span>
+          <span class="step-effect">${escapeHtml(String(step.effect || ""))}</span>
+        </div>`).join("")
+      : `<div style="color:var(--text-muted);font-size:0.8rem;padding:8px 0;">No reasoning steps recorded.</div>`;
+    const avgU = Number(rd.avgUncertainty || 0).toFixed(2);
+    const earlyPct = Math.round((rd.earlyPhaseRatio || 0) * 100);
+    statsContent.innerHTML = `
+      <div class="router-route-banner">
+        <div class="router-route-label">${escapeHtml(startLabel)}</div>
+        <div class="router-route-name">${escapeHtml(routeLabel)}</div>
+        <div class="router-route-explanation">${escapeHtml(rd.explanation || "")}</div>
+      </div>
+      <div class="sidebar-section-title">Live Metrics</div>
+      <div class="router-live-metric">
+        <span class="metric-label">Heap Size</span>
+        <span class="metric-value">${rd.heapSize}</span>
+      </div>
+      <div class="router-live-metric">
+        <span class="metric-label">Early Phase %</span>
+        <span class="metric-value">${earlyPct}%</span>
+      </div>
+      <div class="router-live-metric">
+        <span class="metric-label">Avg Uncertainty</span>
+        <span class="metric-value">${avgU}</span>
+      </div>
+      <div class="router-live-metric">
+        <span class="metric-label">Re-routes</span>
+        <span class="metric-value">${state.session.routeRerouteCounter || 0}</span>
+      </div>
+      <div class="sidebar-section-title">Decision Trace</div>
+      ${stepsHTML}
+    `;
+  }
+
+  function getCardLabel(card) {
+    if (!card) return "?";
+    if (card.type === "blurt") return (card.cue?.cue || "Blurt").substring(0, 60);
+    if (card.type === "analysis-learning") return ((card.record?.analysis || "").replace(/[#*`]/g,"").trim().substring(0, 60) + "...");
+    return ((card?.record?.quote || card?.front?.content || "?").substring(0, 60) + "...");
+  }
+
+  function getSidebarCardId(card) {
+    if (!card) return null;
+    if (card.memoryKind === "quote" || card.type === "quote-learning") return card.record?.id || card.id || null;
+    if (card.memoryKind === "analysis" || card.type === "analysis-learning") return card.record?.id || card.id || null;
+    if (card.type === "blurt") return card.targetRecord?.id || card.id || null;
+    return card.id || null;
+  }
+
+  function findCardById(id) {
+    if (!id) return null;
+    const allCards = getAllCardsForExplore();
+    return allCards.find(c => getSidebarCardId(c) === id);
+  }
+
+  function renderInspectMode() {
+    if (!statsContent) return;
+    const cardId = state.inspectedCardId;
+    let card = null;
+    if (cardId) {
+      card = findCardById(cardId);
+      if (!card && state.session.heap) {
+        const heapItem = state.session.heap.items.find(item => getSidebarCardId(item.card) === cardId);
+        if (heapItem) card = heapItem.card;
+      }
+      if (!card && Array.isArray(state.session.surprisePool)) {
+        card = state.session.surprisePool.find(c => getSidebarCardId(c) === cardId);
+      }
+    }
+    if (!card) {
+      card = state.flashcards[state.currentIndex];
+    }
+    if (!card) {
+      statsContent.innerHTML = `
+        <div class="inspect-placeholder">
+          <div class="inspect-placeholder-icon">\uD83D\uDD0D</div>
+          <div>No card selected.<br>Click a heap item or tap Inspect on the flashcard.</div>
+        </div>`;
+      return;
+    }
+    const ms = card.memoryState || {};
+    const phase = getUserLearningPhase(card, state.userProfile);
+    const nowMs = Date.now();
+    const quotePriority = getQuotePriorityForCard(card);
+    const U = Number(ms.U ?? 0.5);
+    const overdueVal = ms.nextReview > 0 ? Math.max(0, (nowMs - ms.nextReview) / 86400000) : 0;
+    const layers = getCardLayers(card);
+    const tags = getCardTags(card);
+    const subject = getCardSubject(card);
+    const phaseBoost = phase === "new" ? 0.6 : phase === "warming" ? 0.45 : phase === "stabilising" ? 0.3 : phase === "mastered" ? -0.4 : 0;
+    const quotePriorityBoost = quotePriority ? (Number(quotePriority) - 1) * 2 : 0;
+    const totalScore = (1 + overdueVal + U * 0.8 + phaseBoost + quotePriorityBoost).toFixed(2);
+    const recentGrades = Array.isArray(ms.recentGrades) ? ms.recentGrades : [];
+    const gradeIcon = g => g === "easy" ? "\uD83D\uDFE2" : g === "kinda" ? "\uD83D\uDFE1" : g === "didnt_know" ? "\uD83D\uDD34" : "\u26AA";
+    const gradeLabel = g => g === "easy" ? "Easy" : g === "kinda" ? "Kinda" : g === "didnt_know" ? "Didn't Know" : g || "?";
+    const timelineHTML = recentGrades.length > 0
+      ? recentGrades.map((g, i) => `
+        <div class="inspect-timeline-item">
+          <div class="inspect-timeline-dot" style="background:${g === 'easy' ? '#3fd07d' : g === 'kinda' ? '#ffa500' : '#ff4d4d'};"></div>
+          <span style="color:var(--text-muted);">Review ${i + 1}</span>
+          <span style="margin-left:auto;color:var(--text-main);">${gradeIcon(g)} ${gradeLabel(g)}</span>
+        </div>`).join("")
+      : `<div style="color:var(--text-muted);font-size:0.78rem;padding:4px 0;">No review history yet.</div>`;
+    const previewText = card.front?.content || card.record?.quote || card.record?.analysis || "?";
+    const fmtDate = ts => ts ? new Date(ts).toLocaleDateString() : "never";
+    statsContent.innerHTML = `
+      <div class="inspect-card-header">
+        <div class="inspect-card-label">${escapeHtml(subject)}${layers.length ? " \u203A " + layers.join(" \u203A ") : ""}</div>
+        <div class="inspect-card-preview">${escapeHtml(String(previewText).substring(0, 120))}</div>
+      </div>
+      <div class="sidebar-section-title">Memory State</div>
+      <div class="inspect-metric-row">
+        <div class="inspect-metric">
+          <div class="inspect-metric-label">Stability (S)</div>
+          <div class="inspect-metric-value">${Number(ms.S ?? 1).toFixed(2)}</div>
+        </div>
+        <div class="inspect-metric">
+          <div class="inspect-metric-label">Difficulty (D)</div>
+          <div class="inspect-metric-value">${Number(ms.D ?? 1).toFixed(2)}</div>
+        </div>
+      </div>
+      <div class="inspect-metric-row">
+        <div class="inspect-metric">
+          <div class="inspect-metric-label">Uncertainty (U)</div>
+          <div class="inspect-metric-value">${(U * 100).toFixed(0)}%</div>
+          <div class="inspect-metric-bar">
+            <div class="inspect-metric-bar-fill" style="width:${(U * 100).toFixed(0)}%;background:${U > 0.65 ? '#ff4d4d' : U > 0.4 ? '#ffa500' : '#3fd07d'};"></div>
+          </div>
+        </div>
+        <div class="inspect-metric">
+          <div class="inspect-metric-label">Phase</div>
+          <div class="inspect-metric-value" style="font-size:0.85rem;">${escapeHtml(phase)}</div>
+        </div>
+      </div>
+      <div class="inspect-metric-row">
+        <div class="inspect-metric">
+          <div class="inspect-metric-label">Reviews</div>
+          <div class="inspect-metric-value">${ms.reviewCount || 0}</div>
+        </div>
+        <div class="inspect-metric">
+          <div class="inspect-metric-label">Interval</div>
+          <div class="inspect-metric-value">${Number(ms.interval || 0).toFixed(1)}d</div>
+        </div>
+      </div>
+      <div class="inspect-metric-row">
+        <div class="inspect-metric">
+          <div class="inspect-metric-label">Next Review</div>
+          <div class="inspect-metric-value" style="font-size:0.78rem;">${fmtDate(ms.nextReview)}</div>
+        </div>
+        <div class="inspect-metric">
+          <div class="inspect-metric-label">Overdue</div>
+          <div class="inspect-metric-value" style="color:${overdueVal > 1 ? '#ff4d4d' : 'var(--accent)'};">${overdueVal.toFixed(1)}d</div>
+        </div>
+      </div>
+      <div class="sidebar-section-title">Priority Score</div>
+      <div class="inspect-contrib-row"><span class="inspect-contrib-label">Base</span><span class="inspect-contrib-value">1.00</span></div>
+      <div class="inspect-contrib-row"><span class="inspect-contrib-label">Overdue</span><span class="inspect-contrib-value">+${overdueVal.toFixed(2)}</span></div>
+      <div class="inspect-contrib-row"><span class="inspect-contrib-label">Uncertainty</span><span class="inspect-contrib-value">+${(U * 0.8).toFixed(2)}</span></div>
+      <div class="inspect-contrib-row"><span class="inspect-contrib-label">Phase boost</span><span class="inspect-contrib-value">${phaseBoost >= 0 ? '+' : ''}${phaseBoost.toFixed(2)}</span></div>
+      ${quotePriorityBoost > 0 ? `<div class="inspect-contrib-row"><span class="inspect-contrib-label">Priority \u2605</span><span class="inspect-contrib-value">+${quotePriorityBoost.toFixed(2)}</span></div>` : ''}
+      <div class="inspect-contrib-row" style="border-top:1px solid rgba(44,255,179,0.2);margin-top:4px;padding-top:6px;">
+        <span class="inspect-contrib-label" style="font-weight:700;color:var(--text-main);">Total</span>
+        <span class="inspect-contrib-value" style="color:var(--accent);">${totalScore}</span>
+      </div>
+      <div class="sidebar-section-title">Review Timeline</div>
+      ${timelineHTML}
+      ${tags.length > 0 ? `
+        <div class="sidebar-section-title">Tags</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;padding-bottom:8px;">
+          ${tags.map(t => `<span style="padding:3px 8px;border-radius:999px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);font-size:0.72rem;color:var(--text-muted);">${escapeHtml(t)}</span>`).join("")}
+        </div>` : ''}
+    `;
+  }
+
+  function inspectCard(cardId) {
+    if (!cardId) return;
+    state.inspectedCardId = cardId;
+    setSidebarMode(SIDEBAR_MODES.INSPECT);
+    const memoryStats = document.getElementById("memoryStats");
+    if (memoryStats && !memoryStats.classList.contains("open")) {
+      memoryStats.classList.add("open");
+    }
+  }
+
+  function getCurrentPhase() {
+    const card = state.flashcards[state.currentIndex];
+    if (!card) return "new";
+    const ms = card.memoryState || {};
+    return ms.L_phase || getUserLearningPhase(card, state.userProfile) || "new";
+  }
+
+  function getAllCardsForExplore() {
+    // Collect all cards: quotes, analyses, and custom deck cards
+    const allCards = [];
+    if (state.flashcards && state.flashcards.length > 0) {
+      allCards.push(...state.flashcards);
+    }
+    if (state.session?.heap?.items) {
+      allCards.push(...state.session.heap.items.map(i => i.card));
+    }
+    return allCards;
+  }
+
+  function computeBasePriority(card) {
+    return (card.memoryState?.priority || 0);
+  }
+
+  function computeOverdueBoost(card) {
+    const now = Date.now();
+    const nextReview = card.memoryState?.nextReview || now;
+    const overdueDays = (now - nextReview) / 86400000;
+    return Math.max(0, overdueDays);
+  }
+
+  function computePhaseBoost(card) {
+    const phase = card.meta?.L_phase || "new";
+    const boosts = { new: 0.5, warming: 0.3, stabilising: 0.1, stable: 0, mastered: -0.3 };
+    return boosts[phase] || 0;
+  }
+
+  function getMemoryStateFromMeta(meta = {}, kind = "quote") {
+    return {
+      S: Number(meta?.S || 1),
+      D: Number(meta?.D || 1),
+      U: Number(meta?.U ?? 0.5),
+      nextReview: meta?.nextReview || null,
+      interval: Number(meta?.interval || 0),
+      reviewCount: Number(meta?.reviewCount || 0),
+      recentGrades: Array.isArray(meta?.recentGrades) ? meta.recentGrades : []
+    };
+  }
+
+  async function loadExplorerCards() {
+    if (!state.currentSubject) { state.explorerCards = []; return; }
+    state.explorerLoading = true;
+    try {
+      const [quotes, analyses] = await Promise.all([
+        getQuotesForSubject(state.currentSubject),
+        getAnalysisNodesForSubject(state.currentSubject)
+      ]);
+      const quoteCards = (quotes || []).map(q => ({
+        id: q.id, kind: "quote", text: q.quote || "", subject: q.subject || state.currentSubject,
+        layers: (q.meta?.hierarchyPath || []).slice(1, 4).filter(Boolean),
+        tags: q.meta?.tags || [], priority: q.priority,
+        ms: getMemoryStateFromMeta(q.meta || {}, "quote")
+      }));
+      const analysisCards = (analyses || []).map(a => ({
+        id: a.id, kind: "analysis", text: a.analysis || "", subject: a.subject || state.currentSubject,
+        layers: (a.meta?.hierarchyPath || []).slice(1, 4).filter(Boolean),
+        tags: a.tags || [], priority: null,
+        ms: getMemoryStateFromMeta(a.meta || {}, "analysis")
+      }));
+      state.explorerCards = [...quoteCards, ...analysisCards];
+    } catch (e) {
+      console.warn("Explorer load error:", e);
+      state.explorerCards = [];
+    }
+    state.explorerLoading = false;
+  }
+
+  function renderExploreMode() {
+    if (!statsContent) return;
+    if (!state.currentSubject) {
+      statsContent.innerHTML = `
+        <div class="inspect-placeholder">
+          <div class="inspect-placeholder-icon">\uD83D\uDDC2</div>
+          <div>No subject active.<br>Open a deck to explore its cards.</div>
+        </div>`;
+      return;
+    }
+    if (state.explorerLoading) {
+      statsContent.innerHTML = `<div class="inspect-placeholder"><div style="color:var(--accent);">Loading\u2026</div></div>`;
+      return;
+    }
+    if (state.explorerCards.length === 0) {
+      loadExplorerCards().then(() => renderSidebar());
+      statsContent.innerHTML = `<div class="inspect-placeholder"><div style="color:var(--accent);">Loading cards\u2026</div></div>`;
+      return;
+    }
+    const filter = state.explorerFilter;
+    let cards = state.explorerCards;
+    if (filter) {
+      if (filter.startsWith("phase:")) {
+        const ph = filter.slice(6);
+        cards = cards.filter(c => getUserLearningPhase({ memoryState: c.ms }, state.userProfile) === ph);
+      } else if (filter === "kind:quote") {
+        cards = cards.filter(c => c.kind === "quote");
+      } else if (filter === "kind:analysis") {
+        cards = cards.filter(c => c.kind === "analysis");
+      }
+    }
+    const page = state.explorerPage || 0;
+    const total = cards.length;
+    const totalPages = Math.max(1, Math.ceil(total / EXPLORER_PAGE_SIZE));
+    const pageCards = cards.slice(page * EXPLORER_PAGE_SIZE, (page + 1) * EXPLORER_PAGE_SIZE);
+    const filterChips = [
+      { label: "All", value: "" },
+      { label: "Quotes", value: "kind:quote" },
+      { label: "Analyses", value: "kind:analysis" },
+      { label: "New", value: "phase:new" },
+      { label: "Stabilising", value: "phase:stabilising" },
+      { label: "Mastered", value: "phase:mastered" }
+    ].map(chip => `
+      <button class="explore-filter-chip${filter === (chip.value || null) ? ' active' : ''}" data-explorer-filter="${chip.value}">
+        ${chip.label}
+      </button>`).join("");
+    const fmtU = u => (Number(u ?? 0.5) * 100).toFixed(0) + "%";
+    const cardsHTML = pageCards.length > 0
+      ? pageCards.map(c => {
+          const ph = getUserLearningPhase({ memoryState: c.ms }, state.userProfile);
+          const layersStr = c.layers.join(" \u203A ");
+          return `
+          <div class="explore-card-item" data-inspect-card="${escapeHtml(c.id)}">
+            <div class="explore-card-text">${escapeHtml(c.text.substring(0, 120))}</div>
+            <div class="explore-card-meta">
+              <span style="color:${c.kind === 'quote' ? '#4ba3ff' : '#ff9b39'};">${c.kind}</span>
+              ${layersStr ? `<span>${escapeHtml(layersStr)}</span>` : ""}
+              <span>U: ${fmtU(c.ms.U)}</span>
+              <span style="color:${ph === 'mastered' ? '#3fd07d' : ph === 'new' ? '#ff9b39' : 'var(--text-muted)'};">${ph}</span>
+              ${c.priority ? `<span style="color:${getPriorityColor(c.priority)};">P${c.priority}</span>` : ""}
+            </div>
+          </div>`;
+        }).join("")
+      : `<div style="color:var(--text-muted);font-size:0.8rem;padding:12px 0;">No cards match this filter.</div>`;
+    const paginationHTML = totalPages > 1
+      ? `<div class="explore-pagination">
+          ${page > 0 ? `<button class="explore-page-btn" data-explorer-page="${page - 1}">\u2190 Prev</button>` : ""}
+          <span style="font-size:0.72rem;color:var(--text-muted);align-self:center;">${page + 1}/${totalPages}</span>
+          ${page < totalPages - 1 ? `<button class="explore-page-btn" data-explorer-page="${page + 1}">Next \u2192</button>` : ""}
+        </div>` : "";
+    statsContent.innerHTML = `
+      <div class="explore-filter-bar">${filterChips}</div>
+      <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:6px;">${total} card${total !== 1 ? "s" : ""} \u00B7 click to inspect</div>
+      ${cardsHTML}
+      ${paginationHTML}
+      <div style="padding-top:8px;">
+        <button class="memory-btn" style="width:100%;font-size:0.8rem;" data-study-subject="${escapeHtml(state.currentSubject)}">
+          Study This Deck
+        </button>
+      </div>
+    `;
+  }
+
+  function formatSidebarLabel(value) {
+    return String(value || "")
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+
+  function getRouteScopeLabel(route) {
+    const scope = route?.scope || {};
+    if (scope.layers?.length) return "layer cluster (" + scope.layers.slice(0, 2).join(", ") + ")";
+    if (scope.clusters?.length) return "cluster (" + scope.clusters.slice(0, 2).join(", ") + ")";
+    if (scope.tags?.length) return "tag set (" + scope.tags.slice(0, 2).join(", ") + ")";
+    if (scope.subjects?.length) return "subject (" + scope.subjects.slice(0, 2).join(", ") + ")";
+    return "global";
+  }
+
+  function generateRouteExplanation(route, context = {}) {
+    if (!route) return "No route has been selected yet.";
+    const heapSize = Number(context.heapSize || 0);
+    const uncertainty = Number(context.avgUncertainty ?? 0);
+    const earlyRatio = Number(context.earlyPhaseRatio ?? 0);
+    const startLabel = formatSidebarLabel(route.startType);
+
+    if (route.mode === "rapid_sweep") {
+      return `${startLabel} with a large, varied heap -> running a rapid structural sweep before deeper review.`;
+    }
+    if (route.mode === "focused_block") {
+      if (earlyRatio > 0.55) return `${startLabel} with many early-phase cards -> switching to focused reinforcement.`;
+      return `${startLabel} with ${heapSize} queued cards -> focusing a related block for stronger consolidation.`;
+    }
+    if (route.mode === "repair_cycle") {
+      return `${startLabel} with unstable or decaying cards -> pulling fragile memories back into review.`;
+    }
+    if (uncertainty < 0.42) {
+      return `${startLabel} with low average uncertainty -> using the global SRS heap.`;
+    }
+    return `${startLabel} -> using global SRS priority while monitoring uncertainty.`;
+  }
+
+  function updateRouterDebug(route, systemState, reasoningSteps) {
+    const steps = Array.isArray(reasoningSteps) ? reasoningSteps.slice(-ROUTER_DEBUG_MAX_STEPS) : [];
+    const earlyPhaseRatio = clampNumber(
+      Number((systemState?.newCardRatio || 0) + ((systemState?.phaseDistribution?.warming || 0) / Math.max(1, systemState?.sampleSize || systemState?.heapSize || 1))),
+      0, 1
+    );
+    state.routerDebug = {
+      startType: route?.startType || null,
+      heapSize: Number(systemState?.heapSize || 0),
+      earlyPhaseRatio,
+      selectedRoute: route?.mode || null,
+      avgUncertainty: Number(systemState?.avgUncertainty || 0),
+      modeSwitchFrequency: Number(state.session.routeRerouteCounter || 0),
+      reasoningSteps: steps,
+      explanation: generateRouteExplanation(route, {
+        heapSize: Number(systemState?.heapSize || 0),
+        avgUncertainty: Number(systemState?.avgUncertainty || 0),
+        earlyPhaseRatio
+      })
+    };
+  }
+
+  // ─── Helper functions for priority breakdown ───────────────────────────
+
+  function computeBasePriority(card) {
+    return (card.memoryState?.priority || 0);
+  }
+
+  function computeOverdueBoost(card) {
+    const now = Date.now();
+    const nextReview = card.memoryState?.nextReview || now;
+    const overdueDays = (now - nextReview) / 86400000;
+    return Math.max(0, overdueDays);
+  }
+
+  function computePhaseBoost(card) {
+    const phase = card.meta?.L_phase || "new";
+    const boosts = { new: 0.5, warming: 0.3, stabilising: 0.1, stable: 0, mastered: -0.3 };
+    return boosts[phase] || 0;
+  }
+
   // ─── System Thinking Panel ───────────────────────────────────────────────
 
   let _typewriterTimer = null;
@@ -3100,8 +3716,25 @@ export async function initMemoryTool(deps, context = {}) {
     } else if (mode === "evidence-matching") {
       pool.push("Evidence matching active. Testing associative linkage between ideas.");
     } else if (mode === "analysis-learning") {
+      pool.push("Analysis mode. Connecting ideas and building understanding.");
       pool.push("Analysis mode. Tracking conceptual memory separate from quote recall.");
     }
+
+    // --- Sidebar mode context ---
+    const sidebarMode = state.sidebarMode;
+    const router = state.session.learningRoute;
+    const currentPhase = phase;
+
+    if (sidebarMode === SIDEBAR_MODES.ROUTER && router) {
+      pool.push(`Routing: ${router.mode} via ${router.startType}. ${state.routerDebug.explanation || ''}`);
+    }
+
+    if (sidebarMode === SIDEBAR_MODES.FOCUS) {
+      const heap = (state.flashcards || []).length;
+      pool.push(`Focus mode: ${heap} cards queued. Current phase: ${currentPhase}.`);
+    }
+
+    pool.push(`System ready. Mode: ${sidebarMode}.`);
 
     // --- Fallback ---
     if (pool.length === 0) {
@@ -3160,7 +3793,7 @@ export async function initMemoryTool(deps, context = {}) {
       const chunk = text.slice(0, i + 1);
       newLine.innerHTML = `${chunk}<span class="cursor"></span>`;
       i++;
-      const delay = 4 + Math.random() * 6;
+      const delay = 5 + Math.random() * 8; // 5-13ms per character for typewriter effect
       _typewriterTimer = setTimeout(tick, delay);
     };
     tick();
@@ -4168,11 +4801,34 @@ export async function initMemoryTool(deps, context = {}) {
     });
   }
 
-  function saveAllMassEditChanges() {
+  async function saveAllMassEditChanges() {
     if (!deckBuilderState.massEditData) return;
 
     // Update main cards array
     deckBuilderState.cards = [...deckBuilderState.massEditData];
+
+    // Persist changes to IndexedDB
+    for (const card of deckBuilderState.cards) {
+      if (card.quoteId && card.quoteBack) {
+        await addQuote({
+          id: card.quoteId,
+          type: "quote",
+          subject: deckBuilderState.deckName,
+          quote: card.quoteBack,
+          priority: card.priority || 3,
+          meta: { tags: [], layers: card.layers || [] }
+        });
+      }
+      if (card.cueId && card.cueFront) {
+        await addCue({
+          id: card.cueId,
+          type: "cue",
+          subject: deckBuilderState.deckName,
+          cue: card.cueFront,
+          quoteId: card.quoteId
+        });
+      }
+    }
 
     // Update card count
     if (cardCount) cardCount.textContent = deckBuilderState.cards.length;
@@ -4180,7 +4836,7 @@ export async function initMemoryTool(deps, context = {}) {
     exitMassEditMode();
     renderFlashcardList();
 
-    alert(`Saved ${deckBuilderState.cards.length} cards!`);
+    alert(`Saved ${deckBuilderState.cards.length} cards to database!`);
   }
 
   function processAnkiImport() {
