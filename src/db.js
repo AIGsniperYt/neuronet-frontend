@@ -1268,7 +1268,6 @@ export function getFormattedQuote(quoteNode, sourceNode) {
   const resolved = resolveVisualOffsets();
   
   if (!resolved) {
-    console.warn("[SSS] Could not resolve quote in visual text:", quoteText);
     return formatFallback(quoteText);
   }
 
@@ -1348,8 +1347,7 @@ export function getFormattedQuote(quoteNode, sourceNode) {
   result = result.replace(/^(<br>|\s)+/gi, "").replace(/(<br>|\s)+$/gi, "");
   
   if (!result.trim()) {
-     console.debug("[SSS] Extraction returned empty, falling back to plain text.");
      return formatFallback(quoteText);
-  }
+   }
   return result;
 }

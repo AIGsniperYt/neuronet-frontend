@@ -2111,6 +2111,12 @@ export async function initMemoryTool(deps, context = {}) {
       const quote = candidate.record;
       const analyses = await getAnalysesReferencingQuote(quote.id);
       const cueNode = candidate.cueNode || null;
+      // Fetch source node to enable formatted quote rendering
+      let sourceNode = null;
+      if (quote.link?.sourceId) {
+        sourceNode = await getNode(quote.link.sourceId);
+      }
+
       card = {
         id: quote.id,
         memoryKind: "quote",
@@ -2126,6 +2132,7 @@ export async function initMemoryTool(deps, context = {}) {
           content: quote.quote,
           isQuote: true,
           quoteData: quote,
+          sourceNode,
           analyses: analyses
         },
         memoryState: candidate.memoryState
@@ -2173,13 +2180,16 @@ export async function initMemoryTool(deps, context = {}) {
 
   async function buildQuoteLearningQueue() {
     const nowMs = Date.now();
-    const [allQuotes, allCues] = await Promise.all([
+    const [allQuotes, allCues, allSources] = await Promise.all([
       getQuotesForSubject(state.currentSubject),
-      getAllCues()
+      getAllCues(),
+      getAllNodes().then(nodes => nodes.filter(n => n.type === "source"))
     ]);
 
-    // Build cue map: quoteId -> cue
+    // Build lookup maps
     const cuesByQuoteId = new Map();
+    const sourcesById = new Map();
+    (allSources || []).forEach(s => sourcesById.set(s.id, s));
     (allCues || [])
       .filter((c) => c?.subject === state.currentSubject && c?.quoteId)
       .forEach((cue) => {
@@ -2197,6 +2207,7 @@ export async function initMemoryTool(deps, context = {}) {
         const analyses = await getAnalysesReferencingQuote(quote.id);
         const cueNode = cuesByQuoteId.get(quote.id) || null;
         const memoryState = getMemoryStateFromMeta(quote.meta || {}, "quote");
+        const sourceNode = sourcesById.get(quote.link?.sourceId) || null;
 
         // For custom decks, display cue on front, quote on back
         let frontContent;
@@ -2222,6 +2233,7 @@ export async function initMemoryTool(deps, context = {}) {
             content: quote.quote,
             isQuote: true,
             quoteData: quote,
+            sourceNode,
             analyses: analyses
           },
           memoryState
@@ -2369,7 +2381,8 @@ export async function initMemoryTool(deps, context = {}) {
     }
 
     const cards = [];
-    subjectCues.forEach((cue) => {
+
+    for (const cue of subjectCues) {
       let targetKind = null;
       let targetRecord = null;
       if (cue.quoteId && quotesById.has(cue.quoteId)) {
@@ -2379,12 +2392,18 @@ export async function initMemoryTool(deps, context = {}) {
         targetKind = "analysis";
         targetRecord = analysesById.get(cue.analysisId);
       } else {
-        return;
+        continue;
       }
 
       const memoryState = getMemoryStateFromMeta(targetRecord.meta || {}, targetKind);
       // Blurt is harder, so we expect more time
       memoryState.expectedTime = Math.max(memoryState.expectedTime, getExpectedTimeMs("blurt") / 1000);
+
+      // Fetch source node for quote targets to enable formatted rendering
+      let targetSourceNode = null;
+      if (targetKind === "quote" && targetRecord.link?.sourceId) {
+        targetSourceNode = await getNode(targetRecord.link.sourceId);
+      }
 
       const card = {
         id: cue.id,
@@ -2399,14 +2418,15 @@ export async function initMemoryTool(deps, context = {}) {
           isBlurtInput: true,
           targetContent: targetKind === "quote" ? targetRecord.quote : targetRecord.analysis,
           targetRecord,
-          targetKind
+          targetKind,
+          sourceNode: targetSourceNode
         },
         blurt: { submitted: false, text: "" },
         memoryState
       };
 
       cards.push(card);
-    });
+    }
     enqueueLearningCards(cards, nowMs);
   }
 
@@ -2698,7 +2718,7 @@ export async function initMemoryTool(deps, context = {}) {
     const back = flashcardData.back || {};
 
  // Front content
-     if (front.isCue) {
+      if (front.isCue) {
        // For blurt cards pointing at a quote, render the cue more prominently
        const isBlurtQuoteCard = flashcardData.type === "blurt" && flashcardData.targetKind === "quote";
        const isBlurtAnalysisCard = flashcardData.type === "blurt" && flashcardData.targetKind === "analysis";
@@ -2739,17 +2759,17 @@ export async function initMemoryTool(deps, context = {}) {
      } else if (front.isAnalysis) {
        flashcardContent.innerHTML = `<div class="analysis-preview">${formatAnalysisForDisplay(front.content || "")}</div>`;
      } else if (front.isQuote) {
-       flashcardContent.innerHTML = `<div class="quote" id="front-quote-container">${getFormattedQuote({ quote: front.content || "" })}</div>`;
-        const quoteData = flashcardData.front?.quoteData;
-        if (quoteData?.link?.sourceId) {
-          getNode(quoteData.link.sourceId).then(source => {
-            const el = document.getElementById("front-quote-container");
-            if (el) el.innerHTML = getFormattedQuote(quoteData, source);
-          });
-        }
+          const quoteData = flashcardData.back?.quoteData || flashcardData.front?.quoteData;
+          const sourceNode = flashcardData.back?.sourceNode || null;
+          // Use sourceNode for formatted quote; fall back to plain text
+          const formatted = (sourceNode && quoteData)
+            ? getFormattedQuote(quoteData, sourceNode)
+            : escapeHtml(front.content || "");
+          flashcardContent.innerHTML = `<div class="quote" id="front-quote-container">${formatted}</div>`;
         if (quoteData && !quoteData.meta?.tags?.includes("custom-deck")) {
-         flashcardContent.innerHTML += `<div class="quote-meta">From: ${escapeHtml(quoteData.section || "unknown source")}</div>`;
-       }
+          const section = quoteData.section || sourceNode?.section || "unknown source";
+          flashcardContent.innerHTML += `<div class="quote-meta">From: ${escapeHtml(section)}</div>`;
+        }
        // Show priority subtly in corner
        if (quoteData?.priority) {
          const stars = [1,2,3,4,5].map(v => v <= quoteData.priority ? "★" : "☆").join("");
@@ -2762,15 +2782,14 @@ export async function initMemoryTool(deps, context = {}) {
 // Back content - Only populate if flipped to prevent spoiling the next card during transitions
     if (state.isFlipped) {
       if (back.isQuote) {
-        flashcardBackContent.innerHTML = `<div class="quote" id="back-quote-container">${getFormattedQuote({ quote: back.content || "" })}</div>`;
-        if (back.quoteData?.link?.sourceId) {
-          getNode(back.quoteData.link.sourceId).then(source => {
-            const el = document.getElementById("back-quote-container");
-            if (el) el.innerHTML = getFormattedQuote(back.quoteData, source);
-          });
-        }
+        const sourceNode = back.sourceNode || null;
+        const formatted = (sourceNode && back.quoteData)
+          ? getFormattedQuote(back.quoteData, sourceNode)
+          : escapeHtml(back.content || "");
+        flashcardBackContent.innerHTML = `<div class="quote" id="back-quote-container">${formatted}</div>`;
         if (back.quoteData && !back.quoteData.meta?.tags?.includes("custom-deck")) {
-          flashcardBackContent.innerHTML += `<div class="quote-meta">From: ${escapeHtml(back.quoteData.section || "unknown source")}</div>`;
+          const section = back.quoteData.section || sourceNode?.section || "unknown source";
+          flashcardBackContent.innerHTML += `<div class="quote-meta">From: ${escapeHtml(section)}</div>`;
         }
         if (back.analyses && back.analyses.length > 0) {
           flashcardBackContent.innerHTML += `<div class="linked-analyses">`;
@@ -2824,8 +2843,11 @@ export async function initMemoryTool(deps, context = {}) {
           const userText = flashcardData.blurt?.text || "";
           const targetText = back.targetContent || "";
           const isQuoteTarget = back.targetKind === "quote";
+          // Use formatted quote if sourceNode is available
           const formattedTarget = isQuoteTarget
-            ? `<div class="quote">${escapeHtml(targetText)}</div>            ${back.targetRecord?.meta?.tags?.includes("custom-deck") ? "" : `<div class="quote-meta">From: ${escapeHtml(back.targetRecord.section || "unknown source")}</div>`}`
+            ? (back.sourceNode && back.targetRecord)
+              ? `<div class="quote">${getFormattedQuote(back.targetRecord, back.sourceNode)}</div>${back.targetRecord?.meta?.tags?.includes("custom-deck") ? "" : `<div class="quote-meta">From: ${escapeHtml(back.targetRecord.section || "unknown source")}</div>`}`
+              : `<div class="quote">${escapeHtml(targetText)}</div>${back.targetRecord?.meta?.tags?.includes("custom-deck") ? "" : `<div class="quote-meta">From: ${escapeHtml(back.targetRecord.section || "unknown source")}</div>`}`
             : `<div class="analysis">${formatAnalysisForDisplay(targetText)}</div>`;
           flashcardBackContent.innerHTML = `
             <div class="blurt-comparison">

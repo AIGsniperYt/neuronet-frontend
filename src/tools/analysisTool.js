@@ -2104,12 +2104,12 @@ function htmlToPlainText(html) {
     const now = Date.now();
     const path = source?.meta?.hierarchyPath || [source?.subject || "", ...(source?.section ? source.section.split(" > ") : [])];
 
-    const quoteNode = {
-      id: crypto.randomUUID(),
-      type: "quote",
-      subject: source.subject,
-      section: source.section,
-      title: source.title,
+     const quoteNode = {
+       id: crypto.randomUUID(),
+       type: "quote",
+       subject: source.subject,
+       section: source.section || buildSection(path),
+       title: source.title,
       quote: quoteText,
       priority: 3,
       link: {
