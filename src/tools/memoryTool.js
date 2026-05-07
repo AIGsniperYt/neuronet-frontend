@@ -4925,6 +4925,88 @@ export async function initMemoryTool(deps, context = {}) {
 
   // ========== MIDDLE UI FUNCTIONS ==========
 
+  function getGradeDistribution(cards) {
+    const grades = {
+      new: 0,
+      didnt_know: 0,
+      kinda: 0,
+      easy: 0
+    };
+
+    if (!cards || cards.length === 0) return grades;
+
+    cards.forEach(card => {
+      const lastGrade = card.meta?.lastGrade;
+      if (lastGrade === null || lastGrade === "new" || !lastGrade) {
+        grades.new++;
+      } else if (lastGrade === "didnt_know") {
+        grades.didnt_know++;
+      } else if (lastGrade === "kinda") {
+        grades.kinda++;
+      } else if (lastGrade === "easy") {
+        grades.easy++;
+      }
+    });
+
+    return grades;
+  }
+
+  function renderProgressBarInline(grades) {
+    const total = (grades.new || 0) + (grades.didnt_know || 0) + (grades.kinda || 0) + (grades.easy || 0);
+    const pct = (v) => total > 0 ? ((v || 0) / total * 100) : 0;
+    const barId = `progress-bar-${Math.random().toString(36).substr(2, 9)}`;
+
+    return `
+      <div class="filter-progress-bar-wrapper">
+        <div class="filter-progress-bar-inline" id="${barId}">
+          <div class="progress-seg progress-ez" style="width:${pct(grades.easy)}%" data-label="Easy" data-count="${grades.easy}"></div>
+          <div class="progress-seg progress-kn" style="width:${pct(grades.kinda)}%" data-label="Kinda" data-count="${grades.kinda}"></div>
+          <div class="progress-seg progress-dk" style="width:${pct(grades.didnt_know)}%" data-label="Didn't Know" data-count="${grades.didnt_know}"></div>
+          <div class="progress-seg progress-new" style="width:${pct(grades.new)}%" data-label="New" data-count="${grades.new}"></div>
+        </div>
+        <div class="progress-tooltip" style="display: none;">
+          <div class="tooltip-inner">
+            <div class="tooltip-label"></div>
+            <div class="tooltip-count"></div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function setupProgressBarTooltips(container) {
+    if (!container) return;
+    const bars = container.querySelectorAll('.filter-progress-bar-inline');
+    bars.forEach(bar => {
+      const wrapper = bar.closest('.filter-progress-bar-wrapper');
+      if (!wrapper) return;
+      const tooltip = wrapper.querySelector('.progress-tooltip');
+      const segments = bar.querySelectorAll('.progress-seg');
+      
+      segments.forEach(seg => {
+        seg.addEventListener('mouseenter', () => {
+          const label = seg.dataset.label;
+          const count = seg.dataset.count;
+          tooltip.querySelector('.tooltip-label').textContent = label;
+          tooltip.querySelector('.tooltip-count').textContent = count;
+          tooltip.style.display = 'block';
+          
+          // Position tooltip above the specific segment
+          const segRect = seg.getBoundingClientRect();
+          const barRect = bar.getBoundingClientRect();
+          const segCenterRelative = (segRect.left - barRect.left) + (segRect.width / 2);
+          const barWidth = barRect.width;
+          const offsetPercent = (segCenterRelative / barWidth) * 100;
+          tooltip.style.left = offsetPercent + '%';
+        });
+      });
+
+      wrapper.addEventListener('mouseleave', () => {
+        tooltip.style.display = 'none';
+      });
+    });
+  }
+
   async function loadMiddleUIData() {
     if (!state.currentSubject) return;
 
@@ -4935,33 +5017,52 @@ export async function initMemoryTool(deps, context = {}) {
       getAllCues()
     ]);
 
-    // Priority counts
+    // Priority counts and grades
     const priorityCounts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    const priorityCards = { 1: [], 2: [], 3: [], 4: [], 5: [] };
     let totalWithPriority = 0;
     (quotes || []).forEach(q => {
       if (q.priority !== undefined && q.priority !== null) {
         priorityCounts[q.priority] = (priorityCounts[q.priority] || 0) + 1;
+        priorityCards[q.priority].push(q);
         totalWithPriority++;
       }
     });
 
-    // Tags - collect from quotes and analyses
+    // Tags - collect from quotes and analyses with grade distribution
     const tagSet = new Set();
+    const tagCards = new Map();
     (quotes || []).forEach(q => {
-      (q.meta?.tags || []).forEach(t => tagSet.add(t));
+      (q.meta?.tags || []).forEach(t => {
+        tagSet.add(t);
+        if (!tagCards.has(t)) {
+          tagCards.set(t, []);
+        }
+        tagCards.get(t).push(q);
+      });
     });
     (analyses || []).forEach(a => {
-      (a.tags || []).forEach(t => tagSet.add(t));
+      (a.tags || []).forEach(t => {
+        tagSet.add(t);
+        if (!tagCards.has(t)) {
+          tagCards.set(t, []);
+        }
+        tagCards.get(t).push(a);
+      });
     });
     const tags = Array.from(tagSet).sort().map(tag => {
-      // Count items with this tag
+      const cards = tagCards.get(tag) || [];
       const quoteCount = (quotes || []).filter(q => (q.meta?.tags || []).includes(tag)).length;
       const analysisCount = (analyses || []).filter(a => (a.tags || []).includes(tag)).length;
-      return { name: tag, count: quoteCount + analysisCount };
+      return {
+        name: tag,
+        count: quoteCount + analysisCount,
+        grades: getGradeDistribution(cards)
+      };
     });
 
-    // Layers - collect from quotes' hierarchyPath
-    const layerMap = new Map(); // layer1 -> { count, children: Map(layer2 -> { count, children: Map(layer3 -> count) }) }
+    // Layers - collect from quotes' hierarchyPath with grade distribution
+    const layerMap = new Map(); // layer1 -> { count, cards: [], children: Map(layer2 -> { count, cards: [], children: Map(layer3 -> { count, cards: [] }) }) }
 
     (quotes || []).forEach(q => {
       const path = q.meta?.hierarchyPath || [];
@@ -4970,43 +5071,49 @@ export async function initMemoryTool(deps, context = {}) {
       const l3 = path[3] || "";
 
       if (!layerMap.has(l1)) {
-        layerMap.set(l1, { count: 0, children: new Map() });
+        layerMap.set(l1, { count: 0, cards: [], children: new Map() });
       }
       const l1Entry = layerMap.get(l1);
       l1Entry.count++;
+      l1Entry.cards.push(q);
 
       if (l2) {
         if (!l1Entry.children.has(l2)) {
-          l1Entry.children.set(l2, { count: 0, children: new Map() });
+          l1Entry.children.set(l2, { count: 0, cards: [], children: new Map() });
         }
         const l2Entry = l1Entry.children.get(l2);
         l2Entry.count++;
+        l2Entry.cards.push(q);
 
         if (l3) {
-          l2Entry.children.set(l3, (l2Entry.children.get(l3) || 0) + 1);
+          if (!l2Entry.children.has(l3)) {
+            l2Entry.children.set(l3, { count: 0, cards: [] });
+          }
+          const l3Entry = l2Entry.children.get(l3);
+          l3Entry.count++;
+          l3Entry.cards.push(q);
         }
       }
     });
 
-    // Also add sources as leaf nodes
-    // We need to get sources for this subject
-    // For now, we'll use the layer structure from quotes
-
-    state.middleUIData = {
-      priorities: [1, 2, 3, 4, 5].map(p => ({ value: p, count: priorityCounts[p] })),
-      tags,
-      layers: Array.from(layerMap.entries()).map(([name, data]) => ({
+    // Helper function to recursively build layer objects with grades
+    const buildLayerTree = (layerMap) => {
+      return Array.from(layerMap.entries()).map(([name, data]) => ({
         name,
         count: data.count,
-        children: Array.from(data.children.entries()).map(([l2name, l2data]) => ({
-          name: l2name,
-          count: l2data.count,
-          children: Array.from(l2data.children.entries()).map(([l3name, l3count]) => ({
-            name: l3name,
-            count: l3count
-          }))
-        }))
-      }))
+        grades: getGradeDistribution(data.cards),
+        children: data.children.size > 0 ? buildLayerTree(data.children) : []
+      }));
+    };
+
+    state.middleUIData = {
+      priorities: [1, 2, 3, 4, 5].map(p => ({
+        value: p,
+        count: priorityCounts[p],
+        grades: getGradeDistribution(priorityCards[p])
+      })),
+      tags,
+      layers: buildLayerTree(layerMap)
     };
   }
 
@@ -5021,6 +5128,7 @@ export async function initMemoryTool(deps, context = {}) {
         <div class="filter-row ${state.selectedPriorities.includes(p.value) ? 'selected' : ''}" data-priority="${p.value}">
           <input type="checkbox" class="filter-row-checkbox" ${state.selectedPriorities.includes(p.value) ? 'checked' : ''}>
           <span class="filter-row-label" style="color: ${getPriorityColor(p.value)};">${['Very Low', 'Low', 'Medium', 'High', 'Very High'][p.value - 1]}</span>
+          ${renderProgressBarInline(p.grades)}
           <span class="filter-row-count">${p.count}</span>
         </div>
       `).join("");
@@ -5048,6 +5156,7 @@ export async function initMemoryTool(deps, context = {}) {
           <div class="filter-row ${state.selectedTags.includes(tag.name) ? 'selected' : ''}" data-tag="${tag.name}">
             <input type="checkbox" class="filter-row-checkbox" ${state.selectedTags.includes(tag.name) ? 'checked' : ''}>
             <span class="filter-row-label">${escapeHtml(tag.name)}</span>
+            ${renderProgressBarInline(tag.grades)}
             <span class="filter-row-count">${tag.count}</span>
             <button class="filter-row-study-btn" data-tag="${tag.name}">Study</button>
           </div>
@@ -5124,6 +5233,12 @@ export async function initMemoryTool(deps, context = {}) {
         }
       });
     }
+
+    // Setup tooltips for progress bars
+    const middleUI = document.getElementById('middleUI');
+    if (middleUI) {
+      setupProgressBarTooltips(middleUI);
+    }
   }
 
   function renderLayerTree(layer, depth) {
@@ -5132,6 +5247,7 @@ export async function initMemoryTool(deps, context = {}) {
       <div class="filter-row ${isSelected ? 'selected' : ''}" data-layer="${layer.name}" style="margin-left: ${depth * 20}px;">
         <input type="checkbox" class="filter-row-checkbox" ${isSelected ? 'checked' : ''}>
         <span class="filter-row-label">${escapeHtml(layer.name)}</span>
+        ${renderProgressBarInline(layer.grades)}
         <span class="filter-row-count">${layer.count}</span>
         <button class="filter-row-study-btn" data-layer="${layer.name}">Study</button>
       </div>

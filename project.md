@@ -1,8 +1,8 @@
 # NeuroNet Developer Specification
 
-**Version**: 6.2  
-**Date**: May 6, 2026  
-**Status**: Production-ready with SSS (Semantic Search System) anchoring, complete tool implementations (Analysis v2, Memory SuperProgram, Mindmap), bidirectional quote/analysis linking, layer hierarchy navigation, advanced source editor, full feature parity across codebase, advanced lite deckbuilder with layer categorising and priority heap ordering, a specific study filter system, an adaptive learning layer that personalises memory scheduling per user, a Learning Router that selects cold/warm learning strategy, and a multi-mode Sidebar System for context-aware intelligence (Focus, Router, Inspect, Explore)
+**Version**: 6.3  
+**Date**: May 7, 2026  
+**Status**: Production-ready with SSS (Semantic Search System) anchoring, complete tool implementations (Analysis v2, Memory SuperProgram, Mindmap), bidirectional quote/analysis linking, layer hierarchy navigation, advanced source editor, full feature parity across codebase, advanced lite deckbuilder with layer categorising and priority heap ordering, a specific study filter system with inline grade distribution progress bars, an adaptive learning layer that personalises memory scheduling per user, a Learning Router that selects cold/warm learning strategy, and a multi-mode Sidebar System for context-aware intelligence (Focus, Router, Inspect, Explore)
 
 ---
 
@@ -624,10 +624,29 @@ const state = {
 - **Purpose**: Filter cards before studying (entire view scrolls)
 - **Mode selector pills**: 4 modes (Quote Learning, Analysis Learning, Evidence Matching, Blurt)
 - **Filter mode toggle**: AND mode (match ALL) / OR mode (match ANY)
-- **Priority filters**: Checkboxes with counts (P1-P5)
-- **Tag filters**: Checkboxes with counts from quotes/analyses
-- **Layer filters**: Expandable tree (L1 → L2 → L3 hierarchy)
+- **Priority filters**: Checkboxes with counts (P1-P5) + inline grade distribution progress bars
+- **Tag filters**: Checkboxes with counts from quotes/analyses + inline grade distribution progress bars
+- **Layer filters**: Expandable tree (L1 → L2 → L3 hierarchy) + inline grade distribution progress bars
 - **Filter logic**: `passesFilter(card, filter)` function supports AND/OR modes
+
+**Filter Progress Bar Visualization** (May 7, 2026):
+
+- **What it shows**: Inline colored progress bar for each filter row showing the grade distribution of cards behind that filter
+- **Bar segments** (left to right, best to worst):
+  - Green (Easy) - Cards marked as "easy"
+  - Amber (Kinda) - Cards marked as "kinda"
+  - Red (Didn't Know) - Cards marked as "didnt_know"
+  - Gray (New) - Unseen/new cards
+- **Percentage widths**: Segments scale proportionally based on actual card counts
+- **Interactive tooltips**: Hovering over any segment displays a custom modal-style popup showing:
+  - Grade label (uppercase)
+  - Exact count for that segment
+- **Tooltip positioning**: Dynamically positioned above the specific segment being hovered, not fixed to bar center
+- **Implementation**:
+  - `getGradeDistribution(cards)` - Calculates grade counts from card array by checking `card.meta?.lastGrade`
+  - `renderProgressBarInline(grades)` - Generates HTML with styled segments and data attributes
+  - `setupProgressBarTooltips(container)` - Attaches hover listeners and dynamic positioning logic
+  - CSS classes: `.filter-progress-bar-wrapper`, `.progress-seg`, `.progress-tooltip` with glass-morphism effect and arrow indicator
 
 **Blurt Mode**:
 
