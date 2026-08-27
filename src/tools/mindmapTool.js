@@ -478,7 +478,7 @@ const state = {
     const connectionsItems = document.getElementById("connectionsItems");
     const connectionCount = document.getElementById("connectionCount");
     const graphNode = state.graph.nodes.get(selectedItem.id);
-    
+
     if (connectionsItems && connectionCount && graphNode) {
       const neighbors = Array.from(graphNode.connections);
       connectionCount.textContent = neighbors.length;
@@ -497,7 +497,7 @@ const state = {
           </div>
           <button class="btn-break" title="Break Connection" data-target-id="${neighborId}">&times;</button>
         `;
-        
+
         itemEl.querySelector(".btn-break").addEventListener("click", (e) => {
           e.stopPropagation();
           if (confirm(`Break connection to "${getNodeDisplayTitle(neighbor)}"?`)) {
@@ -522,7 +522,7 @@ const state = {
   function renderSidebarTags(item) {
     const sidebarContent = document.querySelector(".sidebar-content");
     let tagsContainer = document.getElementById("sidebarTagsContainer");
-    
+
     if (!tagsContainer) {
       tagsContainer = document.createElement("div");
       tagsContainer.id = "sidebarTagsContainer";
@@ -565,7 +565,7 @@ const state = {
   async function addTagToNode(item, tagName) {
     if (!item.meta) item.meta = {};
     if (!item.meta.tags) item.meta.tags = [];
-    
+
     const normalized = tagName.trim();
     if (!normalized) return;
 
@@ -575,7 +575,7 @@ const state = {
     if (!tag) {
       tag = await addTag({ title: normalized });
     }
-    
+
     if (!item.meta.tags.includes(tag.title)) {
       item.meta.tags.push(tag.title);
       await saveItem(item);
@@ -785,10 +785,10 @@ const state = {
         const dx = posA.x - posB.x;
         const dy = posA.y - posB.y;
         let distSq = dx * dx + dy * dy;
-        
+
         // Prevent singularity
         if (distSq < 1) distSq = 1;
-        
+
         const dist = Math.sqrt(distSq);
 
         const weightA = Math.max(1, nodeA.connections.size);
@@ -891,7 +891,7 @@ const state = {
 
       // Estimate children count for the branch (connections minus the parent link)
       const childrenCount = Math.max(0, Math.max(weightFrom, weightTo) - 1);
-      
+
       // If only a few children (0-2), no extra length needed. If many children, expand length dramatically.
       const childrenBonus = childrenCount <= 2 ? 0 : (childrenCount * 25);
 
@@ -918,7 +918,7 @@ const state = {
 
       const dx = centerX - pos.x;
       const dy = centerY - pos.y;
-      
+
       // Equal, extremely gentle pull for all nodes.
       // This prevents the "bent/pinned subject" issue because the subject is free to move relative to its children!
       forces.get(id).x += dx * 0.00005;
@@ -930,52 +930,52 @@ const state = {
     graph.nodes.forEach((node, id) => {
       const parents = nodeParents.get(id);
       if (!parents || parents.size === 0) return;
-      
+
       const pos = positions.get(id);
-      
+
       parents.forEach(parentId => {
         const parentNode = graph.nodes.get(parentId);
         const parentPos = positions.get(parentId);
         if (!parentNode || !parentPos) return;
-        
+
         const gParents = nodeParents.get(parentId);
         if (!gParents || gParents.size === 0) return; // Root children spread 360
-        
+
         // Use the first grandparent as the orientation anchor
         const gId = gParents.values().next().value;
         const gPos = positions.get(gId);
         if (!gPos) return;
-        
+
         // Forward direction: away from grandparent
         const dxGP = parentPos.x - gPos.x;
         const dyGP = parentPos.y - gPos.y;
         const angleGP = Math.atan2(dyGP, dxGP);
-        
+
         // Current direction: parent to child
         const dxPC = pos.x - parentPos.x;
         const dyPC = pos.y - parentPos.y;
         const anglePC = Math.atan2(dyPC, dxPC);
-        
+
         // Calculate shortest angular distance
         let angleDiff = anglePC - angleGP;
         while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
         while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-        
-        // Sector width scales with child count. 
+
+        // Sector width scales with child count.
         // 1 child = narrow (~70deg), many children = wide (up to 270deg)
         const siblingCount = Math.max(1, parentNode.connections.size - 1);
         const sectorWidth = Math.min(Math.PI * 1.5, (siblingCount * 0.35) + 0.6);
         const halfSector = sectorWidth / 2;
-        
+
         if (Math.abs(angleDiff) > halfSector) {
           // Soft corrective torque to bring node back into the allowed sector
           const overshoot = Math.abs(angleDiff) - halfSector;
-          const strength = 0.2; 
+          const strength = 0.2;
           const forceMag = overshoot * strength;
-          
+
           // Apply a tangential force (perpendicular to parent-child axis)
           const tangentAngle = anglePC + (angleDiff > 0 ? -Math.PI / 2 : Math.PI / 2);
-          
+
           forces.get(id).x += Math.cos(tangentAngle) * forceMag * 12;
           forces.get(id).y += Math.sin(tangentAngle) * forceMag * 12;
         }
@@ -989,10 +989,10 @@ const state = {
   function updatePositionsWithPhysics(forces) {
     const positions = state.nodePositions;
     const velocities = state.velocities;
-    
+
     // Custom damping and velocity limits for our dynamic fractal engine
     // Lower damping (more friction) to prevent bouncing, allowing a soft settling
-    const damping = 0.78; 
+    const damping = 0.78;
     const maxVelocity = 20;
 
     state.graph.nodes.forEach((node, id) => {
@@ -1035,7 +1035,7 @@ const state = {
     if (rawNode.type === "layer 1") return 1;
     if (rawNode.type === "layer 2") return 2;
     if (rawNode.type === "layer 3") return 3;
-    
+
     if (rawNode.type === "source") {
       const { l1, l2, l3 } = getSourceLayerParts(rawNode);
       if (l3) return 4;
@@ -1086,9 +1086,9 @@ const state = {
     graph.nodes.forEach((node, id) => {
       const angle = Math.random() * Math.PI * 2;
       const r = Math.random() * 30; // 30px cluster
-      state.nodePositions.set(id, { 
-        x: centerX + Math.cos(angle) * r, 
-        y: centerY + Math.sin(angle) * r 
+      state.nodePositions.set(id, {
+        x: centerX + Math.cos(angle) * r,
+        y: centerY + Math.sin(angle) * r
       });
       state.velocities.set(id, { x: 0, y: 0 });
     });
@@ -1143,7 +1143,7 @@ const state = {
 
   function fitCameraToGraph() {
     if (state.graph.nodes.size === 0 || state.userInteracted || !canvas) return;
-    
+
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     state.nodePositions.forEach(pos => {
       minX = Math.min(minX, pos.x);
@@ -1163,7 +1163,7 @@ const state = {
 
     const contentWidth = Math.max(100, maxX - minX);
     const contentHeight = Math.max(100, maxY - minY);
-    
+
     const scaleX = canvas.width / contentWidth;
     const scaleY = canvas.height / contentHeight;
     const targetZoom = Math.min(config.maxZoom, Math.max(config.minZoom, Math.min(scaleX, scaleY)));
@@ -1173,7 +1173,7 @@ const state = {
 
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
-    
+
     const targetPanX = -(centerOfMassX - centerX) * targetZoom;
     const targetPanY = -(centerOfMassY - centerY) * targetZoom;
 
@@ -1277,14 +1277,14 @@ const state = {
   function findNodeAtPosition(x, y) {
     const items = getAllItems();
     const clickRadius = 20 / state.zoom;
-    
+
     const inv = inverseTransform(x, y);
-    
+
     for (let i = items.length - 1; i >= 0; i--) {
       const item = items[i];
       const pos = state.nodePositions.get(item.id);
       if (!pos) continue;
-      
+
       const dx = inv.x - pos.x;
       const dy = inv.y - pos.y;
       if (dx * dx + dy * dy <= clickRadius * clickRadius) {
@@ -1297,12 +1297,12 @@ const state = {
   function openNodeSidebar(nodeId) {
     state.selectedNodeId = nodeId;
     state.sidebarView = "content";
-    
+
     const selectedItem = findItemById(nodeId);
     if (!selectedItem) return;
-    
+
     renderSidebar(selectedItem);
-    
+
     if (nodeSidebar) nodeSidebar.classList.add("open");
   }
 
@@ -1314,16 +1314,16 @@ const state = {
 
   async function handleDeleteNode() {
     if (!state.selectedNodeId) return;
-    
+
     const selectedItem = findItemById(state.selectedNodeId);
     if (!selectedItem) return;
-    
+
     const message = selectedItem.type?.startsWith("layer")
       ? "Delete this layer and everything inside it? (All sources + their quotes + any now-empty analyses will be removed.)"
       : `Delete this ${selectedItem.type}? This action cannot be undone.`;
     const confirmed = window.confirm(message);
     if (!confirmed) return;
-    
+
     try {
       if (selectedItem.type?.startsWith("layer")) {
         const parts = Array.isArray(selectedItem?.meta?.layerPath) ? selectedItem.meta.layerPath : [];
@@ -1344,7 +1344,7 @@ const state = {
       } else {
         await removeNodeEverywhere(selectedItem.id);
       }
-      
+
       closeSidebar();
       await refreshData();
     } catch (error) {
@@ -1413,14 +1413,14 @@ const state = {
   async function createNewNode(type) {
     const subject = contextSubject || window.prompt("Enter subject for the new node:") || "General";
     const now = Date.now();
-    
+
     try {
       if (type === "analysis") {
         const title = window.prompt("Enter analysis title:");
         if (title === null) return;
         const analysis = window.prompt("Enter analysis content:");
         if (analysis === null) return;
-        
+
         await addNode({
           type: "analysis",
           subject,
@@ -1434,7 +1434,7 @@ const state = {
       } else if (type === "quote") {
         const quote = window.prompt("Enter quote text:");
         if (quote === null) return;
-        
+
         await addQuote({
           type: "quote",
           subject,
@@ -1447,7 +1447,7 @@ const state = {
       } else if (type === "cue") {
         const cue = window.prompt("Enter cue text:");
         if (cue === null) return;
-        
+
         await addCue({
           type: "cue",
           subject,
@@ -1457,7 +1457,7 @@ const state = {
           meta: {}
         });
       }
-      
+
       await refreshData();
       if (window.__neuronetCanvas) {
         window.__neuronetCanvas.triggerVerticalWave(0.8);
@@ -1470,7 +1470,7 @@ const state = {
 
   async function linkNodes(id1, id2) {
     if (id1 === id2) return;
-    
+
     const item1 = findItemById(id1);
     const item2 = findItemById(id2);
     if (!item1 || !item2) return;
@@ -1481,7 +1481,7 @@ const state = {
       await linkAnalysisToQuote(item2.id, item1.id);
       return;
     }
-    
+
     if (item1.type === "quote" && item2.type === "analysis") {
       // FIX: Use correct parameter order (quoteId, analysisId)
       await linkAnalysisToQuote(item1.id, item2.id);
@@ -1499,7 +1499,7 @@ const state = {
         return;
       }
     }
-    
+
     if (item2.type === "cue") {
       return linkNodes(id2, id1);
     }
@@ -1576,7 +1576,7 @@ const state = {
           state.hasDragged = false; // Reset it here just in case
           return;
         }
-        
+
         const rect = canvas.getBoundingClientRect();
         const pos = {
           x: e.clientX - rect.left,
@@ -1601,7 +1601,7 @@ const state = {
           y: e.clientY - rect.top
         };
         const node = findNodeAtPosition(pos.x, pos.y);
-        
+
         if (state.isPanning) {
           state.userInteracted = true;
           state.hasDragged = true;
@@ -1633,7 +1633,7 @@ const state = {
           e.preventDefault();
           return;
         }
-        
+
         const rect = canvas.getBoundingClientRect();
         const pos = {
           x: e.clientX - rect.left,
@@ -1690,13 +1690,13 @@ const state = {
         const rect = canvas.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
-        
+
         const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
         const newZoom = Math.min(config.maxZoom, Math.max(config.minZoom, state.zoom * zoomFactor));
-        
+
         const worldX = (mouseX - canvas.width / 2 - state.panOffset.x) / state.zoom + canvas.width / 2;
         const worldY = (mouseY - canvas.height / 2 - state.panOffset.y) / state.zoom + canvas.height / 2;
-        
+
         state.panOffset.x = mouseX - canvas.width / 2 - (worldX - canvas.width / 2) * newZoom;
         state.panOffset.y = mouseY - canvas.height / 2 - (worldY - canvas.height / 2) * newZoom;
         state.zoom = newZoom;
@@ -1738,10 +1738,10 @@ const state = {
             window.dispatchEvent(new CustomEvent("neuronet-open-tool", {
               detail: (() => {
                 const subject = String(selectedItem.subject || selectedItem.title || "").trim();
-                return { 
-                  tool: "analysis", 
+                return {
+                  tool: "analysis",
                   subject: subject || contextSubject,
-                  nodeId: selectedItem.id 
+                  nodeId: selectedItem.id
                 };
               })()
             }));
@@ -1782,7 +1782,7 @@ const state = {
       connectNodesBtn.addEventListener("click", () => {
         state.isConnecting = !state.isConnecting;
         state.connectingSourceId = null;
-        
+
         connectNodesBtn.classList.toggle("active", state.isConnecting);
         if (!state.isConnecting) {
           connectingOverlay?.classList.remove("visible");
@@ -1801,7 +1801,7 @@ const state = {
           y: e.clientY - rect.top
         };
         const node = findNodeAtPosition(pos.x, pos.y);
-        
+
         if (node) {
           if (!state.connectingSourceId) {
             state.connectingSourceId = node.id;
@@ -1812,7 +1812,7 @@ const state = {
           } else {
             const sourceId = state.connectingSourceId;
             const targetId = node.id;
-            
+
             if (sourceId !== targetId) {
               await linkNodes(sourceId, targetId);
               await refreshData();
@@ -1820,7 +1820,7 @@ const state = {
                 window.__neuronetCanvas.triggerRadialPulse(e.clientX, e.clientY, 1.0);
               }
             }
-            
+
             state.connectingSourceId = null;
             state.isConnecting = false;
             connectNodesBtn?.classList.remove("active");
@@ -1855,10 +1855,10 @@ const state = {
   function handleResize() {
     const container = canvas?.parentElement;
     if (!container) return;
-    
+
     const width = container.clientWidth;
     const height = container.clientHeight;
-    
+
     if (state.nodePositions.size === 0) {
       initializePositions(width, height);
     }
@@ -1868,12 +1868,12 @@ const state = {
   document.addEventListener("db-change", handleDBChange);
 
   await refreshData();
-  
+
   const container = canvas?.parentElement;
   if (container) {
     initializePositions(container.clientWidth, container.clientHeight);
   }
-  
+
   setupEventListeners();
   tick();
 

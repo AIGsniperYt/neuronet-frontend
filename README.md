@@ -1,3 +1,9 @@
+# **MAJOR (Flagship)** — NeuroNet: Personal Knowledge Management System
+
+See [project.md](../project.md) for full documentation.
+
+---
+
 # Copyright © 2026 AIGsniper
 
 All Rights Reserved.

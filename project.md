@@ -1,7 +1,7 @@
 # NeuroNet Developer Specification
 
-**Version**: 6.3  
-**Date**: May 7, 2026  
+**Version**: 6.3
+**Date**: May 7, 2026
 **Status**: Production-ready with SSS (Semantic Search System) anchoring, complete tool implementations (Analysis v2, Memory SuperProgram, Mindmap), bidirectional quote/analysis linking, layer hierarchy navigation, advanced source editor, full feature parity across codebase, advanced lite deckbuilder with layer categorising and priority heap ordering, a specific study filter system with inline grade distribution progress bars, an adaptive learning layer that personalises memory scheduling per user, a Learning Router that selects cold/warm learning strategy, and a multi-mode Sidebar System for context-aware intelligence (Focus, Router, Inspect, Explore)
 
 ---
@@ -65,7 +65,7 @@ neuronet/
 │   └── models/
 │       ├── Node.js
 │       └── User.js
-└── project.md   # This file   
+└── project.md   # This file
 ```
 
 ### 2.3 Background Canvas Animation (`canvas.js`)

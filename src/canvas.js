@@ -243,7 +243,7 @@ function drawField() {
         // Linear waves are softer and less distracting
         const decayRate = isLinear ? 0.003 : 0.01;
         let intensity = (1 - band / bandLimit) * w.strength * Math.exp(-w.age * decayRate);
-        
+
         if (isLinear) intensity *= 0.45; // Soften the global passes
 
         n.energy = Math.max(n.energy, intensity);

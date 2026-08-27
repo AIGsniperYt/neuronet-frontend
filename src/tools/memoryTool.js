@@ -3636,7 +3636,7 @@ export async function initMemoryTool(deps, context = {}) {
   let _typewriterTimer = null;
   let _lastThoughtMsg = "";
   let _lastGradeTime = 0;
-  
+
 
   function generateSystemThought(manualGrade = null) {
     const lastGrade = manualGrade || state.session.lastGradeReaction;
@@ -3827,7 +3827,7 @@ export async function initMemoryTool(deps, context = {}) {
     if (lastGrade === null && now - _lastGradeTime < 2500) {
       return;
     }
-    
+
     if (lastGrade !== null) {
       _lastGradeTime = now;
     }
@@ -4651,7 +4651,7 @@ export async function initMemoryTool(deps, context = {}) {
             ${[1,2,3,4,5].map(p => {
               const color = getPriorityColor(p);
               const isActive = p === priority;
-              return `<button type="button" class="priority-pill ${isActive ? 'active' : ''}" 
+              return `<button type="button" class="priority-pill ${isActive ? 'active' : ''}"
                 data-priority="${p}" data-index="${index}"
                 style="color: ${isActive ? color : 'var(--text-muted)'}; border-color: ${isActive ? color : 'rgba(255,255,255,0.15)'};"
                 title="Set priority to ${['Very Low', 'Low', 'Medium', 'High', 'Very High'][p-1]}">${['Very Low', 'Low', 'Medium', 'High', 'Very High'][p-1]}</button>`;
@@ -4703,7 +4703,7 @@ export async function initMemoryTool(deps, context = {}) {
 
     return layerNames.map(name => {
       const isActive = name === selectedLayer;
-      return `<button type="button" class="layer-pill ${isActive ? 'active' : ''}" 
+      return `<button type="button" class="layer-pill ${isActive ? 'active' : ''}"
         data-level="${level}" data-layer="${escapeHtml(name)}" data-index="${cardIndex}">${escapeHtml(name)}</button>`;
     }).join("");
   }
@@ -4982,7 +4982,7 @@ export async function initMemoryTool(deps, context = {}) {
       if (!wrapper) return;
       const tooltip = wrapper.querySelector('.progress-tooltip');
       const segments = bar.querySelectorAll('.progress-seg');
-      
+
       segments.forEach(seg => {
         seg.addEventListener('mouseenter', () => {
           const label = seg.dataset.label;
@@ -4990,7 +4990,7 @@ export async function initMemoryTool(deps, context = {}) {
           tooltip.querySelector('.tooltip-label').textContent = label;
           tooltip.querySelector('.tooltip-count').textContent = count;
           tooltip.style.display = 'block';
-          
+
           // Position tooltip above the specific segment
           const segRect = seg.getBoundingClientRect();
           const barRect = bar.getBoundingClientRect();

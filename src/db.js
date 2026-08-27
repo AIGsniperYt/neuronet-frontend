@@ -515,8 +515,8 @@ export function clearQuotes() {
  */
 export async function findExistingQuote(sourceId, start, end) {
   const quotes = await getQuotesForSource(sourceId);
-  return quotes.find(q => 
-    Number(q.link?.start) === Number(start) && 
+  return quotes.find(q =>
+    Number(q.link?.start) === Number(start) &&
     Number(q.link?.end) === Number(end)
   ) || null;
 }
@@ -529,7 +529,7 @@ export async function findExistingQuoteByText(sourceId, quoteText) {
   const quotes = await getQuotesForSource(sourceId);
   const normalized = (text) => text?.toLowerCase().replace(/\s+/g, " ").trim() || "";
   const target = normalized(quoteText);
-  
+
   return quotes.find(q => normalized(q.quote) === target) || null;
 }
 
@@ -577,12 +577,12 @@ export async function linkAnalysisToQuote(quoteId, analysisId) {
 
   if (!quote.meta) quote.meta = {};
   if (!quote.meta.analysisNodeIds) quote.meta.analysisNodeIds = [];
-  
+
   if (!quote.meta.analysisNodeIds.includes(analysisId)) {
     quote.meta.analysisNodeIds.push(analysisId);
   }
   quote.updatedAt = Date.now();
-  
+
   // Also update analysis.quoteRefs to maintain bidirectional consistency
   const analysis = await getNode(analysisId);
   if (analysis) {
@@ -603,7 +603,7 @@ export async function linkAnalysisToQuote(quoteId, analysisId) {
       await addNode(analysis);
     }
   }
-  
+
   return addQuote(quote);
 }
 
@@ -618,7 +618,7 @@ export async function unlinkAnalysisFromQuote(quoteId, analysisId) {
     quote.meta.analysisNodeIds = quote.meta.analysisNodeIds.filter(id => id !== analysisId);
   }
   quote.updatedAt = Date.now();
-  
+
   // Also update analysis.quoteRefs to maintain bidirectional consistency
   const analysis = await getNode(analysisId);
   if (analysis && analysis.quoteRefs) {
@@ -626,7 +626,7 @@ export async function unlinkAnalysisFromQuote(quoteId, analysisId) {
     analysis.updatedAt = Date.now();
     await addNode(analysis);
   }
-  
+
   return addQuote(quote);
 }
 
@@ -636,14 +636,14 @@ export async function unlinkAnalysisFromQuote(quoteId, analysisId) {
 export async function getAnalysesReferencingQuote(quoteId) {
   const allNodes = await getAllNodes();
   const quote = await getQuote(quoteId);
-  
+
   // Get analysis IDs from both sides of the relationship
   const idsFromQuoteMeta = new Set(quote?.meta?.analysisNodeIds || []);
-  
+
   // Check quoteRefs in analysis nodes
   const idsFromQuoteRefs = new Set();
-  const analysesWithRefs = allNodes.filter(node => 
-    node.type === "analysis" && 
+  const analysesWithRefs = allNodes.filter(node =>
+    node.type === "analysis" &&
     node.quoteRefs?.some(ref => {
       if (ref.quoteId === quoteId) {
         idsFromQuoteRefs.add(node.id);
@@ -652,12 +652,12 @@ export async function getAnalysesReferencingQuote(quoteId) {
       return false;
     })
   );
-  
+
   // Merge both sets of IDs
   const allAnalysisIds = new Set([...idsFromQuoteMeta, ...idsFromQuoteRefs]);
-  
+
   // Return full analysis nodes
-  return allNodes.filter(node => 
+  return allNodes.filter(node =>
     node.type === "analysis" && allAnalysisIds.has(node.id)
   );
 }
@@ -1165,16 +1165,16 @@ function escapeHtmlForDB(value) {
  */
 export function resolveQuoteInSource(quoteNode, sourceNode) {
   if (!quoteNode || !sourceNode) return null;
-  
-  const sourceText = sourceNode.contentText || ""; 
+
+  const sourceText = sourceNode.contentText || "";
   const quoteText = quoteNode.quote || "";
   const originalStart = Number(quoteNode.link?.start ?? -1);
   const originalEnd = Number(quoteNode.link?.end ?? -1);
-  
+
   // Support both nested context and direct prefix/suffix
   const prefix = quoteNode.link?.prefix || quoteNode.link?.context?.prefix || "";
   const suffix = quoteNode.link?.suffix || quoteNode.link?.context?.suffix || "";
-  
+
   if (!quoteText) return null;
 
   const matchesExactly = (text, start, end) => {
@@ -1193,7 +1193,7 @@ export function resolveQuoteInSource(quoteNode, sourceNode) {
   if (prefix || suffix) {
     const searchString = `${prefix}${quoteText}${suffix}`;
     let matchIdx = sourceText.indexOf(searchString);
-    
+
     if (matchIdx !== -1) {
       const newStart = matchIdx + prefix.length;
       return { start: newStart, end: newStart + quoteText.length };
@@ -1206,7 +1206,7 @@ export function resolveQuoteInSource(quoteNode, sourceNode) {
   let bestStart = -1;
   let minDiff = Infinity;
   let currentIdx = sourceText.indexOf(quoteText);
-  
+
   while (currentIdx !== -1) {
     const diff = Math.abs(currentIdx - Math.max(0, originalStart));
     if (diff < minDiff) {
@@ -1220,7 +1220,7 @@ export function resolveQuoteInSource(quoteNode, sourceNode) {
     return { start: bestStart, end: bestStart + quoteText.length };
   }
 
-  return null; 
+  return null;
 }
 
 /**
@@ -1229,7 +1229,7 @@ export function resolveQuoteInSource(quoteNode, sourceNode) {
  */
 export function getFormattedQuote(quoteNode, sourceNode) {
   const quoteText = quoteNode.quote || "";
-  
+
   const formatFallback = (text) => {
     return escapeHtmlForDB(text).replace(/\n/g, "<br>");
   };
@@ -1241,7 +1241,7 @@ export function getFormattedQuote(quoteNode, sourceNode) {
   const temp = document.createElement("div");
   temp.innerHTML = sourceNode.contentHtml;
   const visualText = temp.textContent || "";
-  
+
   const prefix = quoteNode.link?.prefix || quoteNode.link?.context?.prefix || "";
   const suffix = quoteNode.link?.suffix || quoteNode.link?.context?.suffix || "";
 
@@ -1266,17 +1266,17 @@ export function getFormattedQuote(quoteNode, sourceNode) {
   };
 
   const resolved = resolveVisualOffsets();
-  
+
   if (!resolved) {
     return formatFallback(quoteText);
   }
 
   let { start, end } = resolved;
-  
+
   // CRITICAL: Trim leading/trailing whitespace from indices to avoid gaps in cards
   while (start < end && /\s/.test(visualText[start])) start++;
   while (end > start && /\s/.test(visualText[end - 1])) end--;
-  
+
   // Extract with basic textContent walker (standard indexing)
   let currentPos = 0;
   const parts = [];
@@ -1301,7 +1301,7 @@ export function getFormattedQuote(quoteNode, sourceNode) {
         const sliceStart = Math.max(0, start - nodeStart);
         const sliceEnd = Math.min(text.length, end - nodeStart);
         const slice = text.slice(sliceStart, sliceEnd);
-        
+
         let parent = node.parentElement;
         let hasBold = false;
         let hasItalic = false;
@@ -1322,7 +1322,7 @@ export function getFormattedQuote(quoteNode, sourceNode) {
     } else if (node.nodeType === Node.ELEMENT_NODE) {
       const tag = node.tagName.toUpperCase();
       const isBlock = blockTags.has(tag);
-      
+
       if (isBlock && currentPos >= start && currentPos < end && parts.length > 0) {
         lastNodeWasBlock = true;
       }
@@ -1330,7 +1330,7 @@ export function getFormattedQuote(quoteNode, sourceNode) {
       for (const child of node.childNodes) {
         walk(child);
       }
-      
+
       // Also check after children for block closure if it helps
       if (isBlock && currentPos >= start && currentPos < end) {
         lastNodeWasBlock = true;
@@ -1339,13 +1339,13 @@ export function getFormattedQuote(quoteNode, sourceNode) {
   }
 
   walk(temp);
-  
+
   // Join and trim leading/trailing breaks/whitespace
   let result = parts.join("");
-  
+
   // Clean up: remove leading/trailing <br> tags and excess whitespace
   result = result.replace(/^(<br>|\s)+/gi, "").replace(/(<br>|\s)+$/gi, "");
-  
+
   if (!result.trim()) {
      return formatFallback(quoteText);
    }

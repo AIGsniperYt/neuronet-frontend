@@ -1,5 +1,5 @@
 # Copyright © 2025 AIGsniper
- 
+
 All Rights Reserved.
 
 This repository and all associated code, assets, and documentation

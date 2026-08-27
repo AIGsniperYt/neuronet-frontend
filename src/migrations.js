@@ -1,12 +1,12 @@
 /**
  * Migration utilities to convert from old combined quote+analysis structure
  * to new separated quote and analysis nodes with many-to-many linking.
- * 
+ *
  * OLD STRUCTURE:
  *   - Analysis nodes contained both quote text AND analysis commentary
  *   - 1-to-1 relationship between quote and analysis
  *   - Tied to specific source section (Act 1 > Scene 3)
- * 
+ *
  * NEW STRUCTURE:
  *   - Quote nodes are separate from analysis nodes
  *   - Analysis nodes are standalone and reference multiple quotes
@@ -88,7 +88,7 @@ export function migrateOldAnalysisNodes(allNodes) {
  */
 export async function performMigration(getAllNodes, addNode, addQuote) {
   const allNodes = await getAllNodes();
-  
+
   // Check if migration is needed
   const hasOldAnalysisNodes = allNodes.some(n => n.type === "analysis" && n.quote && !n.quoteRefs);
   const hasNewQuoteNodes = allNodes.some(n => n.type === "quote");
@@ -125,7 +125,7 @@ export async function performMigration(getAllNodes, addNode, addQuote) {
  * @param {string} quoteText - The quoted text
  * @param {string} sourceId - The source ID
  * @param {number} start - Start position in source
- * @param {number} end - End position in source  
+ * @param {number} end - End position in source
  * @param {string} subject - Subject name
  * @param {string} section - Source section (e.g. "Act 1 > Scene 3")
  * @returns {Object} Quote node object

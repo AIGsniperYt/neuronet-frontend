@@ -225,7 +225,7 @@ async function loadTool(toolName, context = {}) {
 
   const tool = tools[toolName];
   toolContainer.innerHTML = "";
-  
+
   // Fetch and load tool
   fetch(`./tools/${tool.file}`).then(r => r.text()).then(html => {
     toolContainer.innerHTML = html;
@@ -509,7 +509,7 @@ function showLaunchpad() {
   const tc = document.getElementById("toolContainer");
   const launchpad = document.getElementById("globalLaunchpad");
   if (!launchpad) return;
-  
+
   // Animate tool container out if it exists
   if (tc) {
     tc.classList.add("exiting");
@@ -519,7 +519,7 @@ function showLaunchpad() {
       tc.innerHTML = "";
     }, 350);
   }
-  
+
   // Animate launchpad in
   launchpad.style.display = "flex";
   launchpad.classList.add("entering");
@@ -532,7 +532,7 @@ function hideLaunchpad() {
   const tc = document.getElementById("toolContainer");
   const launchpad = document.getElementById("globalLaunchpad");
   if (!launchpad) return;
-  
+
   // Animate launchpad out
   launchpad.classList.add("exiting");
   launchpad.classList.remove("entered");
@@ -540,7 +540,7 @@ function hideLaunchpad() {
     launchpad.style.display = "none";
     launchpad.classList.remove("exiting");
   }, 350);
-  
+
   // Show tool container
   if (tc) {
     tc.style.display = "block";
@@ -703,7 +703,7 @@ async function initLaunchpad() {
     toggleBtn.addEventListener("click", () => {
       subjectEditMode = !subjectEditMode;
       toggleBtn.textContent = subjectEditMode ? "Done" : "Edit";
-      
+
       const actions = document.querySelectorAll(".subject-actions");
       actions.forEach(el => {
         el.hidden = !subjectEditMode;
