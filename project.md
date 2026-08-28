@@ -215,10 +215,15 @@ All nodes share a base shape:
   "subject": "Macbeth",
   "section": "Act 1 > Scene 3",
   "title": "Witches meeting Macbeth",
-  "content": "full passage (HTML)",
+  "content": "full passage (plain text)",
+  "contentMarkdown": "full passage (Markdown — source of truth)",
+  "contentHtml": "<p>full passage (rendered from Markdown)</p>",
+  "contentText": "full passage (textContent of rendered HTML)",
   "meta": {
     "hierarchyPath": ["Macbeth", "Act 1", "Scene 3"],
-    "kind": "source"
+    "kind": "source",
+    "formatVersion": 3,
+    "schemaUpgraded": true
   }
 }
 ```
@@ -967,7 +972,7 @@ The full click path when a user selects text and triggers "Add Quote":
    - Builds `quoteRef` via `buildQuoteRefFromQuoteNode()` and pushes to `state.selectedQuoteRef`
    - Renders updated quote refs list in modal via `renderModalQuoteRefsListHtml()`
    - Calls **`showAnalysisCard()`** → opens the analysis modal with pre-filled quote refs
-4. **Analysis modal** (`showAnalysisCard()` at `analysisTool.js:1420`):
+4. **Analysis modal** (`showAnalysisCard()` at `analysisTool.js:1307`):
    - Sets `analysisCardKicker` to "Create Analysis Node" or "Edit Analysis Node"
    - Sets `analysisSubmitBtn` text to "Save Analysis Node" or "Update Analysis Node"
    - Renders `quoteRefsListContainer` with `renderModalQuoteRefsListHtml()`
@@ -975,14 +980,17 @@ The full click path when a user selects text and triggers "Add Quote":
 
 #### Source Editor (`analysisTool.js`)
 
-1. **Paste handling**:
-   - Extracts content between `<!--StartFragment-->` and `<!--EndFragment-->` markers from clipboard HTML
-   - Falls back to plain text if HTML not available
-   - Post-paste cleanup removes inline styles, empty spans, anchor name attributes
-   - Converts Microsoft Word/Google Docs HTML: `convertWordHtml()`, `convertGoogleDocsHtml()`
-   - Markdown conversion on Enter: headings (#, ##, ###), blockquotes (>)
-
-2. **Source hierarchy**:
+1. **Markdown-first editor** (vendored `md-format`, see "Source Editor (Markdown-First)" above):
+   - WYSIWYG preview default; Write / Split / Source views
+   - Built-in sticky toolbar (no underline; no draggable/floatable taskbar)
+   - Saving stores `contentMarkdown` (+ derived `contentHtml`/`contentText`)
+   - Pasted/content HTML is converted to Markdown via `htmlToMarkdown()`
+2. **Auto-upgrade of legacy data** (`src/schemaUpgrade.js`):
+   - Runs on import (`importDatabaseJson`) and at startup (`upgradeStoredDatabaseIfNeeded`)
+   - Converts legacy sources to `contentMarkdown`, re-anchors quote/quoteRef offsets in the
+     rendered-markdown reader text, backfills `link.prefix`/`link.suffix` fingerprints
+   - Idempotent: already-upgraded data is untouched
+3. **Source hierarchy**:
    - Three-level layer navigation (layer1, layer2, layer3 selects)
    - Hierarchy path stored in `meta.hierarchyPath`
    - Auto-computed from subject + section splits
@@ -1043,26 +1051,31 @@ Added ability to flag analysis nodes for later review:
    - Updates `state.focusedNodeId` and `state.focusedRangeKey`, then re-renders
 6. **Right-click context menu on highlights**: Opens cue creation/edit menu directly from reader highlights
 
-#### Source Editor Deep Features
+#### Source Editor (Markdown-First)
 
-1. **Inline markdown conversion** (`convertInlineMarkdownInPlace()`):
-   - Processes text nodes in real-time (debounced 300ms on input)
-   - Supports: `***bold italic***`, `**bold**`, `*italic*`, `~~strikethrough~~`, `` `code` ``
-   - Order matters: longest patterns first to avoid greedy matches
-   - Preserves cursor position across conversions (`saveCursorPosition`/`restoreCursorPosition`)
-2. **Block markdown on Enter** (`convertMdOnEnter()`):
-   - `# Text` → H1, `## Text` → H2, `### Text` → H3
-   - `> Text` → blockquote
-   - Strips prefix from paragraph text after conversion
-3. **Keyboard shortcuts** (Ctrl/Cmd):
-   - `B` → bold, `I` → italic, `U` → underline, `` ` `` → code, `Shift+X` → strikethrough
-4. **Paste handling**: Extracts `<!--StartFragment-->` / `<!--EndFragment-->` from clipboard HTML; falls back to plain text; runs `convertGoogleDocsHtml()` and `convertWordHtml()` cleanup
-5. **HTML sanitization** (`sanitizeRichHtml()`):
-   - Strips disallowed tags (only allows: P, DIV, BR, STRONG, B, EM, I, U, UL, OL, LI, BLOCKQUOTE, H1, H2, H3, A)
-   - Normalizes B→STRONG, I→EM
-   - Converts pasted HTML to safe `{ contentHtml, contentText }` shape
-6. **Toolbar drag-and-drop**: Drag handle lets user reposition editor toolbar; snaps back to `toolbar-snap-slot` at top of editor wrapper
-7. **`formatQuoteForDisplay()` / `getFormattedFromSource()`**: Renders quotes with original source formatting (bold, italic) by walking the source DOM and extracting inline styles per text slice
+The editor is the vendored `md-format` library (`src/vendor/md-format/`), backed by its own
+parser/renderer — Markdown is the source of truth, not HTML.
+
+1. **Default view = WYSIWYG inline preview** (`view: "preview"`), like a Word/Google Docs editor that
+   is still Markdown under the hood. **Write** (edit Markdown) and **Split** views are available via
+   the view toggle (`Write / Split / Source` → `mdEditor.setView("preview" | "split" | "md")`).
+2. **Built-in sticky toolbar** (industry standard, sticky within the scrollable editor host). Tools
+   from `MDEDITOR_TOOLS`: bold, italic, strikethrough, code, H1/H2/H3, link, image, list, blockquote,
+   code block, task list, table. There is **no underline** button and no draggable/floatable taskbar.
+3. **Markdown shortcuts**: typing `**bold**`, `*italic*`, `` `code` ``, `# `/`## `/`### ` headers,
+   `> ` quotes, `- ` lists, `[text](url)` links, `|` pipe tables renders live.
+4. **Paste handling**: rich/pasted HTML is converted to Markdown on the way in
+   (`htmlToMarkdown()` → `domToMarkdown()` from the vendored lib); nothing is ever stored as raw
+   pasted HTML.
+5. **Storage**: saving stores `contentMarkdown` (source of truth) plus derived `contentHtml` and
+   `contentText`. The reader and all quote offsets work against the rendered Markdown's text:
+   `contentText` is the `textContent` of `render(parse(contentMarkdown), "html")` — one coordinate
+   space end-to-end.
+6. **Auto-upgrade**: legacy records (no `contentMarkdown`, old reader text) are upgraded
+   automatically on **import** and on **startup** by `src/schemaUpgrade.js` (`upgradeDataset()` /
+   `upgradeStoredDatabaseIfNeeded()`) — no manual migration needed. Sources gain real
+   `contentMarkdown`, quote links are re-anchored in the new reader space, and `link.prefix` /
+   `link.suffix` fingerprints are backfilled. Re-running is a no-op.
 
 #### Quote/Analysis Integrity Functions
 

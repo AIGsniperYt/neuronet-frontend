@@ -1,3 +1,5 @@
+import { createEditor, parse, render, domToMarkdown } from "../vendor/md-format/mdeditor.js";
+
 export async function initAnalysisToolV2(deps, context = {}) {
   const {
     getAllNodes,
@@ -62,7 +64,8 @@ export async function initAnalysisToolV2(deps, context = {}) {
   const sourceLevel2Input = document.getElementById("sourceLevel2");
   const sourceLevel3Input = document.getElementById("sourceLevel3");
   const sourceEditor = document.getElementById("sourceEditor");
-  const editorToolbar = document.getElementById("editorToolbar");
+  const editorViewSeg = document.getElementById("editorViewSeg");
+  const mdEditor = createEditor(sourceEditor, { view: "preview", storage: false });
   const newSourceBtn = document.getElementById("newSourceBtn");
   const studyGrid = document.querySelector(".study-grid");
   const analysisReader = document.getElementById("analysisReader");
@@ -164,221 +167,38 @@ function enforceUserSelect() {
     state.selectedSubject = contextSubject;
   }
 
-  function convertGoogleDocsHtml(html) {
-    let result = html;
-    // Remove Google Docs specific spans (Apple-style-span)
-    result = result.replace(/<span[^>]*class="[^"]*Apple-style-span[^"]*"[^>]*>(.*?)<\/span>/gi, "$1");
-    // Remove font-family style spans
-    result = result.replace(/<span[^>]*style="[^"]*font-family:[^;]*;?[^"]*">(.*?)<\/span>/gi, "$1");
-    // Remove any remaining spans but keep content
-    result = result.replace(/<span[^>]*>(.*?)<\/span>/gi, "$1");
-    // Remove font tags
-    result = result.replace(/<font[^>]*>(.*?)<\/font>/gi, "$1");
-    // Remove Office paragraph tags
-    result = result.replace(/<o:p>(.*?)<\/o:p>/gi, "$1");
-    result = result.replace(/<bdo[^>]*>(.*?)<\/bdo>/gi, "$1");
-    // Remove any remaining span open tags without attributes
-    result = result.replace(/<span[^>]+>/gi, "");
-    return result;
+  function htmlToMarkdown(html) {
+    if (!html) return "";
+    const div = document.createElement("div");
+    div.innerHTML = html;
+    return mdNormalize(domToMarkdown(div) || "");
   }
 
-
-  function convertWordHtml(html) {
-    let result = html;
-    // Remove XML declaration and processing instructions
-    result = result.replace(/<\?xml[^>]*\?>.*?<\?xml[^>]*\?>/gi, "");
-    result = result.replace(/<\?xml[^>]*\?>/gi, "");
-    // Remove Word namespace tags (w:, o:, v:, st1:)
-    result = result.replace(/<w:[^>]+>.*?<\/w:[^>]+>/gi, "");
-    result = result.replace(/<w:[^>]+\/>/gi, "");
-    result = result.replace(/<o:[^>]+>.*?<\/o:[^>]+>/gi, "");
-    result = result.replace(/<o:[^>]+\/>/gi, "");
-    result = result.replace(/<v:[^>]+>.*?<\/v:[^>]+>/gi, "");
-    result = result.replace(/<v:[^>]+\/>/gi, "");
-    result = result.replace(/<st1:[^>]+>.*?<\/st1:[^>]+>/gi, "");
-    result = result.replace(/<st1:[^>]+\/>/gi, "");
-    result = result.replace(/<st1:[^>]+>/gi, "");
-    result = result.replace(/class="Mso[^"]*"/gi, "");
-    result = result.replace(/style="[^"]*mso-[^"]*"/gi, "");
-    return result;
+  /* Legacy HTML → markdown round trips leave junk the parser turns back into
+   * invisible blocks: a <br> inside a blockquote becomes a hardbreak that
+   * domToMarkdown serialises as an empty '> >' line, which re-parses to an
+   * empty nested blockquote → blank space in the reader/preview. Normalise the
+   * markdown at the load boundary so both the reader and the editor agree. */
+  function mdNormalize(md) {
+    if (!md) return md;
+    return md
+      .split("\n")
+      .filter((line) => !line.trim().match(/^>[\s>]*$/)) // drop empty blockquote markers ("> ", "> >")
+      .join("\n")
+      .replace(/\n{4,}/g, "\n\n\n")
+      .replace(/^\s+/, "")
+      .replace(/\s+$/, "");
   }
 
-  function convertMarkdown(text) {
-    let result = escapeHtml(text || "");
-    // Bold: ***text*** or **text**
-    result = result.replace(/\*\*\*([^*]+)\*\*\*/g, "<strong><em>$1</em></strong>");
-    result = result.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-    // Italic: *text*
-    result = result.replace(/\*([^*]+)\*/g, "<em>$1</em>");
-    // Bold: __text__
-    result = result.replace(/__([^_]+)__/g, "<strong>$1</strong>");
-    // Italic: _text_
-    result = result.replace(/_([^_]+)_/g, "<em>$1</em>");
-    // Headers
-    result = result.replace(/^### (.+)$/gm, "<h3>$1</h3>");
-    result = result.replace(/^## (.+)$/gm, "<h2>$1</h2>");
-    result = result.replace(/^# (.+)$/gm, "<h1>$1</h1>");
-    // Blockquote
-    result = result.replace(/^> (.+)$/gm, "<blockquote>$1</blockquote>");
-    // Unordered list
-    result = result.replace(/^- (.+)$/gm, "<li>$1</li>");
-    result = result.replace(/^\d+\. (.+)$/gm, "<li>$1</li>");
-    // Newlines
-    result = result.replace(/\n/g, "<br>");
-    return result;
+  function sourceMarkdown(source) {
+    if (!source) return "";
+    let md = "";
+    if (source.contentMarkdown) md = source.contentMarkdown;
+    else if (source.contentHtml) md = htmlToMarkdown(source.contentHtml);
+    else md = source.content || "";
+    return mdNormalize(md);
   }
 
-  // ========== MARKDOWN & FORMATTING SUPPORT ==========
-  // Supported inline markdown patterns (auto-converts as you type):
-  //   - *text* → italic (<em>)
-  //   - **text** → bold (<strong>)
-  //   - ***text*** → bold italic (<strong><em>)
-  //   - _text_ → italic (<em>)
-  //   - __text__ → bold (<strong>)
-  //   - ___text___ → bold italic (<strong><em>)
-  //   - ~~text~~ → strikethrough (<del>)
-  //   - `text` → inline code (<code>)
-  //
-  // Keyboard shortcuts:
-  //   - Ctrl/Cmd+B → bold
-  //   - Ctrl/Cmd+I → italic
-  //   - Ctrl/Cmd+U → underline
-  //   - Ctrl/Cmd+Shift+X → strikethrough
-  //   - Ctrl/Cmd+` → code block
-  //   - #, ##, ### at start of line + Enter → heading (H1, H2, H3)
-  //   - > at start of line + Enter → blockquote
-  //
-  // Block markdown patterns (on Enter):
-  //   - # Text → H1 heading
-  //   - ## Text → H2 heading
-  //   - ### Text → H3 heading
-  //   - > Text → blockquote
-  // ================================================
-
-  function saveCursorPosition() {
-    const selection = window.getSelection();
-    if (!selection.rangeCount) return null;
-    if (!sourceEditor.contains(selection.anchorNode)) return null;
-
-    try {
-      const range = selection.getRangeAt(0);
-      const preRange = range.cloneRange();
-      preRange.selectNodeContents(sourceEditor);
-      preRange.setEnd(range.endContainer, range.endOffset);
-      return preRange.toString().length;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function restoreCursorPosition(offset) {
-    if (offset === null || offset < 0) return;
-    if (!sourceEditor) return;
-
-    try {
-      const selection = window.getSelection();
-      const range = document.createRange();
-      let charCount = 0;
-      let nodeStack = [sourceEditor];
-      let node, foundStart = false;
-
-      while (!foundStart && (node = nodeStack.pop())) {
-        if (node.nodeType === Node.TEXT_NODE) {
-          const nextCharCount = charCount + node.length;
-          if (offset <= nextCharCount) {
-            range.setStart(node, Math.max(0, offset - charCount));
-            foundStart = true;
-          }
-          charCount = nextCharCount;
-        } else {
-          let i = node.childNodes.length;
-          while (i--) {
-            nodeStack.push(node.childNodes[i]);
-          }
-        }
-      }
-
-      if (foundStart) {
-        range.collapse(true);
-        selection.removeAllRanges();
-        selection.addRange(range);
-      }
-    } catch (e) {
-      // Silently fail if cursor restoration fails
-    }
-  }
-
-  function convertInlineMarkdownInPlace() {
-    try {
-      const selection = window.getSelection();
-      const shouldRestoreCursor = selection.rangeCount > 0 && sourceEditor && sourceEditor.contains(selection.anchorNode);
-      const cursorPos = shouldRestoreCursor ? saveCursorPosition() : null;
-
-      const textNodes = [];
-      const walker = document.createTreeWalker(sourceEditor, NodeFilter.SHOW_TEXT);
-      let node;
-
-      while (node = walker.nextNode()) {
-        const text = node.textContent;
-        // Only process text nodes with potential markdown
-        if (text.includes("*") || text.includes("_") || text.includes("`") || text.includes("~")) {
-          // Skip if already inside a formatting tag
-          let parent = node.parentNode;
-          if (parent && !["STRONG", "EM", "CODE", "DEL", "B", "I"].includes(parent.tagName)) {
-            textNodes.push(node);
-          }
-        }
-      }
-
-      let changed = false;
-
-      textNodes.forEach(textNode => {
-        try {
-          let text = textNode.textContent;
-          const originalText = text;
-
-          // Convert markdown patterns (order matters - do longest patterns first)
-          // ***bold italic*** or ___bold italic___
-          text = text.replace(/\*\*\*(\S+(?:\s+\S+)*)\*\*\*/g, "<strong><em>$1</em></strong>");
-          text = text.replace(/___(\S+(?:\s+\S+)*)___/g, "<strong><em>$1</em></strong>");
-          // **bold** or __bold__
-          text = text.replace(/\*\*(\S+(?:\s+\S+)*)\*\*/g, "<strong>$1</strong>");
-          text = text.replace(/__(\S+(?:\s+\S+)*)__/g, "<strong>$1</strong>");
-          // *italic* or _italic_ (only matches if surrounded by non-whitespace)
-          text = text.replace(/\*(\S+(?:\s+\S+)*)\*/g, "<em>$1</em>");
-          text = text.replace(/_(\S+(?:\s+\S+)*)_/g, "<em>$1</em>");
-          // ~~strikethrough~~
-          text = text.replace(/~~(\S+(?:\s+\S+)*)~~/g, "<del>$1</del>");
-          // `code`
-          text = text.replace(/`(\S+(?:\s+\S+)*)`/g, "<code>$1</code>");
-
-          if (text !== originalText) {
-            const parent = textNode.parentNode;
-            if (!parent || !parent.parentNode) return; // Safety check
-
-            const temp = document.createElement("span");
-            temp.innerHTML = text;
-
-            // Replace the text node with temp contents
-            while (temp.firstChild) {
-              parent.insertBefore(temp.firstChild, textNode);
-            }
-            parent.removeChild(textNode);
-            changed = true;
-          }
-        } catch (e) {
-          // Skip this node if there's an error
-        }
-      });
-
-      // Restore cursor position ONLY if we made changes AND had a valid selection
-      if (changed && shouldRestoreCursor && cursorPos !== null) {
-        requestAnimationFrame(() => restoreCursorPosition(cursorPos));
-      }
-    } catch (e) {
-      // Fail silently
-    }
-  }
 
   function clampPriority(value) {
     const num = Number(value);
@@ -841,7 +661,10 @@ function htmlToPlainText(html) {
         const localStart = Math.max(0, start - entry.start);
         const localEnd = Math.min(originalLength, end - entry.start);
 
-        if (localEnd > localStart) {
+        // Skip whitespace-only slivers — a quote window that includes the
+        // speaker's name (name + paragraph break + quote) would otherwise
+        // paint the blank newlines between the blocks as highlighted bars.
+        if (localEnd > localStart && nodeText.slice(localStart, localEnd).search(/\S/) !== -1) {
           rangesToWrap.push({
             node: entry.node,
             localStart,
@@ -1012,6 +835,18 @@ function htmlToPlainText(html) {
       };
     };
 
+    const storedOffsetsMatch = (quote, text, s, e) => {
+      if (!quote || !text) return false;
+      if (!Number.isFinite(s) || !Number.isFinite(e) || s < 0 || e > text.length) return false;
+      const slice = text.slice(s, e);
+      if (!slice) return false;
+      const collapse = (t) => t.replace(/\s+/g, " ").trim();
+      const strip = (t) => t.replace(/\s+/g, "");
+      // Collapse-equal handles normal whitespace; strip-equal handles legacy
+      // quotes whose old reader glued words together (window covers the newline).
+      return collapse(slice) === collapse(quote) || strip(slice) === strip(quote);
+    };
+
     for (const q of state.quotes) {
       if (q.subject !== state.selectedSubject) continue;
       if (q.link?.sourceId !== source.id) continue;
@@ -1036,6 +871,19 @@ function htmlToPlainText(html) {
           const pos = resolvePositions(quoteText, start, start + quoteText.length);
           start = Math.max(0, Number(pos.start) || 0);
           end = Math.max(start, Number(pos.end) || 0);
+        } else if (end > start && quoteText && !storedOffsetsMatch(quoteText, domText, start, end)) {
+          // Stored offsets were computed against the old reader text (contiguous
+          // html). The markdown reader inserts newlines between blocks, so the
+          // offsets drift and highlights land in the wrong place. Re-locate by
+          // text when the slice no longer matches the quoted text.
+          const loc = domText ? findQuoteInSource(quoteText, domText) : null;
+          if (loc) {
+            start = loc.start;
+            end = loc.end;
+          } else {
+            start = 0;
+            end = 0;
+          }
         }
 
         const analysisIds = q.meta?.analysisNodeIds || [];
@@ -1067,6 +915,15 @@ function htmlToPlainText(html) {
           const pos = resolvePositions(quoteText, start, start + quoteText.length);
           start = Math.max(0, Number(pos.start) || 0);
           end = Math.max(start, Number(pos.end) || 0);
+        } else if (end > start && quoteText && !storedOffsetsMatch(quoteText, domText, start, end)) {
+          const loc = domText ? findQuoteInSource(quoteText, domText) : null;
+          if (loc) {
+            start = loc.start;
+            end = loc.end;
+          } else {
+            start = 0;
+            end = 0;
+          }
         }
         mergeRange(start, end, node.id);
       } catch (e) {
@@ -1201,6 +1058,28 @@ function htmlToPlainText(html) {
             end: finalPos + quotePart.length,
             quote: quotePart
           };
+        }
+      }
+    }
+
+    // 4. Whitespace-stripped fallback: legacy sources glue words together (the
+    //    old reader had no separator between adjacent blocks, e.g. speaker name
+    //    + first line became "MACBETHSo foul and fair..."). Re-anchor by
+    //    ignoring all whitespace. Only for long, unambiguous quotes.
+    const strippedQuote = quote.replace(/\s+/g, "");
+    if (strippedQuote.length >= 8) {
+      const strippedSource = sourceText.replace(/\s+/g, "");
+      const strippedIdx = strippedSource.indexOf(strippedQuote);
+      if (strippedIdx !== -1) {
+        let start = -1, pos = 0, end = -1;
+        for (let i = 0; i < sourceText.length && pos <= strippedIdx + strippedQuote.length; i++) {
+          if (/\s/.test(sourceText[i])) continue;
+          if (pos === strippedIdx && start === -1) start = i;
+          pos++;
+          if (pos === strippedIdx + strippedQuote.length) { end = i + 1; break; }
+        }
+        if (start !== -1 && end > start) {
+          return { start, end, quote };
         }
       }
     }
@@ -1437,7 +1316,11 @@ function htmlToPlainText(html) {
     const start = rawStart + leading;
     const quote = rawQuote.trim();
     const end = start + quote.length;
-    const sourceText = normalizeSource(source).contentText;
+    // Prefix/suffix must come from the READER's live text: the offsets above
+    // are already in that space (range against analysisReader), while
+    // normalizeSource().contentText can be the old legacy space for sources not
+    // yet re-saved. This keeps the SSS fingerprints aligned with the offsets.
+    const sourceText = analysisReader.textContent || "";
 
     const prefix = sourceText.substring(Math.max(0, start - 20), start);
     const suffix = sourceText.substring(end, Math.min(sourceText.length, end + 20));
@@ -1936,7 +1819,6 @@ function htmlToPlainText(html) {
 
   function hydrateSourceForm(source) {
     const path = source?.meta?.hierarchyPath || [source?.subject || "", ...(source?.section ? source.section.split(" > ") : [])];
-    const normalized = normalizeSource(source);
 
     sourceIdInput.value = source?.id || "";
     sourceSubjectInput.value = source?.subject || state.selectedSubject;
@@ -1944,14 +1826,14 @@ function htmlToPlainText(html) {
     sourceLevel1Input.value = path[1] || "";
     sourceLevel2Input.value = path[2] || "";
     sourceLevel3Input.value = path[3] || "";
-    sourceEditor.innerHTML = normalized.contentHtml || "<p><br></p>";
+    mdEditor.setMarkdown(sourceMarkdown(source));
   }
 
   function resetSourceForm() {
     sourceForm.reset();
     sourceIdInput.value = "";
     sourceSubjectInput.value = state.selectedSubject;
-    sourceEditor.innerHTML = "<p><br></p>";
+    mdEditor.setMarkdown("");
   }
 
   // ========== NEW: QUOTE AND ANALYSIS LINKING FUNCTIONS ==========
@@ -2090,7 +1972,7 @@ function htmlToPlainText(html) {
    * Create a new quote node from selected text
    * NEW: Path 1 - Create Quote Node from source
    */
-  async function createQuoteNode(quoteText, sourceId, start, end) {
+  async function createQuoteNode(quoteText, sourceId, start, end, prefix = "", suffix = "") {
     if (!sourceId) {
       console.warn("Missing sourceId, skipping quote creation");
       return null;
@@ -2115,7 +1997,9 @@ function htmlToPlainText(html) {
       link: {
         sourceId: sourceId,
         start: start,
-        end: end
+        end: end,
+        prefix: prefix,
+        suffix: suffix
       },
       meta: {
         hierarchyPath: path,
@@ -2619,7 +2503,8 @@ const updateLayerSelection = () => {
     if (currentHierarchy) {
       currentHierarchy.textContent = hierarchyLabel || source.title || source.subject || "No hierarchy";
     }
-    analysisReader.innerHTML = normalized.contentHtml || "<p><br></p>";
+    const contentMd = sourceMarkdown(source);
+    analysisReader.innerHTML = (contentMd.trim() ? render(parse(contentMd), "html") : "") || (normalized.contentHtml || "<p><br></p>");
     analysisReader.style.userSelect = "text";
     analysisReader.style.webkitUserSelect = "text";
     analysisReader.style.MozUserSelect = "text";
@@ -3008,131 +2893,6 @@ const updateLayerSelection = () => {
     });
   }
 
-  if (sourceEditor) {
-    sourceEditor.addEventListener("paste", (event) => {
-      const clipboardData = event.clipboardData;
-      if (!clipboardData) return;
-
-      event.preventDefault();
-      event.stopPropagation();
-
-      const text = clipboardData.getData("text/plain") || "";
-      let html = clipboardData.getData("text/html");
-      let cleanHtml = null;
-
-      if (html && html.trim()) {
-        const startFrag = html.indexOf("<!--StartFragment-->");
-        const endFrag = html.indexOf("<!--EndFragment-->");
-        if (startFrag !== -1 && endFrag !== -1 && endFrag > startFrag) {
-          cleanHtml = html.substring(startFrag + 20, endFrag);
-        } else if (!html.includes("<!DOCTYPE") && !html.includes("<html")) {
-          cleanHtml = html;
-        }
-
-        if (cleanHtml && cleanHtml.trim()) {
-          cleanHtml = convertGoogleDocsHtml(cleanHtml);
-          cleanHtml = convertWordHtml(cleanHtml);
-        } else {
-          cleanHtml = null;
-        }
-      }
-
-      let useMarkdown = !cleanHtml || !cleanHtml.trim();
-      let content = useMarkdown ? convertMarkdown(text) : cleanHtml;
-
-      if (content && content.trim()) {
-        document.execCommand("insertHTML", false, content);
-        setTimeout(() => {
-          const walk = document.createTreeWalker(sourceEditor, NodeFilter.SHOW_ELEMENT);
-          let node;
-          while (node = walk.nextNode()) {
-            node.style.fontSize = "";
-            if (node.hasAttribute("size")) node.removeAttribute("size");
-          }
-          // Let the input event handle markdown conversion to avoid duplicate processing
-        }, 0);
-      } else if (text) {
-        document.execCommand("insertText", false, text);
-      }
-    });
-
-    // Remove inline styles, clean garbage after paste, and convert inline markdown
-    let markdownConversionTimeout;
-    sourceEditor.addEventListener("input", () => {
-      textMap = null; // invalidate cache
-
-      // Clean up styles and elements immediately
-      const walk = document.createTreeWalker(sourceEditor, NodeFilter.SHOW_ELEMENT);
-      const toRemove = [];
-      let node;
-      while (node = walk.nextNode()) {
-        // Remove all inline styles
-        node.style.color = "";
-        node.style.fontFamily = "";
-        node.style.fontSize = "";
-        node.style.whiteSpace = "";
-        node.style.backgroundColor = "";
-
-        // Remove empty spans
-        if (node.tagName === "SPAN" && !node.textContent.trim() && !node.querySelector("*")) {
-          toRemove.push(node);
-        }
-        // Remove anchor tags (name attributes)
-        if (node.tagName === "A" && node.hasAttribute("name")) {
-          while (node.firstChild) {
-            node.parentNode.insertBefore(node.firstChild, node);
-          }
-          toRemove.push(node);
-        }
-      }
-      toRemove.forEach(n => n.remove());
-
-      // Replace <i> with <em>, <b> with <strong>
-      sourceEditor.querySelectorAll("i").forEach(n => {
-        const em = document.createElement("em");
-        while (n.firstChild) em.appendChild(n.firstChild);
-        n.parentNode.replaceChild(em, n);
-      });
-      sourceEditor.querySelectorAll("b").forEach(n => {
-        const strong = document.createElement("strong");
-        while (n.firstChild) strong.appendChild(n.firstChild);
-        n.parentNode.replaceChild(strong, n);
-      });
-
-      // Unwrap P tags that only contain inline elements (no direct text, no block elements)
-      const ps = sourceEditor.querySelectorAll("p");
-      ps.forEach(p => {
-        const hasDirectText = Array.from(p.childNodes).some(
-          (child) => child.nodeType === Node.TEXT_NODE && (child.nodeValue || "").trim()
-        );
-        const blockTagsArr = ["P", "DIV", "BLOCKQUOTE", "H1", "H2", "H3", "UL", "OL", "LI"];
-        const hasBlockChildren = Array.from(p.childNodes).some(
-          (child) => child.nodeType === Node.ELEMENT_NODE && blockTagsArr.includes(child.tagName.toUpperCase())
-        );
-
-        if (!hasDirectText && !hasBlockChildren) {
-          while (p.firstChild) {
-            p.parentNode.insertBefore(p.firstChild, p);
-          }
-          p.remove();
-        }
-      });
-
-      // Clean up empty P tags
-      const emptyPs = sourceEditor.querySelectorAll("p");
-      emptyPs.forEach(p => {
-        if (!p.textContent.trim() && !p.querySelector("img, br, blockquote")) {
-          p.remove();
-        }
-      });
-
-      // Debounce markdown conversion for performance (only convert when user pauses)
-      clearTimeout(markdownConversionTimeout);
-      markdownConversionTimeout = setTimeout(() => {
-        convertInlineMarkdownInPlace();
-      }, 300);
-    });
-  }
 
   if (sourceForm) {
     sourceForm.addEventListener("submit", async (event) => {
@@ -3149,8 +2909,14 @@ const updateLayerSelection = () => {
         sourceLevel3Input?.value || ""
       ]);
 
-      const contentHtml = sourceEditor.innerHTML || "<p><br></p>";
-      const contentText = sourceEditor.innerText || "";
+      const contentMarkdown = mdEditor.getMarkdown() || "";
+      const contentAst = parse(contentMarkdown);
+      const contentHtml = render(contentAst, "html") || "<p><br></p>";
+      // Plain text must match the READER's text (analysisReader.textContent of the
+      // rendered html) so quote offsets, resolveQuoteInSource and saved contentText
+      // all live in one coordinate space. render(ast, "text") adds blockquote
+      // markers and doubled newlines, which shifts every offset after a block.
+      const contentText = ((div) => { div.innerHTML = contentHtml; return div.textContent || ""; })(document.createElement("div"));
 
       const existing = getSourceById(sourceIdInput.value);
       const now = Date.now();
@@ -3165,6 +2931,7 @@ const updateLayerSelection = () => {
         content: contentText,
         contentHtml: contentHtml,
         contentText: contentText,
+        contentMarkdown,
         quote: "",
         analysis: "",
         link: {},
@@ -3242,327 +3009,15 @@ if (saveSourceBtn) {
     });
   }
 
-  if (sourceEditor && editorToolbar) {
-    const allBtns = document.querySelectorAll('#editorToolbar .toolbar-btn');
-    const domChanging = ['h1', 'h2', 'h3', 'removeFormat', 'formatBlock'];
-
-    allBtns.forEach(btn => {
-      btn.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        const sel = window.getSelection();
-        if (sel?.rangeCount > 0) {
-          window.__savedSelection = sel.getRangeAt(0).cloneRange();
-        }
-      });
-
-      btn.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-
-        const command = btn.dataset.command;
-        const value = btn.dataset.value;
-
-        // Always restore for inline commands before executing
-        if (!domChanging.includes(command)) {
-          const sel = window.getSelection();
-          // Even if there's selection, try restoring saved to get full range
-          if (window.__savedSelection && sel?.rangeCount > 0) {
-            // Check if saved end != current end (indicates truncation)
-            const current = sel.getRangeAt(0);
-            const saved = window.__savedSelection;
-            const needsRestore = current.startContainer !== saved.startContainer ||
-                            current.startOffset !== saved.startOffset ||
-                            current.endContainer !== saved.endContainer ||
-                            current.endOffset !== saved.endOffset;
-            if (needsRestore) {
-              console.log('RESTORE full');
-              sel.removeAllRanges();
-              sel.addRange(saved);
-            }
-          } else if (window.__savedSelection) {
-            console.log('RESTORE new');
-            sel.removeAllRanges();
-            sel.addRange(window.__savedSelection);
-          }
-        }
-
-        execFormat(command, value);
-
-        sourceEditor.focus();
+  if (editorViewSeg) {
+    editorViewSeg.querySelectorAll("button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const v = btn.dataset.view;
+        if (!v) return;
+        mdEditor.setView(v);
+        editorViewSeg.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
       });
     });
-
-    function execFormat(command, value) {
-      if (command === "removeFormat") {
-        // Use native removeFormat first
-        document.execCommand("removeFormat", false, null);
-
-        // Then clean up any remaining formatting elements that native removeFormat misses
-        const tagsToRemove = ["STRONG", "B", "EM", "I", "U", "S", "STRIKE", "CODE", "SPAN"];
-        const tagsToConvert = {
-          "H1": "p",
-          "H2": "p",
-          "H3": "p",
-          "BLOCKQUOTE": "p",
-          "UL": "p",
-          "OL": "p"
-        };
-
-        const walker = document.createTreeWalker(sourceEditor, NodeFilter.SHOW_ELEMENT, null, false);
-        const elements = [];
-        let node;
-        while (node = walker.nextNode()) {
-          elements.push(node);
-        }
-
-        for (const el of elements) {
-          const tag = el.tagName.toUpperCase();
-
-          // Convert block elements to paragraphs
-          if (tagsToConvert[tag]) {
-            const newTag = document.createElement(tagsToConvert[tag]);
-            while (el.firstChild) newTag.appendChild(el.firstChild);
-            el.parentNode.replaceChild(newTag, el);
-            continue;
-          }
-
-          // Remove inline formatting wrappers
-          if (tagsToRemove.includes(tag)) {
-            const parent = el.parentNode;
-            while (el.firstChild) parent.insertBefore(el.firstChild, el);
-            parent.removeChild(el);
-          }
-        }
-
-        // Clear any remaining inline styles
-        const styleWalker = document.createTreeWalker(sourceEditor, NodeFilter.SHOW_ELEMENT, null, false);
-        let styleNode;
-        while (styleNode = styleWalker.nextNode()) {
-          if (styleNode.style) {
-            styleNode.style.textDecoration = "";
-            styleNode.style.fontWeight = "";
-            styleNode.style.fontStyle = "";
-          }
-        }
-
-        return;
-      }
-      if (command === "h1" || command === "h2" || command === "h3") {
-        return document.execCommand("formatBlock", false, "<" + command + ">");
-      }
-      if (command === "formatBlock" && value) {
-        return document.execCommand("formatBlock", false, value);
-      }
-      if (value) {
-        return document.execCommand(command, false, value);
-      }
-return document.execCommand(command, false, null);
-    }
-
-    // REMOVED DUPLICATE HANDLER - keeping only the one above with selection saving
-
-    const dragHandle = editorToolbar.querySelector(".drag-handle");
-    let isDragging = false;
-    let toolbarInOriginalPos = true;
-    let snapSlot = null;
-    let editorWrapper = null;
-
-    if (dragHandle) {
-      editorWrapper = document.getElementById("editorWrapper");
-      if (editorWrapper) {
-        snapSlot = document.createElement("div");
-        snapSlot.className = "toolbar-snap-slot";
-        snapSlot.style.cssText = `
-          display: none; height: 44px; border: 2px dashed rgba(44,255,179,0.4);
-          border-radius: 8px; margin-bottom: 10px; align-items: center;
-          justify-content: center; color: rgba(44,255,179,0.6); font-size: 0.8rem;
-          transition: all 0.15s ease;
-        `;
-        snapSlot.textContent = "Drop to slot back";
-        editorWrapper.insertBefore(snapSlot, editorWrapper.firstChild);
-      }
-
-      dragHandle.addEventListener("mousedown", (e) => {
-        isDragging = true;
-        snapSlot = document.querySelector(".toolbar-snap-slot");
-        document.body.appendChild(editorToolbar);
-        editorToolbar.style.position = "fixed";
-        editorToolbar.style.zIndex = "9999";
-        e.preventDefault();
-        e.stopPropagation();
-      });
-
-      window.addEventListener("mousemove", (e) => {
-        if (!isDragging) return;
-        editorToolbar.style.left = e.clientX + "px";
-        editorToolbar.style.top = e.clientY + "px";
-        editorToolbar.style.transform = "none";
-
-        // Check if near the drop zone
-        if (editorWrapper && snapSlot) {
-          const wrapperRect = editorWrapper.getBoundingClientRect();
-          const toolbarRect = editorToolbar.getBoundingClientRect();
-
-          // Check if toolbar center is near editorWrapper top
-          const toolbarCenterY = toolbarRect.top + toolbarRect.height / 2;
-          const isNearWrapper = (
-            e.clientX >= wrapperRect.left - 50 &&
-            e.clientX <= wrapperRect.right + 50 &&
-            toolbarCenterY <= wrapperRect.top + 100
-          );
-
-          if (isNearWrapper) {
-            snapSlot.style.display = "flex";
-            snapSlot.style.borderColor = "rgba(44,255,179,0.8)";
-            snapSlot.style.backgroundColor = "rgba(44,255,179,0.1)";
-          } else {
-            snapSlot.style.display = "none";
-          }
-        }
-      });
-
-      window.addEventListener("mouseup", (e) => {
-        if (!isDragging) return;
-        isDragging = false;
-
-        if (editorWrapper && snapSlot && snapSlot.style.display === "flex") {
-          // Snap back to original position
-          editorWrapper.insertBefore(editorToolbar, editorWrapper.firstChild);
-          editorToolbar.style.position = "";
-          editorToolbar.style.zIndex = "100";
-          editorToolbar.style.left = "";
-          editorToolbar.style.top = "";
-          editorToolbar.style.transform = "";
-          toolbarInOriginalPos = true;
-          snapSlot.style.display = "none";
-        } else {
-          // Stay where dropped, but ensure it's visible (not behind other elements)
-          editorToolbar.style.position = "fixed";
-          editorToolbar.style.zIndex = "9999";
-        }
-      });
-    }
-
-    sourceEditor.addEventListener("keydown", (e) => {
-      // Keyboard shortcuts for formatting (Ctrl/Cmd + modifier)
-      if (e.ctrlKey || e.metaKey) {
-        switch(e.key.toLowerCase()) {
-          case "b":
-            e.preventDefault();
-            document.execCommand("bold", false, null);
-            break;
-          case "i":
-            e.preventDefault();
-            document.execCommand("italic", false, null);
-            break;
-          case "u":
-            e.preventDefault();
-            document.execCommand("underline", false, null);
-            break;
-          case "`":
-            // Ctrl+` wraps selection or word in backticks/code
-            e.preventDefault();
-            const sel = window.getSelection();
-            if (sel.toString()) {
-              document.execCommand("formatBlock", false, "code");
-            }
-            break;
-        }
-      }
-      // Strikethrough shortcut: Ctrl+Shift+X (or Alt+Shift+~)
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "x") {
-        e.preventDefault();
-        document.execCommand("strikethrough", false, null);
-      }
-      if (e.key === "Enter") {
-        setTimeout(convertMdOnEnter, 50);
-      }
-    });
-
-    function convertMdOnEnter() {
-      try {
-        const sel = window.getSelection();
-        if (!sel || sel.rangeCount === 0) return;
-        const range = sel.getRangeAt(0);
-        let container = range.startContainer;
-
-        // Find the paragraph element
-        if (container.nodeType === Node.TEXT_NODE) {
-          container = container.parentNode;
-        }
-
-        let p = null;
-        if (container && container.tagName === "P") {
-          p = container;
-        } else if (container && container.closest) {
-          p = container.closest("p");
-        }
-
-        if (!p || p.tagName.toUpperCase() !== "P") return;
-
-        const text = (p.textContent || "").trim();
-        let newTag = null;
-        let prefixLen = 0;
-
-        if (text.startsWith("### ")) {
-          newTag = "h3";
-          prefixLen = 4;
-        } else if (text.startsWith("## ")) {
-          newTag = "h2";
-          prefixLen = 3;
-        } else if (text.startsWith("# ")) {
-          newTag = "h1";
-          prefixLen = 2;
-        } else if (text.startsWith("> ")) {
-          newTag = "blockquote";
-          prefixLen = 2;
-        }
-
-        if (newTag && prefixLen > 0) {
-          const el = document.createElement(newTag);
-          const content = text.substring(prefixLen);
-
-          // Copy child nodes while removing the markdown marker
-          while (p.firstChild) {
-            el.appendChild(p.firstChild);
-          }
-
-          // Update text content to remove the markdown prefix
-          if (el.firstChild && el.firstChild.nodeType === Node.TEXT_NODE) {
-            el.firstChild.textContent = content;
-          } else if (el.textContent) {
-            el.textContent = content;
-          }
-
-          p.parentNode.replaceChild(el, p);
-        }
-      } catch (e) {
-        // Silently fail if conversion fails
-      }
-    }
-
-    function updateToolbarVisibility() {
-      if (editorToolbar) {
-        editorToolbar.classList.toggle("visible", state.viewMode === "editor");
-        editorToolbar.style.display = state.viewMode === "editor" ? "flex" : "none";
-        if (state.viewMode === "editor" && !toolbarInOriginalPos) {
-          const editorWrapper = document.getElementById("editorWrapper");
-          if (editorWrapper) {
-            editorWrapper.insertBefore(editorToolbar, editorWrapper.firstChild);
-          }
-          editorToolbar.style.position = "";
-          toolbarInOriginalPos = true;
-        }
-      }
-    }
-
-    updateToolbarVisibility();
-
-    const originalSetSourceViewMode = setSourceViewMode;
-    setSourceViewMode = function(mode) {
-      originalSetSourceViewMode(mode);
-      updateToolbarVisibility();
-    };
   }
 
   function captureSelection() {
@@ -3586,7 +3041,9 @@ return document.execCommand(command, false, null);
         sourceId: state.selectedSourceId,
         start: state.selectedRange.start,
         end: state.selectedRange.end,
-        quote: state.selectedRange.quote
+        quote: state.selectedRange.quote,
+        prefix: state.selectedRange.prefix || "",
+        suffix: state.selectedRange.suffix || ""
       };
       if (!selection.sourceId) {
         console.warn("quoteSelectionBtn: missing sourceId, cannot create quote");
@@ -3599,7 +3056,9 @@ return document.execCommand(command, false, null);
         selection.quote,
         selection.sourceId,
         selection.start,
-        selection.end
+        selection.end,
+        selection.prefix,
+        selection.suffix
       );
 
       if (!quoteNode) {
@@ -4257,11 +3716,13 @@ return document.execCommand(command, false, null);
 
       if (targetNode.type === "analysis" || targetNode.type === "source") {
         state.selectedSourceId = targetNode.id;
-        renderSourceSelect();
+        if (typeof renderSourceSelect === "function") renderSourceSelect();
       }
 
       if (targetNode.type === "analysis" && analysisReader) {
-        analysisReader.innerHTML = formatAnalysisForDisplay(targetNode.analysis || "");
+        analysisReader.innerHTML = typeof formatAnalysisForDisplay === "function"
+          ? formatAnalysisForDisplay(targetNode.analysis || "")
+          : (targetNode.analysis || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
         analysisReader.dataset.nodeId = targetNode.id;
       }
     }

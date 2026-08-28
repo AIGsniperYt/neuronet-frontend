@@ -307,68 +307,44 @@ html, body, * {
   display: inline-block;
 }
 
-.editor-toolbar {
+.view-seg {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 10px;
-  background: rgba(20, 40, 35, 0.85);
-  border: 1px solid rgba(44, 255, 179, 0.2);
-  border-radius: 6px;
   margin-bottom: 10px;
-  flex-wrap: wrap;
-  position: relative;
-  z-index: 100;
 }
 
-.editor-toolbar .toolbar-btn {
-  background: none;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  color: #e6fff5;
+.view-seg button {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(230, 255, 245, 0.75);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 0.75rem;
+  font-family: inherit;
   cursor: pointer;
-  font-size: 0.85rem;
-  min-width: 28px;
-  height: 28px;
-  padding: 0 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s, border-color 0.15s;
 }
 
-.editor-toolbar .toolbar-btn:hover {
-  background: rgba(44, 255, 179, 0.15);
+.view-seg button:hover {
   border-color: rgba(44, 255, 179, 0.3);
+  color: #e6fff5;
 }
 
-.editor-toolbar .toolbar-btn:active {
-  background: rgba(44, 255, 179, 0.25);
+.view-seg button.active {
+  background: rgba(44, 255, 179, 0.18);
+  border-color: rgba(44, 255, 179, 0.5);
+  color: #2cffb3;
 }
 
-.editor-toolbar .toolbar-btn.drag-handle {
-  cursor: grab;
-  color: rgba(230, 255, 245, 0.6);
-  font-size: 1rem;
-}
-
-.editor-toolbar .toolbar-btn.drag-handle:active {
-  cursor: grabbing;
-}
-
-.editor-toolbar .toolbar-separator {
-  width: 1px;
-  height: 20px;
-  background: rgba(44, 255, 179, 0.2);
-  margin: 0 4px;
-}
-
-.editor-toolbar.visible {
+#sourceEditor {
+  height: 460px;
+  padding: 0;
+  overflow: hidden;
   display: flex;
 }
 
-.toolbar-snap-slot {
-  box-sizing: border-box;
+#sourceEditor .mdedit {
+  flex: 1;
 }
 
 .panel-header {
@@ -894,22 +870,10 @@ button.analysis-quote-jump.active-quote,
             </div>
 
             <div id="editorWrapper" class="source-view hidden">
-              <div id="editorToolbar" class="editor-toolbar" style="display: none;">
-                <button type="button" class="toolbar-btn drag-handle" title="Drag to move">☰</button>
-                <span class="toolbar-separator"></span>
-                <button type="button" class="toolbar-btn" data-command="bold" title="Bold (Ctrl+B)"><strong>B</strong></button>
-                <button type="button" class="toolbar-btn" data-command="italic" title="Italic (Ctrl+I)"><em>I</em></button>
-                <button type="button" class="toolbar-btn" data-command="underline" title="Underline (Ctrl+U)"><u>U</u></button>
-                <span class="toolbar-separator"></span>
-                <button type="button" class="toolbar-btn" data-command="h1" title="Heading 1">H1</button>
-                <button type="button" class="toolbar-btn" data-command="h2" title="Heading 2">H2</button>
-                <button type="button" class="toolbar-btn" data-command="h3" title="Heading 3">H3</button>
-                <span class="toolbar-separator"></span>
-                <button type="button" class="toolbar-btn" data-command="insertUnorderedList" title="Bullet List">•</button>
-                <button type="button" class="toolbar-btn" data-command="insertOrderedList" title="Numbered List">1.</button>
-                <button type="button" class="toolbar-btn" data-command="formatBlock" data-value="blockquote" title="Quote">"</button>
-                <span class="toolbar-separator"></span>
-                <button type="button" class="toolbar-btn" data-command="removeFormat" title="Clear Formatting">⌫</button>
+              <div id="editorViewSeg" class="view-seg">
+                <button type="button" class="active" data-view="preview" title="Edit as a live preview">Write</button>
+                <button type="button" data-view="split" title="Markdown and preview side by side">Split</button>
+                <button type="button" data-view="md" title="Raw markdown source">Source</button>
               </div>
               <form id="sourceForm" class="form-grid">
                 <input type="hidden" id="sourceId" />
@@ -918,7 +882,7 @@ button.analysis-quote-jump.active-quote,
                 <input id="sourceLevel1" class="inline-input" type="text" placeholder="Layer 1 (optional)" maxlength="80" />
                 <input id="sourceLevel2" class="inline-input" type="text" placeholder="Layer 2 (optional)" maxlength="80" />
                 <input id="sourceLevel3" class="inline-input" type="text" placeholder="Layer 3 (optional)" maxlength="80" />
-                <div id="sourceEditor" class="source-editor reader-surface" contenteditable="true"></div>
+                <div id="sourceEditor" class="source-editor"></div>
               </form>
             </div>
           </div>
