@@ -4,6 +4,7 @@ import { initAnalysisToolV2 } from "./tools/analysisTool.js";
 import { initMemoryTool } from "./tools/memoryTool.js";
 import { initMindmapTool } from "./tools/mindmapTool.js";
 import { performMigration } from "./migrations.js";
+import { upgradeDataset, upgradeStoredData, SCHEMA_VERSION } from "./schemaUpgrade.js";
 import { initCanvas } from "./canvas.js";
 
 initCanvas();
@@ -447,7 +448,7 @@ async function removeCueEverywhere(id) {
 async function exportDatabaseJson() {
   const [nodes, quotes, cues] = await Promise.all([getAllNodes(), getAllQuotes(), getAllCues()]);
   const payload = {
-    schemaVersion: 5,
+    schemaVersion: SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
     nodes,
     quotes,
@@ -466,9 +467,14 @@ async function exportDatabaseJson() {
 async function importDatabaseJson(file) {
   const text = await file.text();
   const payload = JSON.parse(text);
-  const nodes = Array.isArray(payload?.nodes) ? payload.nodes : [];
-  const quotes = Array.isArray(payload?.quotes) ? payload.quotes : [];
-  const cues = Array.isArray(payload?.cues) ? payload.cues : [];
+
+  // Auto-upgrade any legacy data to the markdown-first schema on the way in,
+  // so old export files work as-is (no manual migration needed).
+  const { dataset } = upgradeDataset(payload);
+
+  const nodes = Array.isArray(dataset?.nodes) ? dataset.nodes : [];
+  const quotes = Array.isArray(dataset?.quotes) ? dataset.quotes : [];
+  const cues = Array.isArray(dataset?.cues) ? dataset.cues : [];
 
   await clearNodes();
   await clearQuotes();
@@ -500,6 +506,23 @@ async function importDatabaseJson(file) {
 
   if (currentToolName) {
     await loadTool(currentToolName);
+  }
+}
+
+async function upgradeStoredDatabaseIfNeeded() {
+  try {
+    const [nodes, quotes, cues] = await Promise.all([getAllNodes(), getAllQuotes(), getAllCues()]);
+    const { upgraded, stats, dataset } = upgradeStoredData(nodes, quotes, cues);
+    if (upgraded && dataset) {
+      await Promise.all([addNodes(dataset.nodes), addQuotes(dataset.quotes), addCues(dataset.cues)]);
+      console.log(
+        `[UPGRADE] legacy data upgraded: sources=${stats.sourceUpgraded} ` +
+        `quotes relocated=${stats.quoteRelocated} kept=${stats.quoteKept} failed=${stats.quoteFailed} ` +
+        `quoteRefs relocated=${stats.refRelocated} failed=${stats.refFailed}`
+      );
+    }
+  } catch (error) {
+    console.error("[UPGRADE] error during stored-data upgrade:", error);
   }
 }
 
@@ -969,6 +992,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   await cleanupOldDemoDatabases();
   await initDB();
   DB_READY = true;
+
+  // Upgrade any legacy stored data to the markdown-first schema in place
+  // (idempotent, cheap no-op when nothing is legacy). Runs in both demo and
+  // cloud modes so old local DBs self-heal without a manual re-import.
+  await upgradeStoredDatabaseIfNeeded();
 
   if (!window.DEMO_MODE) {
     await performMigration(getAllNodes, addNode, addQuote);
