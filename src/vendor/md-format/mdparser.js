@@ -27,6 +27,7 @@
  *   { type: "code",       lang?, text }              raw text, no children
  *   { type: "hr" }
  *   { type: "table",      align, headers, rows }     pipe table; align per column
+ *   { type: "math",       tex, display: true }       display maths block ($$...$$)
  *
  * Inlines (the words inside a paragraph/heading):
  *   { type: "text",          value }                 plain words
@@ -39,6 +40,7 @@
  *   { type: "softbreak" }                            single newline inside a para
  *   { type: "hardbreak" }                            two spaces + newline
  *   { type: "html",         value }                  raw html passthrough
+ *   { type: "math",         tex, display? }          $x$ or $$x$$; display if $$
  *
  * Renderers switch on these types: add a node type here and a renderer might
  * trip on it; write a renderer and it must handle every type above.
@@ -203,6 +205,36 @@ export function parseBlocks(lines) {
             continue;
         }
 
+        // ---- display maths: $$...$$ -------------------------------------------
+        // A "$$" line opens a maths block: one line of "$$tex$$", or an opener
+        // "$$" followed by tex lines until a closing "$$" (run to the end of
+        // the document if never closed — friendly to unfinished pastes, like
+        // fences). The tex is stored raw; the renderer decides how to draw it.
+        if (/^ {0,3}\$\$/.test(line)) {
+            const oneLine = line.match(/^ {0,3}\$\$(.*)\$\$[ \t]*$/);
+            if (oneLine) {
+                const tex = oneLine[1].trim();
+                if (tex) { blocks.push({ type: "math", tex, display: true }); i++; continue; }
+            }
+            const texLines = [];
+            i++;
+            while (i < n) {
+                const close = lines[i].match(/^ {0,3}\$\$(.*)$/);
+                if (close) {
+                    const tail = close[1].trim();
+                    if (tail) texLines.push(tail);   // "$$ tex $$" across two lines
+                    i++;
+                    break;
+                }
+                texLines.push(lines[i]);
+                i++;
+            }
+            while (texLines.length && isBlank(texLines[texLines.length - 1])) texLines.pop();
+            const tex = texLines.join("\n");
+            if (tex) blocks.push({ type: "math", tex, display: true });
+            continue;
+        }
+
         // ---- list: - item / 1. item -------------------------------------------
         // parseList eats the WHOLE list internally, so it must tell us which
         // line index it stopped at — otherwise the loop below would re-read
@@ -268,7 +300,8 @@ export function parseBlocks(lines) {
             if (
                 next.match(FENCE_RE) || next.match(ATX_RE) ||
                 QUOTE_RE.test(next) || matchListItem(next) ||
-                HR_RE.test(next) || /^( {4}|\t)/.test(next)
+                HR_RE.test(next) || /^( {4}|\t)/.test(next) ||
+                /^ {0,3}\$\$/.test(next)
             ) break;
 
             paraLines.push(next);
@@ -498,6 +531,31 @@ export function parseInline(text) {
             const span = matchCodeSpan(text, i);
             if (span) { flush(); out.push({ type: "code", text: span.text }); i = span.end; continue; }
             buf += ch; i++;        // lone backtick: it's just text
+            continue;
+        }
+
+        // ---- maths: $x$ and $$x$$ ----------------------------------------------
+        // Detected BEFORE emphasis (and it's a distinct char, so order barely
+        // matters) — the whole span is consumed in one step, which means the
+        // `_`, `*`, `^` and backslashes inside the tex (e.g. \lim_{x\to 0})
+        // can never be chewed up by the bold/italic/strike rules.
+        if (ch === "$") {
+            const display = text[i + 1] === "$";
+            const closer = findDelimiter(text, i + (display ? 2 : 1), "$", display ? 2 : 1);
+            if (closer) {
+                const tex = text.slice(i + (display ? 2 : 1), closer.index);
+                // sanity: non-empty, single-line, no leading/trailing space —
+                // so "$5.00" and "a $ b" stay ordinary text. (Escape a lone
+                // dollar as "\$" if you really mean it.)
+                const first = tex[0], last = tex[tex.length - 1];
+                if (tex.length && tex.indexOf("\n") === -1 && first !== " " && first !== "\t" && last !== " " && last !== "\t") {
+                    flush();
+                    out.push({ type: "math", tex, display });
+                    i = closer.end;
+                    continue;
+                }
+            }
+            buf += ch; i++;
             continue;
         }
 

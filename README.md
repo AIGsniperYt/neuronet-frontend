@@ -1,6 +1,7 @@
 # **MAJOR (Flagship)** — NeuroNet: Personal Knowledge Management System
 
-See [project.md](../project.md) for full documentation.
+> Documentation and architecture notes are deliberately kept private (outside
+> this public repo); only the code lives here.
 
 ---
 
@@ -16,5 +17,3 @@ See the gh-pages branch for deployment code -
 I've chosen to keep the codebase transparent :)
 
 See the commit history for a nice detailed juicy changelog, I never bothered to start a proper one, sorry :P
-
-## Documentation is nicely done in [project.md](project.md)   <============== !!!!

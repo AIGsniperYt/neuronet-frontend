@@ -11,7 +11,7 @@
  *   cues } export shape so every source carries real contentMarkdown
  *   (+ derived contentHtml/contentText), every quote link is re-anchored in
  *   the NEW reader text, and quote links get prefix/suffix fingerprints so the
- *   SSS self-healing described in project.md actually works.
+ *   SSS self-healing (anchor fingerprint + relocation) actually works.
  *
  * USE
  *   - App import path: upgradeDataset(payload) runs on anything the user

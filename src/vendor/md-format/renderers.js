@@ -49,6 +49,7 @@ function flattenText(children) {
             case "text": out += node.value; break;
             case "code": out += node.text; break;
             case "html": out += node.value; break;
+            case "math": out += (node.display ? "$$" : "$") + node.tex + (node.display ? "$$" : "$"); break;
             case "image": out += node.alt; break;
             case "softbreak":
             case "hardbreak": out += "\n"; break;
@@ -118,6 +119,15 @@ function renderHtml(tree) {
             return `<hr>`;
         }
 
+        case "math": {
+            // block maths: a display-mode element. The tex is written into the
+            // markup twice — the data-tex attribute is how we round-trip it
+            // back to markdown, the body is the fallback text that shows even
+            // with NO KaTeX loaded. renderMathWithKatex() (mdeditor.js)
+            // swaps the body for real typeset maths when window.katex exists.
+            return `<div class="md-math md-math-display" data-tex="${escapeHtml(tree.tex)}">${escapeHtml(tree.tex)}</div>`;
+        }
+
         case "table": {
             // alignment marker per column; absent alignment emits no attribute.
             const al = a => a ? ` align="${a}"` : "";
@@ -162,6 +172,11 @@ function renderHtmlInline(children) {
             case "softbreak":   out += "\n"; break;
             case "hardbreak":   out += "<br>\n"; break;
             case "html":        out += node.value; break;   // raw html passthrough
+            case "math": {
+                const cls = node.display ? "md-math md-math-display" : "md-math";
+                out += `<span class="${cls}" data-tex="${escapeHtml(node.tex)}">${escapeHtml(node.tex)}</span>`;
+                break;
+            }
             default:
                 throw new Error(`renderHtmlInline: unknown inline type "${node.type}"`);
         }
@@ -209,6 +224,9 @@ function renderText(tree) {
         case "code":
             return tree.text;   // code is code, nothing to strip
 
+        case "math":
+            return `$$\n${tree.tex}\n$$`;   // keep the delimiters, lose nothing
+
         case "hr":
             return "----------------------------------------";
 
@@ -243,6 +261,11 @@ function renderTextInline(children) {
             case "softbreak":
             case "hardbreak":   out += "\n"; break;
             case "html":        out += node.value; break;
+            case "math": {
+                const d = node.display ? "$$" : "$";
+                out += d + node.tex + d;
+                break;
+            }
             default:
                 throw new Error(`renderTextInline: unknown inline type "${node.type}"`);
         }
@@ -295,6 +318,9 @@ function renderAnsi(tree) {
         case "code":
             return `${ANSI.gray}${tree.text}${ANSI.reset}`;
 
+        case "math":
+            return `$$\n${tree.tex}\n$$`;   // terminals can't type-set; keep raw
+
         case "hr":
             return `${ANSI.gray}────────────────────────${ANSI.reset}`;
 
@@ -328,6 +354,11 @@ function renderAnsiInline(children) {
             case "softbreak":
             case "hardbreak":   out += "\n"; break;
             case "html":        out += node.value; break;
+            case "math": {
+                const d = node.display ? "$$" : "$";
+                out += `${ANSI.cyan}${d}${node.tex}${d}${ANSI.reset}`;
+                break;
+            }
             default:
                 throw new Error(`renderAnsiInline: unknown inline type "${node.type}"`);
         }
@@ -381,6 +412,9 @@ function renderMarkdown(tree) {
         case "hr":
             return "---";
 
+        case "math":
+            return `$$\n${tree.tex}\n$$`;   // round-trips byte-for-byte
+
         case "table": {
             // round-trip faithful: the header, an alignment gutter, then the
             // body — every row wrapped in pipes so it re-parses exactly.
@@ -426,6 +460,11 @@ function renderMarkdownInline(children) {
             case "softbreak":   out += "\n"; break;
             case "hardbreak":   out += "  \n"; break;   // two spaces = hard break
             case "html":        out += node.value; break;
+            case "math": {
+                const d = node.display ? "$$" : "$";
+                out += d + node.tex + d;
+                break;
+            }
             default:
                 throw new Error(`renderMarkdownInline: unknown inline type "${node.type}"`);
         }

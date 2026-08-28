@@ -1,4 +1,4 @@
-import { createEditor, parse, render, domToMarkdown } from "../vendor/md-format/mdeditor.js";
+import { createEditor, parse, render, domToMarkdown, renderMathWithKatex } from "../vendor/md-format/mdeditor.js";
 
 export async function initAnalysisToolV2(deps, context = {}) {
   const {
@@ -2505,6 +2505,7 @@ const updateLayerSelection = () => {
     }
     const contentMd = sourceMarkdown(source);
     analysisReader.innerHTML = (contentMd.trim() ? render(parse(contentMd), "html") : "") || (normalized.contentHtml || "<p><br></p>");
+    renderMathWithKatex(analysisReader);   // typesets $…$ maths when KaTeX is loaded (no-op otherwise)
     analysisReader.style.userSelect = "text";
     analysisReader.style.webkitUserSelect = "text";
     analysisReader.style.MozUserSelect = "text";

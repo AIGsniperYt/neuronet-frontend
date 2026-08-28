@@ -19,6 +19,7 @@
  *   ul/ol  → - / 1. markers li             → + checkbox if task
  *   blockquote → > lines    hr             → ---          br → "  " hard break
  *   table  → pipe table with a "---" gutter (alignment carried from th align)
+ *   math   → $tex$ / $$tex$$ (raw tex lives in the data-tex attribute)
  *
  * Why is this in its own file and not stuck in index.html? Two reasons: it's
  * the third leg of the engine (md→out, out→md, inspect) so it deserves to be a
@@ -197,6 +198,16 @@ function mdPre(node) {
 function mdInline(node) {
     if (node.nodeType === Node.TEXT_NODE) return node.textContent;
     if (node.nodeType !== Node.ELEMENT_NODE) return "";
+
+    /* maths: our renderer writes the raw tex into data-tex, and (with KaTeX)
+     * replaces the BODY with typeset html — so we always read the attribute,
+     * never the live text. Emit the original delimiters back. */
+    if (node.classList && node.classList.contains("md-math")) {
+        const tex = node.getAttribute("data-tex") || node.textContent;
+        const display = node.classList.contains("md-math-display");
+        return display ? `$$\n${tex}\n$$` : `$${tex}$`;
+    }
+
     const tag = node.tagName.toLowerCase();
     switch (tag) {
         case "br":         return "  \n";                    // hard line break

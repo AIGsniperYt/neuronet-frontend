@@ -14,6 +14,9 @@ them - no bundler required. Public surface used by this app:
   parse(text) -> AST          (mdparser.js)
   render(ast, type) -> html|text|ansi|markdown   (renderers.js)
   domToMarkdown(element) -> markdown     (domtomd.js)
+  renderMathWithKatex(container)          maths prettifier: no-op unless
+                                          window.katex is loaded — call after
+                                          injecting rendered html
 
 To refresh a newer version: copy mdparser.js, renderers.js, domtomd.js,
 mdeditor.js, mdeditor.css from tools/md-format/ over this folder, then

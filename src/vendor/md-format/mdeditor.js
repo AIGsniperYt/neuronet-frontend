@@ -52,6 +52,33 @@ import { domToMarkdown } from "./domtomd.js";
 export { parse, render, domToMarkdown };
 
 /* ============================================================================
+ * renderMathWithKatex(container) — the OPTIONAL maths prettifier hook.
+ * ----------------------------------------------------------------------------
+ * md-format parses and renders maths on its own ($x$, $$x$$): it draws
+ * <span class="md-math" data-tex="…"> / <div class="md-math md-math-display">
+ * with the raw tex as the visible fallback, so the maths is ALWAYS readable.
+ *
+ * Call this if your page has a KaTeX build loaded (window.katex): every
+ * .md-math element inside `container` gets swapped to real typeset maths,
+ * and the raw tex stays in data-tex for lossless round-tripping. Without
+ * window.katex it is a no-op — no bundling, no dependency, nothing breaks.
+ * The editor's own refresh() calls it automatically; hosts that render with
+ * `render(parse(md), "html")` themselves can call it after injecting.
+ * ========================================================================== */
+export function renderMathWithKatex(container) {
+    if (typeof window === "undefined" || !window.katex) return;
+    for (const el of container.querySelectorAll(".md-math")) {
+        const tex = el.getAttribute("data-tex") || el.textContent;
+        try {
+            window.katex.render(tex, el, {
+                displayMode: el.classList.contains("md-math-display"),
+                throwOnError: false,   // a bad formula keeps its raw tex
+            });
+        } catch (err) { /* leave the raw tex as-is */ }
+    }
+}
+
+/* ============================================================================
  * THE TOOL REGISTRY — one plain list of what the toolbar can do.
  * Each tool is { id, label, title, group }: the id is (a) the data-tool
  * attribute the click handler reads and (b) what you pass to ed.command().
@@ -263,6 +290,8 @@ export function createEditor(container, opts = {}) {
                     for (const cb of preview.querySelectorAll('input[type="checkbox"]')) {
                         cb.disabled = false;
                     }
+                    // prettify maths with KaTeX, if the host loaded it
+                    renderMathWithKatex(preview);
                     break;
                 }
                 case "htmlsrc":
