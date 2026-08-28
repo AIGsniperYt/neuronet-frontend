@@ -1247,7 +1247,25 @@ export function getFormattedQuote(quoteNode, sourceNode) {
 
   // Helper to find offsets in visual text (textContent)
   const resolveVisualOffsets = () => {
-    // 1. Try fingerprint
+    const stripped = (s) => s.replace(/\s+/g, "").toLowerCase();
+    const quoteKey = stripped(quoteText);
+    // 1. Trust the stored link window first. Migrations and the source
+    //    editor re-anchor every quote against THIS document's textContent
+    //    (sourceNode.contentText is exactly this rendered html's textContent),
+    //    so link.start/end give the true character range. For a glued legacy
+    //    quote such as "Third WitchThere to meet with Macbeth." that window is
+    //    the bold name, its newline and the quote in one clean slice.
+    const os = Number(quoteNode.link?.start ?? -1);
+    const oe = Number(quoteNode.link?.end ?? -1);
+    if (quoteKey && os >= 0 && oe > os && oe <= visualText.length) {
+      const sliceKey = stripped(visualText.substring(os, oe));
+      // Accept when the window is exactly the quote, or the quote is embedded
+      // in it (a glued legacy quote's window = name + newline + quote).
+      if (sliceKey === quoteKey || sliceKey.includes(quoteKey)) {
+        return { start: os, end: oe };
+      }
+    }
+    // 2. Try fingerprint
     if (prefix || suffix) {
       const searchString = `${prefix}${quoteText}${suffix}`;
       const idx = visualText.indexOf(searchString);
@@ -1255,12 +1273,12 @@ export function getFormattedQuote(quoteNode, sourceNode) {
         return { start: idx + prefix.length, end: idx + prefix.length + quoteText.length };
       }
     }
-    // 2. Try raw quote
+    // 3. Try raw quote
     const rawIdx = visualText.indexOf(quoteText);
     if (rawIdx !== -1) {
        return { start: rawIdx, end: rawIdx + quoteText.length };
     }
-    // 3. Fallback to DB offsets (risky if contentText mismatch, but last resort)
+    // 4. Fall back to the DB semantic search
     const dbResolved = resolveQuoteInSource(quoteNode, sourceNode);
     return dbResolved;
   };
@@ -1343,8 +1361,12 @@ export function getFormattedQuote(quoteNode, sourceNode) {
   // Join and trim leading/trailing breaks/whitespace
   let result = parts.join("");
 
-  // Clean up: remove leading/trailing <br> tags and excess whitespace
+  // Clean up: remove leading/trailing <br> tags and excess whitespace,
+  // and collapse the walker's duplicate <br>s at block boundaries (the
+  // reader emits leading/trailing newlines inside each block element) so
+  // "Name<br>\n<br>\n<br>quote" renders as clean "Name<br>quote".
   result = result.replace(/^(<br>|\s)+/gi, "").replace(/(<br>|\s)+$/gi, "");
+  result = result.replace(/(<br>\s*)+/gi, "<br>");
 
   if (!result.trim()) {
      return formatFallback(quoteText);
