@@ -3,6 +3,7 @@ import { syncLocalWithCloud, syncToCloud, deleteCloudNode, deleteCloudQuote, del
 import { initAnalysisToolV2 } from "./tools/analysisTool.js";
 import { initMemoryTool } from "./tools/memoryTool.js";
 import { initMindmapTool } from "./tools/mindmapTool.js";
+import { initTrackerTool } from "./tools/trackerTool.js";
 import { performMigration } from "./migrations.js";
 import { upgradeDataset, upgradeStoredData, SCHEMA_VERSION } from "./schemaUpgrade.js";
 import { initCanvas } from "./canvas.js";
@@ -126,7 +127,14 @@ const tools = {
   tracker: {
     name: "Tracker",
     file: "tracker.html",
-    init: null
+    init: (context) => initTrackerTool({
+      getAllNodes,
+      addNode,
+      addNodes,
+      deleteNode,
+      getSubjects,
+      escapeHtml
+    }, context)
   }
 };
 

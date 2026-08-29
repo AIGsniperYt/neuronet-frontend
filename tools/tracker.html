@@ -1,0 +1,278 @@
+<div id="trackerTool">
+  <style>
+    #trackerTool {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, sans-serif;
+      color: var(--text-main);
+      overflow: hidden;
+    }
+
+    #trackerHeader {
+      padding: 16px;
+      background: var(--glass-surface);
+      backdrop-filter: blur(var(--glass-blur));
+      border-bottom: 1px solid var(--glass-border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    #trackerHeader h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: var(--accent);
+      margin: 0;
+    }
+
+    #trackerControls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+    .tracker-btn {
+      width: auto; padding: 8px 14px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: #e6fff5; border-radius: 999px; cursor: pointer;
+      font: inherit; font-size: 0.85rem; transition: all 0.2s ease;
+    }
+    .tracker-btn:hover { border-color: rgba(44,255,179,0.45); background: rgba(44,255,179,0.08); }
+    .tracker-btn.active { background: rgba(44,255,179,0.15); border-color: var(--accent); color: var(--accent); }
+    .tracker-btn.primary {
+      background: linear-gradient(130deg, rgba(44,255,179,0.24), rgba(44,255,179,0.11));
+      border-color: rgba(44,255,179,0.45); color: #e6fff5; font-weight: 500;
+    }
+    .tracker-btn.primary:hover {
+      background: linear-gradient(130deg, rgba(44,255,179,0.32), rgba(44,255,179,0.18));
+      transform: translateY(-1px);
+    }
+    .tracker-btn.danger { border-color: rgba(255,107,107,0.4); color: #ff8c8c; }
+    .tracker-btn.danger:hover { background: rgba(255,107,107,0.1); border-color: rgba(255,107,107,0.7); }
+    .tracker-btn:disabled { cursor: not-allowed; opacity: 0.5; }
+    .tracker-btn:disabled:hover { background: rgba(255,255,255,0.03); transform: none; }
+    .tracker-sep { width: 1px; height: 20px; background: rgba(255,255,255,0.14); margin: 0 6px; }
+
+    #trackerContent { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+    #trackerPapers, #trackerStats { flex: 1; min-height: 0; overflow: auto; padding: 24px; }
+
+    .tracker-page-head h2 { margin: 0 0 4px; font-size: 1.2rem; font-weight: 600; color: var(--accent); }
+    .tracker-page-head p { margin: 0 0 16px; color: var(--text-muted); font-size: 0.85rem; }
+
+    #trackerToolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 18px; flex-wrap: wrap; }
+    #trackerToolbar input[type="text"] {
+      flex: 1; min-width: 200px; padding: 10px 12px; border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.12); font: inherit; font-size: 0.85rem;
+      background: rgba(255,255,255,0.05); color: var(--text-main);
+    }
+    #trackerToolbar input[type="text"]:focus { outline: 2px solid var(--accent-soft); }
+    #trackerResultCount { color: var(--text-muted); font-size: 0.85rem; }
+
+    #trackerPaperGroups { display: flex; flex-direction: column; gap: 22px; }
+
+    .tracker-subject-group h3 {
+      margin: 0 0 10px; font-size: 1rem; font-weight: 600; color: var(--accent);
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    }
+    .tracker-subject-group .count {
+      font-size: 0.78rem; color: var(--text-muted);
+      background: rgba(44,255,179,0.1); border: 1px solid rgba(44,255,179,0.25);
+      border-radius: 999px; padding: 2px 8px;
+    }
+    .tracker-subject-group .board-edit {
+      font-size: 0.78rem; color: var(--text-muted); margin-left: auto; cursor: pointer;
+      border: 1px dashed rgba(255,255,255,0.18); border-radius: 999px; padding: 2px 10px;
+    }
+    .tracker-subject-group .board-edit:hover { border-color: var(--accent-soft); color: var(--accent); }
+
+    .tracker-sitting {
+      background: linear-gradient(135deg, var(--panel-strong), var(--panel-bg));
+      border: 1px solid var(--glass-border); border-radius: 16px;
+      margin-bottom: 10px; overflow: hidden;
+    }
+    .tracker-sitting-head {
+      display: flex; align-items: center; gap: 12px; padding: 13px 16px; cursor: pointer;
+    }
+    .tracker-sitting-head:hover { background: rgba(255,255,255,0.02); }
+    .tracker-sitting-title { font-weight: 600; min-width: 0; }
+    .tracker-sitting-title .series { color: var(--text-muted); font-weight: 400; font-size: 0.82rem; margin-left: 6px; }
+    .tracker-sitting-badge { font-size: 0.75rem; padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.14); color: var(--text-muted); }
+    .tracker-sitting-badge.bnd { border-color: rgba(44,255,179,0.25); color: var(--accent); }
+    .tracker-sitting-chev { margin-left: auto; color: var(--text-muted); transition: transform 0.2s ease; }
+    .tracker-sitting.open .tracker-sitting-chev { transform: rotate(0deg); }
+    .head-scores { display: flex; gap: 8px; flex-wrap: wrap; font-size: 0.78rem; }
+    .head-score { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; background: rgba(255,255,255,0.03); }
+    .head-score .head-score-name { color: var(--text-muted); }
+    .head-score b { color: var(--accent); font-weight: 700; }
+    .head-score b.low { color: #ff8c8c; }
+    .head-score i { font-style: normal; color: var(--text-muted); }
+    .head-score em { font-style: normal; color: var(--text-muted); }
+
+    .tracker-sitting-body {
+      display: none; border-top: 1px solid var(--glass-border); padding: 12px 16px;
+      flex-direction: column; gap: 10px;
+    }
+    .tracker-sitting.open .tracker-sitting-body { display: flex; }
+
+    .tracker-result-slot {
+      display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+      padding: 9px 12px; border: 1px solid rgba(255,255,255,0.09); border-radius: 12px;
+    }
+    .tracker-result-slot .paper-name { font-weight: 500; width: 84px; flex: none; }
+    .tracker-result-slot .score { font-weight: 700; color: var(--accent); }
+    .tracker-result-slot .score.low { color: #ff8c8c; }
+    .tracker-result-slot .attempts { display: flex; gap: 6px; font-size: 0.75rem; color: var(--text-muted); }
+    .tracker-sitting-notes { font-size: 0.82rem; color: var(--text-muted); }
+
+    .tracker-sitting-actions { display: flex; gap: 6px; margin-top: 4px; }
+
+    .tracker-empty { color: var(--text-muted); border: 1px dashed rgba(255,255,255,0.15); border-radius: 16px; padding: 32px; text-align: center; }
+    .tracker-empty button { margin-top: 12px; }
+
+    .tracker-stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; margin-top: 16px; }
+    .tracker-stat-card {
+      background: linear-gradient(135deg, var(--panel-strong), var(--panel-bg));
+      border: 1px solid var(--glass-border); border-radius: 16px; padding: 16px;
+    }
+    .tracker-stat-card h4 { margin: 0 0 10px; font-size: 0.95rem; font-weight: 600; color: var(--accent); }
+    .tracker-stat-card .stat { font-size: 1.5rem; font-weight: 700; }
+    .tracker-stat-card .stat-sub { font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; }
+    .tracker-bar { height: 8px; border-radius: 999px; background: rgba(255,255,255,0.08); margin-top: 10px; overflow: hidden; }
+    .tracker-bar > div { height: 100%; background: linear-gradient(90deg, rgba(44,255,179,0.3), var(--accent)); border-radius: 999px; transition: width 0.3s ease; }
+    .tracker-trend { margin-top: 10px; font-size: 0.78rem; color: var(--text-muted); line-height: 1.6; }
+
+    #trackerModal { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; z-index: 50; }
+    #trackerModal.open { display: flex; }
+    #trackerModalOverlay { position: absolute; inset: 0; background: rgba(0,0,0,0.55); backdrop-filter: blur(2px); }
+    #trackerModalBox {
+      position: relative; width: min(560px, 92%); max-height: 86%; overflow: auto;
+      background: linear-gradient(135deg, var(--panel-strong), #1a1a1a);
+      border: 1px solid var(--glass-border); border-radius: 20px; padding: 22px; box-sizing: border-box;
+    }
+    #trackerModalTitle { margin: 0 0 16px; font-size: 1.15rem; font-weight: 600; color: var(--accent); }
+    #trackerModalClose { position: absolute; top: 14px; right: 16px; background: none; border: none; color: var(--text-muted); font-size: 1.3rem; cursor: pointer; }
+    #trackerModalClose:hover { color: var(--text-main); }
+
+    .tracker-form-row { margin-bottom: 12px; display: flex; flex-direction: column; gap: 6px; }
+    .tracker-form-row label { font-size: 0.8rem; color: var(--text-muted); }
+    .tracker-form-row input, .tracker-form-row select, .tracker-form-row textarea {
+      padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.12);
+      font: inherit; font-size: 0.9rem; background: rgba(255,255,255,0.05); color: var(--text-main);
+      width: 100%; box-sizing: border-box;
+    }
+    .tracker-form-row textarea { min-height: 60px; resize: vertical; }
+    .tracker-form-row input:focus, .tracker-form-row select:focus, .tracker-form-row textarea:focus { outline: 2px solid var(--accent-soft); }
+    .tracker-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+
+    .tracker-slot-editor { border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+    .tracker-slot-editor .head { display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 8px; }
+    .tracker-slot-editor .attempt-row { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+
+    .tracker-form-actions { display: flex; gap: 10px; margin-top: 16px; align-items: center; flex-wrap: wrap; }
+    .tracker-form-msg { font-size: 0.85rem; margin-left: 6px; }
+    .tracker-form-msg.ok { color: var(--accent); }
+    .tracker-form-msg.err { color: #ff8c8c; }
+  </style>
+
+  <div id="trackerHeader">
+    <h1>Past Papers Tracker</h1>
+    <div id="trackerControls">
+      <button id="trackerPapersBtn" class="tracker-btn active">Papers</button>
+      <button id="trackerStatsBtn" class="tracker-btn">Stats</button>
+      <span class="tracker-sep"></span>
+      <button id="trackerExportBtn" class="tracker-btn">Export</button>
+      <button id="trackerImportBtn" class="tracker-btn">Import</button>
+      <input id="trackerImportFile" type="file" accept=".json" style="display:none;" />
+    </div>
+  </div>
+
+  <div id="trackerContent">
+    <div id="trackerPapers">
+      <div class="tracker-page-head">
+        <h2>Papers</h2>
+        <p>Each entry is one sitting (a paper taken in a given year &amp; series), with per-paper scores and retakes. Set the exam board once per subject.</p>
+      </div>
+      <div id="trackerToolbar">
+        <input id="trackerFilter" type="text" list="trackerSubjectList" placeholder="Filter by subject..." />
+        <datalist id="trackerSubjectList"></datalist>
+        <span id="trackerResultCount"></span>
+        <button id="trackerAddBtn" class="tracker-btn primary">+ Add sitting</button>
+      </div>
+      <div id="trackerPaperGroups"></div>
+    </div>
+
+    <div id="trackerStats" style="display:none;">
+      <div class="tracker-page-head">
+        <h2>Progress</h2>
+        <p>Best, average &amp; latest per subject.</p>
+      </div>
+      <div id="trackerStatsGrid" class="tracker-stats-grid"></div>
+    </div>
+  </div>
+
+  <div id="trackerModal">
+    <div id="trackerModalOverlay"></div>
+    <div id="trackerModalBox">
+      <button id="trackerModalClose" title="Close">&times;</button>
+      <h2 id="trackerModalTitle">Add sitting</h2>
+      <div class="tracker-form-grid">
+        <div class="tracker-form-row">
+          <label>Subject</label>
+          <input id="trackerFormSubject" list="trackerSubjectList" placeholder="e.g. Maths" />
+        </div>
+        <div class="tracker-form-row">
+          <label>Qualification</label>
+          <select id="trackerFormQualification">
+            <option value="">--</option>
+            <option value="GCSE">GCSE</option>
+            <option value="A-Level">A-Level</option>
+          </select>
+        </div>
+        <div class="tracker-form-row">
+          <label>Exam board (per subject)</label>
+          <input id="trackerFormBoard" list="trackerBoardList" placeholder="e.g. AQA" />
+          <datalist id="trackerBoardList">
+            <option value="AQA"></option><option value="Edexcel"></option><option value="OCR"></option>
+            <option value="WJEC"></option><option value="CCEA"></option><option value="Cambridge"></option>
+          </datalist>
+        </div>
+        <div class="tracker-form-row">
+          <label>Year</label>
+          <input id="trackerFormYear" type="number" placeholder="2024" />
+        </div>
+        <div class="tracker-form-row">
+          <label>Series (optional)</label>
+          <select id="trackerFormSeries">
+            <option value="">--</option>
+            <option value="June">June</option>
+            <option value="November">November</option>
+            <option value="March">March</option>
+            <option value="May">May</option>
+            <option value="October">October</option>
+            <option value="Mock">Mock</option>
+            <option value="Specimen">Specimen</option>
+          </select>
+        </div>
+        <div class="tracker-form-row">
+          <label>Boundary for top grade (this sitting)</label>
+          <input id="trackerFormBoundary" type="number" placeholder="e.g. 132" />
+        </div>
+      </div>
+      <div class="tracker-form-row">
+        <label>Paper scores (per-paper; add attempts for retakes)</label>
+        <div id="trackerSlotList"></div>
+        <button type="button" id="trackerAddSlotBtn" class="tracker-btn" style="align-self:flex-start;">+ Add paper slot</button>
+      </div>
+      <div class="tracker-form-row">
+        <label>Notes</label>
+        <textarea id="trackerFormNotes" placeholder="Optional notes..."></textarea>
+      </div>
+      <div class="tracker-form-actions">
+        <button id="trackerSaveBtn" class="tracker-btn primary">Save sitting</button>
+        <button id="trackerCancelBtn" class="tracker-btn">Cancel</button>
+        <span id="trackerFormMsg" class="tracker-form-msg"></span>
+      </div>
+    </div>
+  </div>
+</div>
