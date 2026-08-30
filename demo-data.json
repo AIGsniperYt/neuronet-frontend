@@ -1,6 +1,6 @@
 {
   "schemaVersion": 6,
-  "exportedAt": "2026-04-28T10:25:57.345Z",
+  "exportedAt": "2026-08-30T06:40:57.373Z",
   "nodes": [
     {
       "id": "0d2fbc41-4723-470b-8d1c-1f7ed424aaa9",
@@ -77,6 +77,54 @@
       "createdAt": 1776855191418,
       "updatedAt": 1776855191418,
       "contentMarkdown": "### ACT I\n\n### SCENE I. A desert place.\n\n> *Thunder and lightning. Enter three Witches*\n\n**First Witch**\n\n> When shall we three meet again  \n> In thunder, lightning, or in rain?\n\n**Second Witch**\n\n> When the hurlyburly's done,  \n> When the battle's lost and won.\n\n**Third Witch**\n\n> That will be ere the set of sun.\n\n**First Witch**\n\n> Where the place?\n\n**Second Witch**\n\n> Upon the heath.\n\n**Third Witch**\n\n> There to meet with Macbeth.\n\n**First Witch**\n\n> I come, Graymalkin!\n\n**Second Witch**\n\n> Paddock calls.\n\n**Third Witch**\n\n> Anon.\n\n**ALL**\n\n> Fair is foul, and foul is fair:  \n> Hover through the fog and filthy air.  \n> *Exeunt*"
+    },
+    {
+      "type": "subject",
+      "subject": "Computer Science",
+      "name": "Computer Science",
+      "examBoard": "",
+      "qualification": "GCSE",
+      "customized": false,
+      "officialCourse": null,
+      "createdAt": 1788067815720,
+      "updatedAt": 1788067820606,
+      "id": "19d2cbfa-80b3-4714-8e22-ca43788af538"
+    },
+    {
+      "type": "subject",
+      "subject": "Physics",
+      "name": "Physics",
+      "examBoard": "",
+      "qualification": "GCSE",
+      "customized": false,
+      "officialCourse": null,
+      "createdAt": 1788067815712,
+      "updatedAt": 1788067820586,
+      "id": "21a58f49-5bd1-47ce-a36a-6592d787d86f"
+    },
+    {
+      "type": "subject",
+      "subject": "Maths",
+      "name": "Maths",
+      "examBoard": "",
+      "qualification": "GCSE",
+      "customized": false,
+      "officialCourse": null,
+      "createdAt": 1788067815715,
+      "updatedAt": 1788067820579,
+      "id": "220691d7-6708-45c2-85ad-b9587455a9cd"
+    },
+    {
+      "type": "subject",
+      "subject": "Chemistry",
+      "name": "Chemistry",
+      "examBoard": "",
+      "qualification": "GCSE",
+      "customized": false,
+      "officialCourse": null,
+      "createdAt": 1788067815709,
+      "updatedAt": 1788067820591,
+      "id": "2217bc9a-08b9-43cb-8266-4f32266c8e8d"
     },
     {
       "id": "25ab3979-626d-4370-9470-21649d50a63e",
@@ -239,6 +287,30 @@
       "createdAt": 1777201518286,
       "updatedAt": 1777201518286,
       "contentMarkdown": "### ACT V\n\n### SCENE I. Dunsinane. Ante-room in the castle.\n\n> *Enter a Doctor of Physic and a Waiting-Gentlewoman*\n\n**Doctor**\n\n> I have two nights watched with you, but can perceive  \n> no truth in your report. When was it she last walked?\n\n**Gentlewoman**\n\n> Since his majesty went into the field, I have seen  \n> her rise from her bed, throw her night-gown upon  \n> her, unlock her closet, take forth paper, fold it,  \n> write upon't, read it, afterwards seal it, and again  \n> return to bed; yet all this while in a most fast sleep.\n\n**Doctor**\n\n> A great perturbation in nature, to receive at once  \n> the benefit of sleep, and do the effects of  \n> watching! In this slumbery agitation, besides her  \n> walking and other actual performances, what, at any  \n> time, have you heard her say?\n\n**Gentlewoman**\n\n> That, sir, which I will not report after her.\n\n**Doctor**\n\n> You may to me: and 'tis most meet you should.\n\n**Gentlewoman**\n\n> Neither to you nor any one; having no witness to  \n> confirm my speech.  \n> *Enter LADY MACBETH, with a taper*Lo you, here she comes! This is her very guise;  \n> and, upon my life, fast asleep. Observe her; stand close.\n\n**Doctor**\n\n> How came she by that light?\n\n**Gentlewoman**\n\n> Why, it stood by her: she has light by her  \n> continually; 'tis her command.\n\n**Doctor**\n\n> You see, her eyes are open.\n\n**Gentlewoman**\n\n> Ay, but their sense is shut.\n\n**Doctor**\n\n> What is it she does now? Look, how she rubs her hands.\n\n**Gentlewoman**\n\n> It is an accustomed action with her, to seem thus  \n> washing her hands: I have known her continue in  \n> this a quarter of an hour.\n\n**LADY MACBETH**\n\n> Yet here's a spot.\n\n**Doctor**\n\n> Hark! she speaks: I will set down what comes from  \n> her, to satisfy my remembrance the more strongly.\n\n**LADY MACBETH**\n\n> Out, damned spot! out, I say!--One: two: why,  \n> then, 'tis time to do't.--Hell is murky!--Fie, my  \n> lord, fie! a soldier, and afeard? What need we  \n> fear who knows it, when none can call our power to  \n> account?--Yet who would have thought the old man  \n> to have had so much blood in him.\n\n**Doctor**\n\n> Do you mark that?\n\n**LADY MACBETH**\n\n> The thane of Fife had a wife: where is she now?--  \n> What, will these hands ne'er be clean?--No more o'  \n> that, my lord, no more o' that: you mar all with  \n> this starting.\n\n**Doctor**\n\n> Go to, go to; you have known what you should not.\n\n**Gentlewoman**\n\n> She has spoke what she should not, I am sure of  \n> that: heaven knows what she has known.\n\n**LADY MACBETH**\n\n> Here's the smell of the blood still: all the  \n> perfumes of Arabia will not sweeten this little  \n> hand. Oh, oh, oh!\n\n**Doctor**\n\n> What a sigh is there! The heart is sorely charged.\n\n**Gentlewoman**\n\n> I would not have such a heart in my bosom for the  \n> dignity of the whole body.\n\n**Doctor**\n\n> Well, well, well,--\n\n**Gentlewoman**\n\n> Pray God it be, sir.\n\n**Doctor**\n\n> This disease is beyond my practise: yet I have known  \n> those which have walked in their sleep who have died  \n> holily in their beds.\n\n**LADY MACBETH**\n\n> Wash your hands, put on your nightgown; look not so  \n> pale.--I tell you yet again, Banquo's buried; he  \n> cannot come out on's grave.\n\n**Doctor**\n\n> Even so?\n\n**LADY MACBETH**\n\n> To bed, to bed! there's knocking at the gate:  \n> come, come, come, come, give me your hand. What's  \n> done cannot be undone.--To bed, to bed, to bed!  \n> *Exit*\n\n**Doctor**\n\n> Will she go now to bed?\n\n**Gentlewoman**\n\n> Directly.\n\n**Doctor**\n\n> Foul whisperings are abroad: unnatural deeds  \n> Do breed unnatural troubles: infected minds  \n> To their deaf pillows will discharge their secrets:  \n> More needs she the divine than the physician.  \n> God, God forgive us all! Look after her;  \n> Remove from her the means of all annoyance,  \n> And still keep eyes upon her. So, good night:  \n> My mind she has mated, and amazed my sight.  \n> I think, but dare not speak.\n\n**Gentlewoman**\n\n> Good night, good doctor.  \n> *Exeunt*"
+    },
+    {
+      "type": "subject",
+      "subject": "English Lang",
+      "name": "English Lang",
+      "examBoard": "",
+      "qualification": "GCSE",
+      "customized": false,
+      "officialCourse": null,
+      "createdAt": 1788067815733,
+      "updatedAt": 1788067820595,
+      "id": "4eaf18a7-397a-4513-8f2e-90860879152d"
+    },
+    {
+      "type": "subject",
+      "subject": "Geography",
+      "name": "Geography",
+      "examBoard": "",
+      "qualification": "GCSE",
+      "customized": false,
+      "officialCourse": null,
+      "createdAt": 1788067815736,
+      "updatedAt": 1788067820583,
+      "id": "4ee2b828-cabd-40d0-9446-d6c034acfaa9"
     },
     {
       "id": "508d2969-4ab6-480d-8ab9-1622332c9e53",
@@ -1199,6 +1271,18 @@
       "contentMarkdown": "### SCENE II. The palace.\n\n> *Enter LADY MACBETH and a Servant*\n\n**LADY MACBETH**\n\n> Is Banquo gone from court?\n\n**Servant**\n\n> Ay, madam, but returns again to-night.\n\n**LADY MACBETH**\n\n> Say to the king, I would attend his leisure  \n> For a few words.\n\n**Servant**\n\n> Madam, I will.  \n> *Exit*\n\n**LADY MACBETH**\n\n> Nought's had, all's spent,  \n> Where our desire is got without content:  \n> 'Tis safer to be that which we destroy  \n> Than by destruction dwell in doubtful joy.  \n> *Enter MACBETH*How now, my lord! why do you keep alone,  \n> Of sorriest fancies your companions making,  \n> Using those thoughts which should indeed have died  \n> With them they think on? Things without all remedy  \n> Should be without regard: what's done is done.\n\n**MACBETH**\n\n> We have scotch'd the snake, not kill'd it:  \n> She'll close and be herself, whilst our poor malice  \n> Remains in danger of her former tooth.  \n> But let the frame of things disjoint, both the  \n> worlds suffer,  \n> Ere we will eat our meal in fear and sleep  \n> In the affliction of these terrible dreams  \n> That shake us nightly: better be with the dead,  \n> Whom we, to gain our peace, have sent to peace,  \n> Than on the torture of the mind to lie  \n> In restless ecstasy. Duncan is in his grave;  \n> After life's fitful fever he sleeps well;  \n> Treason has done his worst: nor steel, nor poison,  \n> Malice domestic, foreign levy, nothing,  \n> Can touch him further.\n\n**LADY MACBETH**\n\n> Come on;  \n> Gentle my lord, sleek o'er your rugged looks;  \n> Be bright and jovial among your guests to-night.\n\n**MACBETH**\n\n> So shall I, love; and so, I pray, be you:  \n> Let your remembrance apply to Banquo;  \n> Present him eminence, both with eye and tongue:  \n> Unsafe the while, that we  \n> Must lave our honours in these flattering streams,  \n> And make our faces vizards to our hearts,  \n> Disguising what they are.\n\n**LADY MACBETH**\n\n> You must leave this.\n\n**MACBETH**\n\n> O, full of scorpions is my mind, dear wife!  \n> Thou know'st that Banquo, and his Fleance, lives.\n\n**LADY MACBETH**\n\n> But in them nature's copy's not eterne.\n\n**MACBETH**\n\n> There's comfort yet; they are assailable;  \n> Then be thou jocund: ere the bat hath flown  \n> His cloister'd flight, ere to black Hecate's summons  \n> The shard-borne beetle with his drowsy hums  \n> Hath rung night's yawning peal, there shall be done  \n> A deed of dreadful note.\n\n**LADY MACBETH**\n\n> What's to be done?\n\n**MACBETH**\n\n> Be innocent of the knowledge, dearest chuck,  \n> Till thou applaud the deed. Come, seeling night,  \n> Scarf up the tender eye of pitiful day;  \n> And with thy bloody and invisible hand  \n> Cancel and tear to pieces that great bond  \n> Which keeps me pale! Light thickens; and the crow  \n> Makes wing to the rooky wood:  \n> Good things of day begin to droop and drowse;  \n> While night's black agents to their preys do rouse.  \n> Thou marvell'st at my words: but hold thee still;  \n> Things bad begun make strong themselves by ill.  \n> So, prithee, go with me.  \n> *Exeunt*"
     },
     {
+      "type": "subject",
+      "subject": "English Lit",
+      "name": "English Lit",
+      "examBoard": "",
+      "qualification": "GCSE",
+      "customized": false,
+      "officialCourse": null,
+      "createdAt": 1788067815728,
+      "updatedAt": 1788067820599,
+      "id": "da7edfd1-65f1-4a2a-b787-ec3cffa05998"
+    },
+    {
       "id": "dfc66998-dccc-42ee-9b4f-61aab18de4b5",
       "type": "analysis",
       "subject": "Macbeth",
@@ -1315,6 +1399,18 @@
       "contentMarkdown": "### ACT II\n\n### SCENE I. Court of Macbeth's castle.\n\n> *Enter BANQUO, and FLEANCE bearing a torch before him*\n\n**BANQUO**\n\n> How goes the night, boy?\n\n**FLEANCE**\n\n> The moon is down; I have not heard the clock.\n\n**BANQUO**\n\n> And she goes down at twelve.\n\n**FLEANCE**\n\n> I take't, 'tis later, sir.\n\n**BANQUO**\n\n> Hold, take my sword. There's husbandry in heaven;  \n> Their candles are all out. Take thee that too.  \n> A heavy summons lies like lead upon me,  \n> And yet I would not sleep: merciful powers,  \n> Restrain in me the cursed thoughts that nature  \n> Gives way to in repose!  \n> *Enter MACBETH, and a Servant with a torch*Give me my sword.  \n> Who's there?\n\n**MACBETH**\n\n> A friend.\n\n**BANQUO**\n\n> What, sir, not yet at rest? The king's a-bed:  \n> He hath been in unusual pleasure, and  \n> Sent forth great largess to your offices.  \n> This diamond he greets your wife withal,  \n> By the name of most kind hostess; and shut up  \n> In measureless content.\n\n**MACBETH**\n\n> Being unprepared,  \n> Our will became the servant to defect;  \n> Which else should free have wrought.\n\n**BANQUO**\n\n> All's well.  \n> I dreamt last night of the three weird sisters:  \n> To you they have show'd some truth.\n\n**MACBETH**\n\n> I think not of them:  \n> Yet, when we can entreat an hour to serve,  \n> We would spend it in some words upon that business,  \n> If you would grant the time.\n\n**BANQUO**\n\n> At your kind'st leisure.\n\n**MACBETH**\n\n> If you shall cleave to my consent, when 'tis,  \n> It shall make honour for you.\n\n**BANQUO**\n\n> So I lose none  \n> In seeking to augment it, but still keep  \n> My bosom franchised and allegiance clear,  \n> I shall be counsell'd.\n\n**MACBETH**\n\n> Good repose the while!\n\n**BANQUO**\n\n> Thanks, sir: the like to you!  \n> *Exeunt BANQUO and FLEANCE*\n\n**MACBETH**\n\n> Go bid thy mistress, when my drink is ready,  \n> She strike upon the bell. Get thee to bed.  \n> *Exit Servant*Is this a dagger which I see before me,  \n> The handle toward my hand? Come, let me clutch thee.  \n> I have thee not, and yet I see thee still.  \n> Art thou not, fatal vision, sensible  \n> To feeling as to sight? or art thou but  \n> A dagger of the mind, a false creation,  \n> Proceeding from the heat-oppressed brain?  \n> I see thee yet, in form as palpable  \n> As this which now I draw.  \n> Thou marshall'st me the way that I was going;  \n> And such an instrument I was to use.  \n> Mine eyes are made the fools o' the other senses,  \n> Or else worth all the rest; I see thee still,  \n> And on thy blade and dudgeon gouts of blood,  \n> Which was not so before. There's no such thing:  \n> It is the bloody business which informs  \n> Thus to mine eyes. Now o'er the one halfworld  \n> Nature seems dead, and wicked dreams abuse  \n> The curtain'd sleep; witchcraft celebrates  \n> Pale Hecate's offerings, and wither'd murder,  \n> Alarum'd by his sentinel, the wolf,  \n> Whose howl's his watch, thus with his stealthy pace.  \n> With Tarquin's ravishing strides, towards his design  \n> Moves like a ghost. Thou sure and firm-set earth,  \n> Hear not my steps, which way they walk, for fear  \n> Thy very stones prate of my whereabout,  \n> And take the present horror from the time,  \n> Which now suits with it. Whiles I threat, he lives:  \n> Words to the heat of deeds too cold breath gives.  \n> *A bell rings*I go, and it is done; the bell invites me.  \n> Hear it not, Duncan; for it is a knell  \n> That summons thee to heaven or to hell.  \n> *Exit*"
     },
     {
+      "type": "subject",
+      "subject": "Biology",
+      "name": "Biology",
+      "examBoard": "",
+      "qualification": "GCSE",
+      "customized": false,
+      "officialCourse": null,
+      "createdAt": 1788067815702,
+      "updatedAt": 1788067820574,
+      "id": "efd872bf-aea6-4cc9-8990-f7d57ff1217e"
+    },
+    {
       "id": "f7779d16-f4b7-4778-b459-cb6b271e894d",
       "type": "analysis",
       "subject": "Macbeth",
@@ -1373,6 +1469,1732 @@
       },
       "createdAt": 1777371725198,
       "updatedAt": 1777371725198
+    },
+    {
+      "subject": "Biology",
+      "year": null,
+      "series": "Specimen",
+      "label": "specimen",
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [],
+      "id": "paper-0b95051d-5af8-4a14-a4d4-a4b2b36f63d0",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Maths",
+      "year": 2022,
+      "series": "November",
+      "label": null,
+      "gradeBoundary": 194,
+      "examBoard": "",
+      "notes": "first year not good or bad, needs more knowledge eg completing the square",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 59,
+          "maxMarks": 80,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 59,
+              "maxMarks": 80,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 49,
+          "maxMarks": 80,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 49,
+              "maxMarks": 80,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 3",
+          "score": 60,
+          "maxMarks": 80,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 60,
+              "maxMarks": 80,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        }
+      ],
+      "id": "paper-0d164724-3560-4eb5-acc3-b50c97e40386",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Geography",
+      "year": 2022,
+      "series": null,
+      "label": null,
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [],
+      "id": "paper-159a2099-b0b2-4689-b24c-66a973d69d1d",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Biology",
+      "year": 2020,
+      "series": null,
+      "label": null,
+      "gradeBoundary": 131,
+      "examBoard": "",
+      "notes": "",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 87,
+          "maxMarks": 100,
+          "date": "03/08/2025",
+          "attempts": [
+            {
+              "score": 87,
+              "maxMarks": 100,
+              "date": "03/08/2025"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 83,
+          "maxMarks": 100,
+          "date": "18/03/2026",
+          "attempts": [
+            {
+              "score": 83,
+              "maxMarks": 100,
+              "date": "18/03/2026"
+            }
+          ]
+        }
+      ],
+      "id": "paper-15e77c49-7590-4d68-93b3-83d1f6413f7e",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Geography",
+      "year": 2018,
+      "series": null,
+      "label": null,
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [],
+      "id": "paper-17fd9c6e-477b-4da6-89ef-7d751e27da13",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Maths",
+      "year": 2022,
+      "series": "June",
+      "label": null,
+      "gradeBoundary": 194,
+      "examBoard": "",
+      "notes": "omds some silly mistakes, functions and cosine law and inequalities knowledge gaps, need new knowledge, read the questions properly and carefully",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 69,
+          "maxMarks": 80,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 69,
+              "maxMarks": 80,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 60,
+          "maxMarks": 80,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 60,
+              "maxMarks": 80,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 3",
+          "score": 71,
+          "maxMarks": 80,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 71,
+              "maxMarks": 80,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        }
+      ],
+      "id": "paper-1855893d-f5b6-4d2f-9905-fd180a401e4e",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Physics",
+      "year": 2018,
+      "series": null,
+      "label": null,
+      "gradeBoundary": 135,
+      "examBoard": "",
+      "notes": "",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 77,
+          "maxMarks": 100,
+          "date": "18/03/2026",
+          "attempts": [
+            {
+              "score": 77,
+              "maxMarks": 100,
+              "date": "18/03/2026"
+            }
+          ]
+        }
+      ],
+      "id": "paper-2b25786d-4605-4de9-aec6-f0a840b6837f",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Chemistry",
+      "year": 2023,
+      "series": null,
+      "label": null,
+      "gradeBoundary": 150,
+      "examBoard": "",
+      "notes": "happy w improvement but need 100%, take 2 is yr 10 J EOY mocks",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 95,
+          "maxMarks": 100,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 85,
+              "maxMarks": 100,
+              "date": "Previously added before 31/07/25"
+            },
+            {
+              "score": 95,
+              "maxMarks": 100,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 87,
+          "maxMarks": 100,
+          "date": "09/03/2026",
+          "attempts": [
+            {
+              "score": 87,
+              "maxMarks": 100,
+              "date": "09/03/2026"
+            }
+          ]
+        }
+      ],
+      "id": "paper-2d8f91ae-b0be-435a-a616-2410e029490d",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Physics",
+      "year": 2019,
+      "series": null,
+      "label": null,
+      "gradeBoundary": 143,
+      "examBoard": "",
+      "notes": "",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 88,
+          "maxMarks": 100,
+          "date": "18/03/2026",
+          "attempts": [
+            {
+              "score": 88,
+              "maxMarks": 100,
+              "date": "18/03/2026"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 94,
+          "maxMarks": 100,
+          "date": "23/03/2026",
+          "attempts": [
+            {
+              "score": 94,
+              "maxMarks": 100,
+              "date": "23/03/2026"
+            }
+          ]
+        }
+      ],
+      "id": "paper-2db9a0a1-ae35-42c0-9ae4-67691adcff7a",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "English Lang",
+      "year": 2021,
+      "series": "November",
+      "label": null,
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [],
+      "id": "paper-2e3f4e3f-2ccb-4fac-8d9d-b132b8dfb401",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "English Lit",
+      "year": 2019,
+      "series": null,
+      "label": null,
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [],
+      "id": "paper-2e8d63b2-e601-4679-9fc2-9bba4773fa71",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Maths",
+      "year": 2018,
+      "series": "November",
+      "label": null,
+      "gradeBoundary": 196,
+      "examBoard": "",
+      "notes": "omd wat is this, read the question, read your own handwriting and write neatly, expand brackets properly, always same silly mistakes",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 76,
+          "maxMarks": 80,
+          "date": "07/08/2025",
+          "attempts": [
+            {
+              "score": 76,
+              "maxMarks": 80,
+              "date": "07/08/2025"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 65,
+          "maxMarks": 80,
+          "date": "07/08/2025",
+          "attempts": [
+            {
+              "score": 65,
+              "maxMarks": 80,
+              "date": "07/08/2025"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 3",
+          "score": 76,
+          "maxMarks": 80,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 76,
+              "maxMarks": 80,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        }
+      ],
+      "id": "paper-3b75a126-98b6-4101-abc9-a0c3e451644d",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "English Lang",
+      "year": 2020,
+      "series": "November",
+      "label": null,
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [],
+      "id": "paper-3e00df80-9425-4aab-a04b-2d7d885b1065",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "English Lang",
+      "year": null,
+      "series": "Specimen",
+      "label": "2023/26 (specimen)",
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 69,
+          "maxMarks": 80,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 69,
+              "maxMarks": 80,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        }
+      ],
+      "id": "paper-41118741-ad9e-4402-8d43-4d5fcfc0b7e1",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Physics",
+      "year": 2021,
+      "series": null,
+      "label": null,
+      "gradeBoundary": 142,
+      "examBoard": "",
+      "notes": "",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 76,
+          "maxMarks": 100,
+          "date": "18/03/2026",
+          "attempts": [
+            {
+              "score": 76,
+              "maxMarks": 100,
+              "date": "18/03/2026"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 84,
+          "maxMarks": 100,
+          "date": "21/03/2026",
+          "attempts": [
+            {
+              "score": 84,
+              "maxMarks": 100,
+              "date": "21/03/2026"
+            }
+          ]
+        }
+      ],
+      "id": "paper-46f155ec-8bc2-4ac7-ad04-72f43259333d",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Maths",
+      "year": 2018,
+      "series": "June",
+      "label": null,
+      "gradeBoundary": 196,
+      "examBoard": "",
+      "notes": "silly mistakes, potential acec",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 79,
+          "maxMarks": 80,
+          "date": "08/08/2025",
+          "attempts": [
+            {
+              "score": 79,
+              "maxMarks": 80,
+              "date": "08/08/2025"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 77,
+          "maxMarks": 80,
+          "date": "08/08/2025",
+          "attempts": [
+            {
+              "score": 77,
+              "maxMarks": 80,
+              "date": "08/08/2025"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 3",
+          "score": 68,
+          "maxMarks": 80,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 68,
+              "maxMarks": 80,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        }
+      ],
+      "id": "paper-4a66a68c-f754-417d-a0ba-1e6bc96db51d",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Chemistry",
+      "year": 2018,
+      "series": null,
+      "label": null,
+      "gradeBoundary": 150,
+      "examBoard": "",
+      "notes": "super old logic, modern logic should have done a lot better for this paper, an estimated ~10 marks better",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 79,
+          "maxMarks": 80,
+          "date": "13/08/2025",
+          "attempts": [
+            {
+              "score": 79,
+              "maxMarks": 80,
+              "date": "13/08/2025"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 91,
+          "maxMarks": 100,
+          "date": "12/03/2026",
+          "attempts": [
+            {
+              "score": 91,
+              "maxMarks": 100,
+              "date": "12/03/2026"
+            }
+          ]
+        }
+      ],
+      "id": "paper-4be548e8-2bcd-40ec-8d95-fcbe98b5d50a",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "English Lit",
+      "year": 2021,
+      "series": null,
+      "label": null,
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [],
+      "id": "paper-4cd160b9-5e0f-4549-af70-9f54183200f0",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Biology",
+      "year": 2021,
+      "series": null,
+      "label": null,
+      "gradeBoundary": 130,
+      "examBoard": "",
+      "notes": "learnt to not be risky, and to play it safe, it was a hard paper, good 6 mark answers tho",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 87,
+          "maxMarks": 100,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 87,
+              "maxMarks": 100,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 83,
+          "maxMarks": 100,
+          "date": "16/03/2026",
+          "attempts": [
+            {
+              "score": 83,
+              "maxMarks": 100,
+              "date": "16/03/2026"
+            }
+          ]
+        }
+      ],
+      "id": "paper-51e0c7eb-3dfa-41b6-ba48-9012db32a3c1",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Biology",
+      "year": 2018,
+      "series": null,
+      "label": null,
+      "gradeBoundary": 132,
+      "examBoard": "",
+      "notes": "q6 removed, hard paper, i thought i flopped, bad logic",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 73,
+          "maxMarks": 82,
+          "date": "13/08/2025",
+          "attempts": [
+            {
+              "score": 73,
+              "maxMarks": 82,
+              "date": "13/08/2025"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 88,
+          "maxMarks": 100,
+          "date": "20/03/2026",
+          "attempts": [
+            {
+              "score": 88,
+              "maxMarks": 100,
+              "date": "20/03/2026"
+            }
+          ]
+        }
+      ],
+      "id": "paper-524a43a4-eab6-405c-abff-2f1f6689a5ec",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Chemistry",
+      "year": 2019,
+      "series": null,
+      "label": null,
+      "gradeBoundary": 144,
+      "examBoard": "",
+      "notes": "few logical errors, just also remember hydrogen is oxidised in a fuel cell, and excess hydrogen is burned off to stop it going in the air cus its explosive",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 88,
+          "maxMarks": 100,
+          "date": "12/08/2025",
+          "attempts": [
+            {
+              "score": 88,
+              "maxMarks": 100,
+              "date": "12/08/2025"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 89,
+          "maxMarks": 100,
+          "date": "18/03/2026",
+          "attempts": [
+            {
+              "score": 89,
+              "maxMarks": 100,
+              "date": "18/03/2026"
+            }
+          ]
+        }
+      ],
+      "id": "paper-5fd4f891-ce72-497f-9576-d817a3f65a4a",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Maths",
+      "year": 2019,
+      "series": "November",
+      "label": null,
+      "gradeBoundary": 167,
+      "examBoard": "",
+      "notes": "P2 and P3 so many stoopid mistakes honestly im cursed i think and it returned on P2",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 79,
+          "maxMarks": 80,
+          "date": "31/07/2025",
+          "attempts": [
+            {
+              "score": 79,
+              "maxMarks": 80,
+              "date": "31/07/2025"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 72,
+          "maxMarks": 80,
+          "date": "31/07/2025",
+          "attempts": [
+            {
+              "score": 72,
+              "maxMarks": 80,
+              "date": "31/07/2025"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 3",
+          "score": 73,
+          "maxMarks": 80,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 73,
+              "maxMarks": 80,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        }
+      ],
+      "id": "paper-6092793e-3c50-4492-af71-ef2706c68da2",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Biology",
+      "year": 2025,
+      "series": null,
+      "label": null,
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [
+        {
+          "paper": "Paper 2",
+          "score": 78,
+          "maxMarks": 100,
+          "date": "09/03/2026",
+          "attempts": [
+            {
+              "score": 78,
+              "maxMarks": 100,
+              "date": "09/03/2026"
+            }
+          ]
+        }
+      ],
+      "id": "paper-66a74b76-ff53-455d-a64f-1a9ce98b4252",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "English Lang",
+      "year": 2023,
+      "series": "November",
+      "label": null,
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [],
+      "id": "paper-6769e948-46a4-4b75-884f-dff3c5901ac3",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Physics",
+      "year": 2025,
+      "series": null,
+      "label": null,
+      "gradeBoundary": 72,
+      "examBoard": "",
+      "notes": "",
+      "results": [
+        {
+          "paper": "Paper 2",
+          "score": 82,
+          "maxMarks": 100,
+          "date": "23/03/2026",
+          "attempts": [
+            {
+              "score": 82,
+              "maxMarks": 100,
+              "date": "23/03/2026"
+            }
+          ]
+        }
+      ],
+      "id": "paper-697a2c46-e343-49ee-b464-a706e443b253",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Chemistry",
+      "year": 2020,
+      "series": null,
+      "label": null,
+      "gradeBoundary": 139,
+      "examBoard": "",
+      "notes": "",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 82,
+          "maxMarks": 100,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 82,
+              "maxMarks": 100,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 82,
+          "maxMarks": 100,
+          "date": "16/03/2026",
+          "attempts": [
+            {
+              "score": 82,
+              "maxMarks": 100,
+              "date": "16/03/2026"
+            }
+          ]
+        }
+      ],
+      "id": "paper-6a259436-e407-4d47-b113-08bf76bd1a61",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Computer Science",
+      "year": 2023,
+      "series": null,
+      "label": null,
+      "gradeBoundary": 127,
+      "examBoard": "",
+      "notes": "",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 36,
+          "maxMarks": 75,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 36,
+              "maxMarks": 75,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        }
+      ],
+      "id": "paper-719f9de7-83c2-4a89-9759-6281e645dc87",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Geography",
+      "year": 2020,
+      "series": null,
+      "label": null,
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [],
+      "id": "paper-732ecaf3-9327-4f89-acef-d47d67bf121d",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "English Lit",
+      "year": 2023,
+      "series": null,
+      "label": null,
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [],
+      "id": "paper-7348ddd5-017f-4a6c-80b5-24b248958a80",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Chemistry",
+      "year": 2022,
+      "series": null,
+      "label": null,
+      "gradeBoundary": 144,
+      "examBoard": "",
+      "notes": "no revision - baseline",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 65,
+          "maxMarks": 100,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 65,
+              "maxMarks": 100,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 90,
+          "maxMarks": 100,
+          "date": "09/03/2026",
+          "attempts": [
+            {
+              "score": 90,
+              "maxMarks": 100,
+              "date": "09/03/2026"
+            }
+          ]
+        }
+      ],
+      "id": "paper-79e0e62d-7082-4bfa-a4c0-a5234250dd50",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Geography",
+      "year": 2024,
+      "series": null,
+      "label": null,
+      "gradeBoundary": 117,
+      "examBoard": "",
+      "notes": "yr10 june mocks with partial paper 2",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 76,
+          "maxMarks": 94,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 76,
+              "maxMarks": 94,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 41,
+          "maxMarks": 49,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 41,
+              "maxMarks": 49,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        }
+      ],
+      "id": "paper-7c540b23-8ec0-40d0-981a-2329720ed1a1",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Maths",
+      "year": 2021,
+      "series": "November",
+      "label": null,
+      "gradeBoundary": 194,
+      "examBoard": "",
+      "notes": "holy how was i this garbage at maths not so long ago, good to see the improvement, but dang, do i gap myself that hard so often?, P3 was recent and its looking good, im starting to like gcse maths",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 69,
+          "maxMarks": 80,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 69,
+              "maxMarks": 80,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 66,
+          "maxMarks": 80,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 66,
+              "maxMarks": 80,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 3",
+          "score": 75,
+          "maxMarks": 80,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 75,
+              "maxMarks": 80,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        }
+      ],
+      "id": "paper-7d4afe7e-b901-4013-87b8-7009c21d7151",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Biology",
+      "year": null,
+      "series": "Mock",
+      "label": "mock (custom??)",
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": ":/",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 84,
+          "maxMarks": 100,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 84,
+              "maxMarks": 100,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        }
+      ],
+      "id": "paper-7e02ebf3-1f3a-461f-ae1d-e0841282ce0e",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Maths",
+      "year": 2023,
+      "series": "June",
+      "label": null,
+      "gradeBoundary": 203,
+      "examBoard": "",
+      "notes": "most of P2 questions came up in yr 10 june mocks",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 65,
+          "maxMarks": 80,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 65,
+              "maxMarks": 80,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 79,
+          "maxMarks": 80,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 79,
+              "maxMarks": 80,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 3",
+          "score": 73,
+          "maxMarks": 80,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 73,
+              "maxMarks": 80,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        }
+      ],
+      "id": "paper-8078e69b-50a8-40c1-b10b-426a27f1cae2",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Maths",
+      "year": 2017,
+      "series": "June",
+      "label": null,
+      "gradeBoundary": 190,
+      "examBoard": "",
+      "notes": "",
+      "results": [],
+      "id": "paper-858aa38b-b790-4c39-85cd-58dd817f6722",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Geography",
+      "year": 2019,
+      "series": null,
+      "label": null,
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [],
+      "id": "paper-8719d2a0-28a5-4693-9803-f8d0ab4168cc",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Physics",
+      "year": 2020,
+      "series": null,
+      "label": null,
+      "gradeBoundary": 140,
+      "examBoard": "",
+      "notes": "",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 83,
+          "maxMarks": 100,
+          "date": "18/03/2026",
+          "attempts": [
+            {
+              "score": 83,
+              "maxMarks": 100,
+              "date": "18/03/2026"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 90,
+          "maxMarks": 100,
+          "date": "22/03/2026",
+          "attempts": [
+            {
+              "score": 90,
+              "maxMarks": 100,
+              "date": "22/03/2026"
+            }
+          ]
+        }
+      ],
+      "id": "paper-89bc706d-7ec7-4d94-a659-9d8305f467ff",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Chemistry",
+      "year": 2021,
+      "series": null,
+      "label": null,
+      "gradeBoundary": 138,
+      "examBoard": "",
+      "notes": "",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 93,
+          "maxMarks": 100,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 93,
+              "maxMarks": 100,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 91,
+          "maxMarks": 100,
+          "date": "17/03/2026",
+          "attempts": [
+            {
+              "score": 91,
+              "maxMarks": 100,
+              "date": "17/03/2026"
+            }
+          ]
+        }
+      ],
+      "id": "paper-94cdf7d7-5c88-4435-8420-830f98bc1b3d",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Biology",
+      "year": 2024,
+      "series": null,
+      "label": null,
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [
+        {
+          "paper": "Paper 2",
+          "score": 83,
+          "maxMarks": 100,
+          "date": "09/03/2026",
+          "attempts": [
+            {
+              "score": 83,
+              "maxMarks": 100,
+              "date": "09/03/2026"
+            }
+          ]
+        }
+      ],
+      "id": "paper-972b1d09-52d9-4cf9-b690-30aed0c04ebb",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Computer Science",
+      "year": 2022,
+      "series": null,
+      "label": null,
+      "gradeBoundary": 123,
+      "examBoard": "",
+      "notes": "",
+      "results": [],
+      "id": "paper-9ff2b377-63a2-4877-8562-15c09391b251",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "English Lit",
+      "year": 2022,
+      "series": null,
+      "label": null,
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [],
+      "id": "paper-aaa463cf-4129-4aed-ab17-989ecdca2c10",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Maths",
+      "year": 2017,
+      "series": "November",
+      "label": null,
+      "gradeBoundary": 190,
+      "examBoard": "",
+      "notes": "",
+      "results": [],
+      "id": "paper-ad72a071-044a-4d5f-b05e-a28cc129dbd6",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Chemistry",
+      "year": 2024,
+      "series": null,
+      "label": null,
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [
+        {
+          "paper": "Paper 2",
+          "score": 91,
+          "maxMarks": 100,
+          "date": "10/03/2026",
+          "attempts": [
+            {
+              "score": 91,
+              "maxMarks": 100,
+              "date": "10/03/2026"
+            }
+          ]
+        }
+      ],
+      "id": "paper-b0c7fd1e-0db3-4f4f-9da4-19a3efbeb03e",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Maths",
+      "year": 2020,
+      "series": "November",
+      "label": null,
+      "gradeBoundary": 204,
+      "examBoard": "",
+      "notes": "heres where new era me starts",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 78,
+          "maxMarks": 80,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 78,
+              "maxMarks": 80,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 77,
+          "maxMarks": 80,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 77,
+              "maxMarks": 80,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 3",
+          "score": 76,
+          "maxMarks": 80,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 76,
+              "maxMarks": 80,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        }
+      ],
+      "id": "paper-b718a00d-c24a-497a-aec9-dc34b0990775",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Geography",
+      "year": 2021,
+      "series": null,
+      "label": null,
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [],
+      "id": "paper-bb829293-9a4a-4dfe-b97d-b4e230baf65b",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Physics",
+      "year": 2022,
+      "series": null,
+      "label": null,
+      "gradeBoundary": 150,
+      "examBoard": "",
+      "notes": "brutally difficult paper",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 72,
+          "maxMarks": 100,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 72,
+              "maxMarks": 100,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 92,
+          "maxMarks": 100,
+          "date": "20/03/2026",
+          "attempts": [
+            {
+              "score": 92,
+              "maxMarks": 100,
+              "date": "20/03/2026"
+            }
+          ]
+        }
+      ],
+      "id": "paper-be3c7df8-92b3-4958-aacf-65ad422fc42d",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "English Lang",
+      "year": 2022,
+      "series": "November",
+      "label": null,
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [],
+      "id": "paper-c6f00119-3cf8-4fa6-9889-459edac2ca1c",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "English Lit",
+      "year": 2020,
+      "series": null,
+      "label": null,
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [],
+      "id": "paper-c8405141-8f95-48cf-9518-f57c73484db5",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Physics",
+      "year": 2023,
+      "series": null,
+      "label": null,
+      "gradeBoundary": 148,
+      "examBoard": "",
+      "notes": "no revision - baseline",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 74,
+          "maxMarks": 100,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 74,
+              "maxMarks": 100,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 74,
+          "maxMarks": 100,
+          "date": "09/03/2026",
+          "attempts": [
+            {
+              "score": 74,
+              "maxMarks": 100,
+              "date": "09/03/2026"
+            }
+          ]
+        }
+      ],
+      "id": "paper-cdd179c7-ce1d-4a14-885f-1d17b504c475",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Biology",
+      "year": 2022,
+      "series": null,
+      "label": null,
+      "gradeBoundary": 132,
+      "examBoard": "",
+      "notes": "patch up small gaps, and improve 6 markers",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 91,
+          "maxMarks": 100,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 89,
+              "maxMarks": 100,
+              "date": "Previously added before 31/07/25"
+            },
+            {
+              "score": 91,
+              "maxMarks": 100,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 84,
+          "maxMarks": 100,
+          "date": "12/03/2026",
+          "attempts": [
+            {
+              "score": 84,
+              "maxMarks": 100,
+              "date": "12/03/2026"
+            }
+          ]
+        }
+      ],
+      "id": "paper-d2ee36ef-5605-424e-90e6-d7fa3a6e227b",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "English Lit",
+      "year": 2017,
+      "series": null,
+      "label": null,
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [],
+      "id": "paper-d64a6639-8495-483d-bb1b-c0500d18b7d5",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "English Lit",
+      "year": null,
+      "series": "Specimen",
+      "label": "specimen",
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [],
+      "id": "paper-d88dd9af-65ca-4cf0-a2a3-6cf0bf9a5b72",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "English Lit",
+      "year": 2018,
+      "series": null,
+      "label": null,
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [],
+      "id": "paper-ddd96c66-6a93-4443-a119-ba22cceea5c8",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Geography",
+      "year": 2023,
+      "series": null,
+      "label": null,
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [],
+      "id": "paper-e25a7cb4-069e-42ff-91a2-4741ad141d64",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Biology",
+      "year": 2023,
+      "series": null,
+      "label": null,
+      "gradeBoundary": 132,
+      "examBoard": "",
+      "notes": "no revision- baseline",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 47,
+          "maxMarks": 100,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 47,
+              "maxMarks": 100,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 82,
+          "maxMarks": 100,
+          "date": "10/03/2026",
+          "attempts": [
+            {
+              "score": 82,
+              "maxMarks": 100,
+              "date": "10/03/2026"
+            }
+          ]
+        }
+      ],
+      "id": "paper-ee1fe8ea-1e18-40c6-ba64-d7ec1e1cd44a",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "English Lang",
+      "year": 2022,
+      "series": "June",
+      "label": null,
+      "gradeBoundary": null,
+      "examBoard": "",
+      "notes": "",
+      "results": [],
+      "id": "paper-f150c82f-8838-4e63-8d3c-a2775fe3b7d9",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
+    },
+    {
+      "subject": "Biology",
+      "year": 2019,
+      "series": null,
+      "label": null,
+      "gradeBoundary": 134,
+      "examBoard": "",
+      "notes": "",
+      "results": [
+        {
+          "paper": "Paper 1",
+          "score": 88,
+          "maxMarks": 100,
+          "date": "Previously added before 31/07/25",
+          "attempts": [
+            {
+              "score": 88,
+              "maxMarks": 100,
+              "date": "Previously added before 31/07/25"
+            }
+          ]
+        },
+        {
+          "paper": "Paper 2",
+          "score": 84,
+          "maxMarks": 100,
+          "date": "17/03/2026",
+          "attempts": [
+            {
+              "score": 84,
+              "maxMarks": 100,
+              "date": "17/03/2026"
+            }
+          ]
+        }
+      ],
+      "id": "paper-f8a8227c-11db-465b-836b-a61a7a678216",
+      "type": "pastpaper",
+      "createdAt": "2026-08-30T05:30:15.647Z",
+      "updatedAt": "2026-08-30T05:30:15.647Z"
     }
   ],
   "quotes": [

@@ -454,6 +454,73 @@ async function removeCueEverywhere(id) {
   }
 }
 
+// ---- toast notifications ----
+function toast(message, { sticky = false, action = null } = {}) {
+  const root = document.getElementById("nnToastRoot");
+  if (!root) return;
+  const el = document.createElement("div");
+  el.className = "nn-toast";
+  const text = document.createElement("span");
+  text.textContent = message;
+  el.appendChild(text);
+  if (action) {
+    const btn = document.createElement("button");
+    btn.className = "nn-toast-btn";
+    btn.textContent = action.label;
+    el.appendChild(btn);
+    btn.addEventListener("click", (e) => {
+      if (e && e.stopPropagation) e.stopPropagation();
+      dismiss();
+      if (action.onClick) action.onClick();
+    });
+  }
+  const dismiss = () => {
+    el.classList.add("hide");
+    setTimeout(() => el.remove(), 320);
+  };
+  root.appendChild(el);
+  if (!sticky) setTimeout(dismiss, 7000);
+  return dismiss;
+}
+
+// Stable fingerprint of a dataset (used to detect whether the user is on
+// pristine demo data vs. a modified/own dataset).
+function fingerprintDataset(nodes, quotes, cues) {
+  const norm = (arr) => arr
+    .map((o) => JSON.stringify(o))
+    .sort()
+    .join("|");
+  const str = norm(nodes || []) + "||" + norm(quotes || []) + "||" + norm(cues || []);
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) + h + str.charCodeAt(i)) >>> 0;
+  }
+  return h.toString(16);
+}
+
+async function currentFingerprint() {
+  const [nodes, quotes, cues] = await Promise.all([getAllNodes(), getAllQuotes(), getAllCues()]);
+  return fingerprintDataset(nodes, quotes, cues);
+}
+
+async function demoFingerprint() {
+  try {
+    const res = await fetch("demo-data.json", { cache: "no-store" });
+    if (!res.ok) return null;
+    const payload = await res.json();
+    const { dataset } = upgradeDataset(payload);
+    return fingerprintDataset(dataset?.nodes || [], dataset?.quotes || [], dataset?.cues || []);
+  } catch (e) {
+    return null;
+  }
+}
+
+async function fetchDemoPayload() {
+  const res = await fetch("demo-data.json", { cache: "no-store" });
+  if (!res.ok) throw new Error("Demo data not found");
+  return res.json();
+}
+
 async function exportDatabaseJson() {
   const [nodes, quotes, cues] = await Promise.all([getAllNodes(), getAllQuotes(), getAllCues()]);
   const payload = {
@@ -476,7 +543,10 @@ async function exportDatabaseJson() {
 async function importDatabaseJson(file) {
   const text = await file.text();
   const payload = JSON.parse(text);
+  await importPayload(payload);
+}
 
+async function importPayload(payload) {
   // Auto-upgrade any legacy data to the markdown-first schema on the way in,
   // so old export files work as-is (no manual migration needed).
   const { dataset } = upgradeDataset(payload);
@@ -533,6 +603,120 @@ async function upgradeStoredDatabaseIfNeeded() {
   } catch (error) {
     console.error("[UPGRADE] error during stored-data upgrade:", error);
   }
+}
+
+// ========== DEMO DATA & DELETE DATA ==========
+
+async function importDemoData() {
+  const cur = await currentFingerprint();
+  const empty = cur === fingerprintDataset([], [], []);
+  if (!empty) {
+    const ok = await dialog.confirm(
+      "Importing demo data will overwrite YOUR current NeuroNet database. Continue?",
+      "Import demo",
+      "danger"
+    );
+    if (!ok) return;
+  }
+  try {
+    const payload = await fetchDemoPayload();
+    await importPayload(payload);
+    toast("Demo data imported. Explore the launchpad or click a tool.");
+  } catch (error) {
+    console.error("Demo import failed", error);
+    dialog.alert("Could not load demo data. It may not be deployed yet.");
+  }
+}
+
+async function deleteAllData() {
+  const [nodes, quotes, cues] = await Promise.all([getAllNodes(), getAllQuotes(), getAllCues()]);
+  const isDemo = await isOnDemoData(nodes, quotes, cues);
+
+  // Easy path: pristine demo data, fully recoverable via re-import.
+  if (isDemo) {
+    const ok = await dialog.confirm(
+      "This is demo data — safe to remove and you can re-import it anytime.\n\nDelete demo data?",
+      "Delete demo data",
+      "danger"
+    );
+    if (!ok) return;
+    await wipeDatabase();
+    toast("Demo data removed. Use “Import Demo Data” in your profile to get it back.");
+    return;
+  }
+
+  // Modified / user data: full caution flow.
+  const gate = await dialog.confirm(
+    "Delete ALL of your NeuroNet data? This removes every subject, source, analysis, quote, cue and past paper from this browser. This is a danger zone.\n\nContinue?",
+    "Continue to delete",
+    "danger"
+  );
+  if (!gate) return;
+
+  // Optional backup — never forced.
+  const makeBackup = await dialog.confirm(
+    "Back up your data first as a .json file? Recommended, optional.\n\nChoose whether to download a backup before deleting.\n\nYes = download backup now.  No = skip (delete without backup).",
+    "Yes, back up",
+    "primary",
+    "No"
+  );
+  if (makeBackup) {
+    await exportDatabaseJson();
+    await dialog.alert(
+      "Backup downloaded.\n\nKeep your .json data file safe — you can re-import it into NeuroNet anytime (profile → Import JSON Data)."
+    );
+  }
+
+  const finalOk = await dialog.confirm(
+    "FINAL WARNING: This permanently deletes everything from this browser. There is no undo.\n\nProceed to delete?",
+    "Delete all data",
+    "danger"
+  );
+  if (!finalOk) return;
+
+  // Real typed double-check ("danger zone").
+  const typeOk = await dialog.prompt(
+    "This is the danger area. Type the word DELETE to permanently erase all data, or Cancel to keep everything.",
+    ""
+  );
+  if (typeOk == null || String(typeOk).trim().toUpperCase() !== "DELETE") {
+    await dialog.alert("Deletion cancelled — nothing was deleted.");
+    return;
+  }
+
+  await wipeDatabase();
+  toast("All data deleted. Your database is now empty.");
+}
+
+async function isOnDemoData(nodes, quotes, cues) {
+  const demoFp = await demoFingerprint();
+  if (demoFp == null) return false;
+  return fingerprintDataset(nodes, quotes, cues) === demoFp;
+}
+
+async function wipeDatabase() {
+  await clearNodes();
+  await clearQuotes();
+  await clearCues();
+  if (USE_BACKEND && window.currentUser) {
+    try {
+      const [cloudNodes, cloudQuotes, cloudCues] = await Promise.all([
+        fetchCloudNodes(), fetchCloudQuotes(), fetchCloudCues()
+      ]);
+      await Promise.all([
+        ...cloudNodes.map((node) => deleteCloudNode(node.id)),
+        ...cloudQuotes.map((quote) => deleteCloudQuote(quote.id)),
+        ...cloudCues.map((cue) => deleteCloudCue(cue.id))
+      ]);
+      await syncToCloud([], [], []);
+    } catch (error) {
+      console.log("Cloud wipe skipped", error);
+    }
+  }
+  await updateGlobalStats();
+  await renderSubjectList();
+  document.dispatchEvent(new Event("db-change"));
+  if (currentToolName) await loadTool(currentToolName);
 }
 
 // ========== LAUNCHPAD FUNCTIONS ==========
@@ -1139,6 +1323,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   const exportJsonBtn = document.getElementById("exportJsonBtn");
   const importJsonBtn = document.getElementById("importJsonBtn");
   const importJsonInput = document.getElementById("importJsonInput");
+  const importDemoBtn = document.getElementById("importDemoBtn");
+  const deleteDataBtn = document.getElementById("deleteDataBtn");
 
   if (profileElem) {
     profileElem.addEventListener("click", (e) => {
@@ -1150,6 +1336,12 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   document.addEventListener("click", () => {
     if (dropdown) dropdown.style.display = "none";
+  });
+
+  // Keep the sidebar subject pills (and launchpad subjects) in sync with any
+  // database change across all tools.
+  document.addEventListener("db-change", async () => {
+    await renderSidebarSubjects();
   });
 
   const unpinCancel = document.getElementById("unpinCancel");
@@ -1248,4 +1440,48 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     });
   }
+
+  if (importDemoBtn) {
+    importDemoBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (dropdown) dropdown.style.display = "none";
+      await importDemoData();
+    });
+  }
+
+  if (deleteDataBtn) {
+    deleteDataBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (dropdown) dropdown.style.display = "none";
+      deleteAllData();
+    });
+  }
+
+  // First-entry / data-state toast: nudge the user toward the profile card
+  // (Import Demo Data / Delete Data live there). Shown whenever the DB is
+  // pristine demo data, empty, OR it's the user's first visit — and only
+  // stops once they've made their first change (own/modified data).
+  try {
+    const visitedKey = "nn-first-visit";
+    const visited = !!localStorage.getItem(visitedKey);
+    if (!visited) localStorage.setItem(visitedKey, "1");
+
+    const [nodes, quotes, cues] = await Promise.all([getAllNodes(), getAllQuotes(), getAllCues()]);
+    const isEmpty = nodes.length === 0 && quotes.length === 0 && cues.length === 0;
+    const isDemo = await isOnDemoData(nodes, quotes, cues);
+
+    if (isEmpty || isDemo || !visited) {
+      setTimeout(() => {
+        toast("Tap your profile card (bottom) for data options — import demo data or delete everything.", {
+          sticky: true,
+          action: {
+            label: "Open",
+            onClick: () => {
+              if (dropdown) dropdown.style.display = "block";
+            }
+          }
+        });
+      }, 1400);
+    }
+  } catch (e) { /* ignore */ }
 });

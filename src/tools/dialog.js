@@ -35,7 +35,7 @@ function ensureRoot() {
 
 function cleanup() { if (root) root.classList.remove("open"); }
 
-function show({ message, prompt, okLabel, okClass, cancel }) {
+function show({ message, prompt, okLabel, okClass, cancel, cancelLabel }) {
   ensureRoot();
   const msg = document.getElementById("nnDialogMsg");
   const input = document.getElementById("nnDialogInput");
@@ -50,7 +50,7 @@ function show({ message, prompt, okLabel, okClass, cancel }) {
     btnOK.textContent = okLabel || "OK";
     const btnCancel = document.createElement("button");
     btnCancel.className = "nn-dialog-btn";
-    btnCancel.textContent = "Cancel";
+    btnCancel.textContent = cancelLabel || "Cancel";
 
     const finalize = (val) => { cleanup(); resolve(val); detach(); };
     const onOK = () => finalize(prompt ? (input.value ?? "") : true);
@@ -78,7 +78,7 @@ function show({ message, prompt, okLabel, okClass, cancel }) {
 }
 
 export const dialog = {
-  confirm: (message, okLabel = "OK", okClass = "primary") => show({ message, okLabel, okClass }),
+  confirm: (message, okLabel = "OK", okClass = "primary", cancelLabel) => show({ message, okLabel, okClass, cancelLabel }),
   prompt: (message, initial = "") => show({ message, prompt: true, initial }),
   alert: (message) => show({ message, cancel: false })
 };

@@ -236,49 +236,61 @@ canvas { position: fixed; inset:0; z-index:-1; }
 #sidebarSubjects {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   margin-bottom: 16px;
-  padding: 0 4px;
-  max-height: 30vh;
+  padding: 10px;
+  flex: 0 0 auto;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 14px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 #sidebarSubjectsHead {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 0.7rem;
+  padding: 0 2px 6px;
+}
+#sidebarSubjectsHead > span {
+  font-size: 0.62rem;
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 1.6px;
   color: var(--text-muted);
-  padding: 0 2px;
+  font-weight: 600;
 }
 #sidebarSubjectList {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 .subject-pill {
   border: none;
-  background: rgba(255,255,255,0.05);
-  color: var(--text-main);
-  padding: 5px 10px;
-  border-radius: 999px;
+  background: transparent;
+  color: rgba(230,255,245,0.85);
+  padding: 7px 10px;
+  border-radius: 8px;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: 0.84rem;
+  font-weight: 500;
   text-align: left;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: background 0.18s ease, color 0.18s ease;
 }
 .subject-pill:hover {
-  background: rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.08);
 }
 .subject-pill.active {
-  background: var(--accent-soft);
-  color: var(--text-main);
-  outline: 1px solid var(--accent);
+  background: rgba(44,255,179,0.14);
+  color: var(--accent);
+  font-weight: 600;
 }
 
 
@@ -461,58 +473,110 @@ canvas { position: fixed; inset:0; z-index:-1; }
 
 #dropdown {
   position: absolute;
-  bottom: 60px;
+  bottom: calc(60px + 8px);
   left: 0;
-  background: var(--glass-surface);
-  border: 1px solid var(--glass-border);
-  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02)),
+    linear-gradient(135deg, rgba(18,46,34,0.82), rgba(10,30,22,0.9));
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 18px;
   overflow: hidden;
-  backdrop-filter: blur(var(--glass-blur));
-  min-width: 120px;
+  min-width: 200px;
+  z-index: 150;
+  box-shadow:
+    0 18px 50px rgba(0,0,0,0.55),
+    0 4px 16px rgba(0,0,0,0.35),
+    inset 0 1px 0 rgba(255,255,255,0.12),
+    inset 0 0 0 0.5px rgba(255,255,255,0.04);
+  padding: 6px;
 }
 
-#logoutBtn {
-  padding: 10px 16px;
+#dropdown > button {
+  padding: 11px 14px;
   width: 100%;
   background: transparent;
   border: none;
-  color: #ff6b6b;
+  color: var(--text-main);
   cursor: pointer;
   font-weight: 500;
   text-align: left;
+  border-radius: 12px;
+  font-size: 0.88rem;
 }
 
+#logoutBtn,
+#deleteDataBtn {
+  color: #ff8c8c;
+}
+#deleteDataBtn {
+  margin-top: 4px;
+  border-top: 1px solid rgba(255,255,255,0.09);
+  border-radius: 0 0 12px 12px;
+}
 #authActionBtn {
-  padding: 10px 16px;
-  width: 100%;
-  background: transparent;
-  border: none;
   color: var(--text-main);
-  cursor: pointer;
-  font-weight: 500;
-  text-align: left;
-}
-
-#exportJsonBtn,
-#importJsonBtn {
-  padding: 10px 16px;
-  width: 100%;
-  background: transparent;
-  border: none;
-  color: var(--text-main);
-  cursor: pointer;
-  font-weight: 500;
-  text-align: left;
 }
 #analysisReader blockquote {
   margin-left: 2em;
 }
-#logoutBtn:hover,
 #authActionBtn:hover,
 #exportJsonBtn:hover,
-#importJsonBtn:hover {
-  background: rgba(255,107,107,0.1);
+#importJsonBtn:hover,
+#importDemoBtn:hover {
+  background: rgba(255,255,255,0.09);
 }
+#logoutBtn:hover,
+#deleteDataBtn:hover {
+  background: rgba(255,107,107,0.18);
+}
+
+#nnToastRoot {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  z-index: 999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+}
+.nn-toast {
+  pointer-events: auto;
+  background: linear-gradient(135deg, var(--panel-strong, #262626), #1a1a1a);
+  border: 1px solid var(--glass-border);
+  border-left: 3px solid var(--accent, #2cffb3);
+  border-radius: 12px;
+  padding: 12px 18px;
+  color: var(--text-main);
+  font-size: 0.9rem;
+  box-shadow: 0 12px 40px rgba(0,0,0,.5);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  animation: nnToastIn .3s ease;
+}
+@keyframes nnToastIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.nn-toast.hide { opacity: 0; transform: translateY(8px); transition: opacity .3s, transform .3s; }
+.nn-toast .nn-toast-btn {
+  border: 1px solid var(--glass-border);
+  background: rgba(255,255,255,.08);
+  color: var(--text-main);
+  padding: 5px 12px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: .8rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.nn-toast .nn-toast-btn:hover { background: rgba(255,255,255,.16); }
+
 
 /* Launchpad styles */
 .launchpad {
@@ -1062,6 +1126,8 @@ canvas { position: fixed; inset:0; z-index:-1; }
       <button id="logoutBtn">Logout</button>
       <button id="exportJsonBtn">Export JSON Data</button>
       <button id="importJsonBtn">Import JSON Data</button>
+      <button id="importDemoBtn">Import Demo Data</button>
+      <button id="deleteDataBtn" class="danger">Delete Data</button>
       <input id="importJsonInput" type="file" accept=".json,application/json" hidden />
     </div>
   </aside>
@@ -1077,6 +1143,8 @@ canvas { position: fixed; inset:0; z-index:-1; }
       </div>
     </div>
   </div>
+
+  <div id="nnToastRoot"></div>
 
   <main id="mainContent">
     <div id="toolContainer"></div>
