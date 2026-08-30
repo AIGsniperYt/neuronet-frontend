@@ -3096,4 +3096,21 @@
     display: flex;
     justify-content: space-between;
   }
+
+  @media (max-width: 700px) {
+    #memoryHeader {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+      padding: 12px;
+    }
+    #memoryControls { flex-wrap: wrap; }
+    #evidenceMatchingContainer,
+    #memoryStats { padding: 16px 14px; }
+    #evidencePrompt { padding: 20px; font-size: 1.15rem; }
+    #quoteOptions { grid-template-columns: 1fr; }
+    .stats-grid,
+    .focus-stats { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .live-metrics { grid-template-columns: 1fr; }
+  }
 </style>

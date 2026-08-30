@@ -565,6 +565,19 @@
     border-color: rgba(44, 255, 179, 0.4);
     color: var(--accent);
   }
+
+  @media (max-width: 700px) {
+    .mindmap-shell { position: relative; grid-template-columns: 1fr; }
+    .mindmap-header { flex-wrap: wrap; gap: 10px; padding: 10px 12px; }
+    .mindmap-header p { flex-basis: 100%; }
+    .header-actions { margin-left: auto; flex-wrap: wrap; }
+    .stats-bar { width: 100%; margin-left: 0; flex-wrap: wrap; }
+    .stat-pill { font-size: 0.75rem; padding: 5px 10px; }
+    .node-sidebar { position: absolute; top: 0; right: 0; bottom: 0; height: 100%; z-index: 50; }
+    .node-sidebar.open { width: 88%; }
+    .sidebar-inner { width: 100%; }
+    .connecting-overlay { left: 12px; right: 12px; transform: none; width: auto; }
+  }
 </style>
 
 <div class="mindmap-shell">

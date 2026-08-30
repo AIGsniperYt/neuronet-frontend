@@ -807,6 +807,12 @@ button.analysis-quote-jump.active-quote,
     flex-basis: 100%;
   }
 }
+
+@media (max-width: 560px) {
+  .stats-row { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .launch-top { grid-template-columns: 1fr; }
+  .subject-card { min-width: 0; }
+}
 </style>
 
 <div class="analysis-shell" style="user-select: text !important; -webkit-user-select: text !important;">

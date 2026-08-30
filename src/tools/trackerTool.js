@@ -289,6 +289,8 @@ export function initTrackerTool(deps, context = {}) {
 
     const sorted = visible.slice().sort(compareSorted);
 
+    const scroll = document.createElement("div");
+    scroll.className = "sit-scroll";
     const table = document.createElement("table");
     table.className = "sit-table";
     const thead = document.createElement("thead");
@@ -315,7 +317,8 @@ export function initTrackerTool(deps, context = {}) {
       }
     }
     table.appendChild(tbody);
-    el.paperGroups.appendChild(table);
+    scroll.appendChild(table);
+    el.paperGroups.appendChild(scroll);
   }
 
   function shortSeries(s) {

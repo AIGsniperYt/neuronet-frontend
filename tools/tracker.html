@@ -131,6 +131,7 @@
     }
     .sit-table tbody tr:last-child td { border-bottom: none; }
     .sit-table tbody tr.row-main:hover { background: rgba(255,255,255,0.02); }
+    .sit-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     .col-session { width: 100px; }
     .col-papers { width: auto; }
     .col-boundary { width: 120px; white-space: nowrap; }
@@ -204,6 +205,20 @@
     .tracker-form-msg { font-size: 0.85rem; margin-left: 6px; }
     .tracker-form-msg.ok { color: var(--accent); }
     .tracker-form-msg.err { color: #ff8c8c; }
+
+    @media (max-width: 700px) {
+      #trackerHeader { flex-direction: column; align-items: stretch; padding: 12px; }
+      #trackerControls { justify-content: flex-start; }
+      #trackerPapers, #trackerStats { padding: 14px 12px; }
+      #trackerToolbar input[type="text"] { min-width: 0; flex-basis: 100%; }
+      #trackerToolbar button, #trackerToolbar .tracker-btn { flex: 1 1 auto; }
+      #trackerScope, #trackerResultCount { width: 100%; }
+      .tracker-sitting-head { flex-wrap: wrap; padding: 11px 12px; }
+      .head-scores { width: 100%; }
+      .sit-table { min-width: 620px; }
+      .tracker-form-grid { grid-template-columns: 1fr; }
+      #trackerModalBox { padding: 16px; width: min(94%, 560px); max-height: 90%; }
+    }
   </style>
 
   <div id="trackerHeader">
