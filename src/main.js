@@ -1,6 +1,7 @@
 import { cleanupOldDemoDatabases, initDB, addNode, addNodes, getAllNodes, getNode, deleteNode, addQuote, addQuotes, getAllQuotes, getQuote, deleteQuote, clearNodes, clearQuotes, clearCues, addCues, getQuotesForSubject, getAnalysisNodesForSubject, getDueQuotesForSubject, getDueAnalysisNodesForSubject, getQuotesReferencedByAnalysis, getAnalysesReferencingQuote, getPinnedTools, pinTool, unpinTool, isToolPinned, setPinnedToolsOrder, getSubjects, addSubject, deleteSubject, renameSubject, addCue, getAllCues, getCue, deleteCue, getCuesForQuote, getCuesForAnalysis, getCuesForSubject, updateCueLinks, getAllTags, addTag, deleteTag, findExistingQuote, findExistingQuoteByText, linkAnalysisToQuote, unlinkAnalysisFromQuote, getFormattedQuote, resolveQuoteInSource } from "./db.js";
 import { syncLocalWithCloud, syncToCloud, deleteCloudNode, deleteCloudQuote, deleteCloudCue, fetchCloudNodes, fetchCloudQuotes, fetchCloudCues } from "./sync.js";
 import { initAnalysisToolV2 } from "./tools/analysisTool.js";
+import { dialog } from "./tools/dialog.js";
 import { initMemoryTool } from "./tools/memoryTool.js";
 import { initMindmapTool } from "./tools/mindmapTool.js";
 import { initTrackerTool } from "./tools/trackerTool.js";
@@ -671,16 +672,18 @@ async function renderSubjectList() {
       if (!action || !subject) return;
 
       if (action === "rename-subject") {
-        const updated = window.prompt(`Rename subject "${subject}" to:`, subject);
+        const updated = await dialog.prompt(`Rename subject "${subject}" to:`, subject);
         const next = (updated || "").trim();
         if (!next || next === subject) return;
         await renameSubject(subject, next);
       } else if (action === "delete-subject") {
-        if (!confirm(`Delete subject "${subject}" and all its content?`)) return;
+        const ok = await dialog.confirm(`Delete subject "${subject}" and all its content?`, "Delete", "danger");
+        if (!ok) return;
         await deleteSubject(subject);
       }
       await updateGlobalStats();
       await renderSubjectList();
+      await renderSidebarSubjects();
     });
   });
 }
@@ -694,6 +697,7 @@ async function addSubjectFromInput() {
   input.value = "";
   await renderSubjectList();
   await updateGlobalStats();
+  await renderSidebarSubjects();
   const addSubjectBtn = document.getElementById("addSubjectBtn");
   if (addSubjectBtn) addSubjectBtn.disabled = true;
 }
@@ -702,6 +706,12 @@ async function initLaunchpad() {
   await updateGlobalStats();
   await renderSubjectList();
   await renderToolCatalogue();
+  await renderSidebarSubjects();
+
+  const allBtn = document.getElementById("sidebarSubjectAll");
+  if (allBtn) {
+    allBtn.addEventListener("click", () => selectSidebarSubject(""));
+  }
 
   const addSubjectBtn = document.getElementById("addSubjectBtn");
   const newSubjectInput = document.getElementById("newSubjectName");
@@ -746,6 +756,7 @@ async function initLaunchpad() {
 async function enterSubjectWorkspace(subject) {
   currentSubject = subject;
   hideLaunchpad();
+  await renderSidebarSubjects();
   await loadTool("analysis", { subject });
 }
 
@@ -759,6 +770,7 @@ function returnToGlobalLaunchpad() {
     window.__neuronetOnReturnToGlobal();
   }
   showLaunchpad();
+  renderSidebarSubjects();
 
   // Make the transition back to home prominent on the neural background
   if (window.__neuronetCanvas) {
@@ -865,6 +877,51 @@ async function renderPinnedToolsSidebar() {
     });
   });
 }
+
+// ========== SIDEBAR SUBJECT SWITCHER ==========
+
+async function renderSidebarSubjects() {
+  const listEl = document.getElementById("sidebarSubjectList");
+  const allBtn = document.getElementById("sidebarSubjectAll");
+  if (!listEl || !allBtn) return;
+
+  const subjects = await getSubjects();
+  const norm = (s) => String(s || "").trim().toLowerCase();
+
+  allBtn.classList.toggle("active", !currentSubject);
+
+  listEl.innerHTML = subjects.map(subject => `
+    <button type="button" class="subject-pill ${norm(subject) === norm(currentSubject) ? "active" : ""}"
+            data-subject="${escapeHtml(subject)}">${escapeHtml(subject)}</button>
+  `).join("");
+
+  listEl.querySelectorAll(".subject-pill").forEach(btn => {
+    btn.addEventListener("click", () => selectSidebarSubject(btn.dataset.subject));
+  });
+}
+
+async function selectSidebarSubject(subject) {
+  const next = subject || null;
+  const subjectChanged = next !== currentSubject;
+  currentSubject = next;
+  setActiveTool(currentToolName);
+  await renderSidebarSubjects();
+
+  if (!subjectChanged) return;
+  if (currentToolName) {
+    loadTool(currentToolName, { subject: next });
+  } else if (next) {
+    enterSubjectWorkspace(next);
+  } else {
+    returnToGlobalLaunchpad();
+  }
+}
+
+window.__neuronetSelectSubject = selectSidebarSubject;
+
+window.__neuronetRefreshSubjects = async () => {
+  await renderSidebarSubjects();
+};
 
 // ========== UNPIN MODAL ==========
 
@@ -1174,7 +1231,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     importJsonInput.addEventListener("change", async () => {
       const [file] = importJsonInput.files || [];
       if (!file) return;
-      const confirmed = window.confirm("Importing JSON will overwrite your current NeuroNet database. Continue?");
+      const confirmed = await dialog.confirm("Importing JSON will overwrite your current NeuroNet database. Continue?", "Import", "danger");
       if (!confirmed) {
         importJsonInput.value = "";
         return;
@@ -1185,7 +1242,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (dropdown) dropdown.style.display = "none";
       } catch (error) {
         console.error("Import failed", error);
-        alert("Import failed. Please check the JSON file format.");
+        dialog.alert("Import failed. Please check the JSON file format.");
       } finally {
         importJsonInput.value = "";
       }

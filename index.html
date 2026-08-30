@@ -232,6 +232,56 @@ canvas { position: fixed; inset:0; z-index:-1; }
   color: var(--sidebar-logo-hover);
 }
 
+/* Subject switcher in sidebar */
+#sidebarSubjects {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 0 4px;
+  max-height: 30vh;
+  overflow-y: auto;
+}
+#sidebarSubjectsHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  padding: 0 2px;
+}
+#sidebarSubjectList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.subject-pill {
+  border: none;
+  background: rgba(255,255,255,0.05);
+  color: var(--text-main);
+  padding: 5px 10px;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.subject-pill:hover {
+  background: rgba(255,255,255,0.12);
+}
+.subject-pill.active {
+  background: var(--accent-soft);
+  color: var(--text-main);
+  outline: 1px solid var(--accent);
+}
+
+
 #mainContent {
   flex: 1;
   padding: 0;
@@ -994,6 +1044,13 @@ canvas { position: fixed; inset:0; z-index:-1; }
 <div id="app">
   <aside id="sidebar" class="entering">
     <h2 id="logo" style="cursor: pointer;">NeuroNet</h2>
+    <div id="sidebarSubjects">
+      <div id="sidebarSubjectsHead">
+        <span>Subjects</span>
+        <button id="sidebarSubjectAll" class="subject-pill active" data-subject="">All</button>
+      </div>
+      <div id="sidebarSubjectList"></div>
+    </div>
     <div id="toolButtonsContainer"></div>
 
     <div id="sidebarProfile">

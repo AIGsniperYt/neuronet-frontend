@@ -1,3 +1,4 @@
+import { dialog } from "./dialog.js";
 export async function initMindmapTool(deps, context = {}) {
   const {
     getAllNodes,
@@ -498,9 +499,9 @@ const state = {
           <button class="btn-break" title="Break Connection" data-target-id="${neighborId}">&times;</button>
         `;
 
-        itemEl.querySelector(".btn-break").addEventListener("click", (e) => {
+        itemEl.querySelector(".btn-break").addEventListener("click", async (e) => {
           e.stopPropagation();
-          if (confirm(`Break connection to "${getNodeDisplayTitle(neighbor)}"?`)) {
+          if (await dialog.confirm(`Break connection to "${getNodeDisplayTitle(neighbor)}"?`)) {
             breakLink(selectedItem.id, neighborId);
           }
         });
@@ -553,8 +554,8 @@ const state = {
 
     const addBtn = document.getElementById("addTagBtn");
     if (addBtn) {
-      addBtn.addEventListener("click", () => {
-        const tagName = window.prompt("Enter tag name:");
+      addBtn.addEventListener("click", async () => {
+        const tagName = await dialog.prompt("Enter tag name:");
         if (tagName) {
           addTagToNode(item, tagName);
         }
@@ -1321,7 +1322,7 @@ const state = {
     const message = selectedItem.type?.startsWith("layer")
       ? "Delete this layer and everything inside it? (All sources + their quotes + any now-empty analyses will be removed.)"
       : `Delete this ${selectedItem.type}? This action cannot be undone.`;
-    const confirmed = window.confirm(message);
+    const confirmed = await dialog.confirm(message, "Delete", "danger");
     if (!confirmed) return;
 
     try {
@@ -1349,7 +1350,7 @@ const state = {
       await refreshData();
     } catch (error) {
       console.error("Failed to delete node:", error);
-      alert("Failed to delete node: " + error.message);
+      dialog.alert("Failed to delete node: " + error.message);
     }
   }
 
@@ -1411,14 +1412,14 @@ const state = {
   }
 
   async function createNewNode(type) {
-    const subject = contextSubject || window.prompt("Enter subject for the new node:") || "General";
+    const subject = contextSubject || (await dialog.prompt("Enter subject for the new node:")) || "General";
     const now = Date.now();
 
     try {
       if (type === "analysis") {
-        const title = window.prompt("Enter analysis title:");
+        const title = await dialog.prompt("Enter analysis title:");
         if (title === null) return;
-        const analysis = window.prompt("Enter analysis content:");
+        const analysis = await dialog.prompt("Enter analysis content:");
         if (analysis === null) return;
 
         await addNode({
@@ -1432,7 +1433,7 @@ const state = {
           meta: {}
         });
       } else if (type === "quote") {
-        const quote = window.prompt("Enter quote text:");
+        const quote = await dialog.prompt("Enter quote text:");
         if (quote === null) return;
 
         await addQuote({
@@ -1445,7 +1446,7 @@ const state = {
           meta: {}
         });
       } else if (type === "cue") {
-        const cue = window.prompt("Enter cue text:");
+        const cue = await dialog.prompt("Enter cue text:");
         if (cue === null) return;
 
         await addCue({
@@ -1464,7 +1465,7 @@ const state = {
       }
     } catch (error) {
       console.error("Failed to create node:", error);
-      alert("Error: " + error.message);
+      dialog.alert("Error: " + error.message);
     }
   }
 

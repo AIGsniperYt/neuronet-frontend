@@ -1,3 +1,4 @@
+import { dialog } from "./dialog.js";
 export async function initMemoryTool(deps, context = {}) {
   const {
     getAllNodes,
@@ -510,7 +511,7 @@ export async function initMemoryTool(deps, context = {}) {
 
     if (resetMemoryBtn) {
       resetMemoryBtn.addEventListener("click", async () => {
-        if (confirm("Are you sure you want to reset ALL memory metadata for this subject? This cannot be undone.")) {
+        if (await dialog.confirm("Are you sure you want to reset ALL memory metadata for this subject? This cannot be undone.", "Reset", "danger")) {
           await resetSubjectMemoryMetadata();
           await loadFlashcards();
           renderUI();
@@ -592,7 +593,7 @@ export async function initMemoryTool(deps, context = {}) {
         deckBuilderState.deckName = deckNameInput?.value?.trim() || "";
         deckBuilderState.deckDescription = deckDescriptionInput?.value?.trim() || "";
         if (!deckBuilderState.deckName) {
-          alert("Please enter a deck name");
+          dialog.alert("Please enter a deck name");
           return;
         }
         showDeckBuilderStep(2);
@@ -627,11 +628,11 @@ export async function initMemoryTool(deps, context = {}) {
 
     // Mass Edit button
     if (massEditBtn) {
-      massEditBtn.addEventListener("click", () => {
+      massEditBtn.addEventListener("click", async () => {
         if (deckBuilderState.isMassEditMode) {
           exitMassEditMode();
         } else {
-          if (confirm("Switch to mass edit mode? This will change the layout to show all cards with individual forms.")) {
+          if (await dialog.confirm("Switch to mass edit mode? This will change the layout to show all cards with individual forms.")) {
             enterMassEditMode();
           }
         }
@@ -640,8 +641,8 @@ export async function initMemoryTool(deps, context = {}) {
 
     // Mass Edit Cancel button
     if (massEditCancelBtn) {
-      massEditCancelBtn.addEventListener("click", () => {
-        if (confirm("Discard all changes in mass edit mode?")) {
+      massEditCancelBtn.addEventListener("click", async () => {
+        if (await dialog.confirm("Discard all changes in mass edit mode?")) {
           exitMassEditMode();
         }
       });
@@ -674,7 +675,7 @@ export async function initMemoryTool(deps, context = {}) {
         const cueFront = cueInput?.value?.trim() || "";
         const quoteBack = quoteInput?.value?.trim() || "";
         if (!cueFront || !quoteBack) {
-          alert("Please enter both front and back of the card");
+          dialog.alert("Please enter both front and back of the card");
           return;
         }
         // Get selected priority from pills
@@ -713,7 +714,7 @@ export async function initMemoryTool(deps, context = {}) {
     if (finishDeckBtn) {
       finishDeckBtn.addEventListener("click", async () => {
         if (deckBuilderState.cards.length === 0) {
-          alert("Please add at least one card to the deck");
+          dialog.alert("Please add at least one card to the deck");
           return;
         }
         await saveDeckToDB();
@@ -998,7 +999,7 @@ export async function initMemoryTool(deps, context = {}) {
           await navigateTo(state.currentIndex + 1);
         } else {
           // If at end, maybe reload or show finished
-          alert("Completed all evidence matching for this round!");
+          dialog.alert("Completed all evidence matching for this round!");
         }
         return;
       }
@@ -4420,12 +4421,12 @@ export async function initMemoryTool(deps, context = {}) {
 
   async function saveDeckToDB() {
     if (!deckBuilderState.deckName) {
-      alert("Deck name is required");
+      dialog.alert("Deck name is required");
       return;
     }
 
     if (deckBuilderState.cards.length === 0) {
-      alert("Add at least one card to the deck");
+      dialog.alert("Add at least one card to the deck");
       return;
     }
 
@@ -4506,7 +4507,7 @@ export async function initMemoryTool(deps, context = {}) {
 
       } catch (error) {
         console.error("Error saving deck:", error);
-        alert("Error saving deck: " + error.message);
+        dialog.alert("Error saving deck: " + error.message);
       }
    }
 
@@ -4811,9 +4812,9 @@ export async function initMemoryTool(deps, context = {}) {
 
     // Delete buttons
     massEditCards.querySelectorAll(".delete-card-btn").forEach(btn => {
-      btn.addEventListener("click", () => {
+      btn.addEventListener("click", async () => {
         const index = parseInt(btn.dataset.index);
-        if (confirm("Delete this card?")) {
+        if (await dialog.confirm("Delete this card?")) {
           if (deckBuilderState.massEditData[index]) {
             deckBuilderState.massEditData.splice(index, 1);
             renderMassEditCards();
@@ -4858,7 +4859,7 @@ export async function initMemoryTool(deps, context = {}) {
     exitMassEditMode();
     renderFlashcardList();
 
-    alert(`Saved ${deckBuilderState.cards.length} cards to database!`);
+    dialog.alert(`Saved ${deckBuilderState.cards.length} cards to database!`);
   }
 
   function processAnkiImport() {

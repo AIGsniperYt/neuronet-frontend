@@ -1,4 +1,5 @@
 import { createEditor, parse, render, domToMarkdown, renderMathWithKatex } from "../vendor/md-format/mdeditor.js";
+import { dialog } from "./dialog.js";
 
 export async function initAnalysisToolV2(deps, context = {}) {
   const {
@@ -1545,18 +1546,18 @@ function htmlToPlainText(html) {
     const cueContent = cueText?.value?.trim();
 
     if (!quoteId) {
-      alert("No quote selected for cue");
+      dialog.alert("No quote selected for cue");
       return;
     }
 
     if (!cueContent) {
-      alert("Please enter a cue");
+      dialog.alert("Please enter a cue");
       return;
     }
 
     const quote = state.quotes.find(q => q.id === quoteId);
     if (!quote) {
-      alert("Quote not found");
+      dialog.alert("Quote not found");
       return;
     }
 
@@ -1593,7 +1594,7 @@ function htmlToPlainText(html) {
       }
     } catch (error) {
       console.error("Failed to save cue:", error);
-      alert("Failed to save cue: " + error.message);
+      dialog.alert("Failed to save cue: " + error.message);
     }
   }
 
@@ -1603,7 +1604,7 @@ function htmlToPlainText(html) {
 
     if (!cueId) return;
 
-    const confirmed = window.confirm("Delete this cue? This action cannot be undone.");
+    const confirmed = await dialog.confirm("Delete this cue? This action cannot be undone.", "Delete", "danger");
     if (!confirmed) return;
 
     try {
@@ -1627,7 +1628,7 @@ function htmlToPlainText(html) {
       }
     } catch (error) {
       console.error("Failed to delete cue:", error);
-      alert("Failed to delete cue: " + error.message);
+      dialog.alert("Failed to delete cue: " + error.message);
     }
   }
 
@@ -2660,7 +2661,7 @@ const updateLayerSelection = () => {
   }
 
   async function renameSubject(subjectName) {
-    const updated = window.prompt(`Rename subject "${subjectName}" to:`, subjectName);
+    const updated = await dialog.prompt(`Rename subject "${subjectName}" to:`, subjectName);
     const next = (updated || "").trim();
     if (!next || next === subjectName) return;
 
@@ -2708,7 +2709,7 @@ const updateLayerSelection = () => {
   }
 
   async function deleteSubject(subjectName) {
-    const typed = window.prompt(`Type "${subjectName}" to confirm deletion.`);
+    const typed = await dialog.prompt(`Type "${subjectName}" to confirm deletion.`);
     if (typed !== subjectName) return;
 
     const related = state.nodes.filter((node) => {
@@ -2874,7 +2875,7 @@ const updateLayerSelection = () => {
       if (!source) return;
 
       const linked = state.analysisNodes.filter((node) => analysisTouchesSource(node, source.id));
-      const approved = window.confirm(`Delete "${source.title}" and ${linked.length} linked analysis node(s)?`);
+      const approved = await dialog.confirm(`Delete "${source.title}" and ${linked.length} linked analysis node(s)?`, "Delete", "danger");
       if (!approved) return;
 
       for (const node of linked) {
@@ -3101,7 +3102,7 @@ if (saveSourceBtn) {
       const tags = parseTags(analysisTagsInput?.value || "");
 
       if (!analysis) {
-        alert("Please enter analysis commentary.");
+        dialog.alert("Please enter analysis commentary.");
         return;
       }
 
@@ -3480,7 +3481,7 @@ if (saveSourceBtn) {
             }, 2000);
           }
         }).catch(() => {
-          alert("Failed to copy quote to clipboard");
+          dialog.alert("Failed to copy quote to clipboard");
         });
         return;
       }

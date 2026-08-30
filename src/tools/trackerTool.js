@@ -1,4 +1,5 @@
 import { transformRows } from "./trackerImport.js";
+import { dialog } from "./dialog.js";
 
 export function initTrackerTool(deps, context = {}) {
   const { getAllNodes, addNode, addNodes, deleteNode, getSubjects, escapeHtml } = deps;
@@ -14,10 +15,12 @@ export function initTrackerTool(deps, context = {}) {
     papers: $("trackerPapers"),
     stats: $("trackerStats"),
 
-    filter: $("trackerFilter"),
+    scope: $("trackerScope"),
     subjectList: $("trackerSubjectList"),
     resultCount: $("trackerResultCount"),
     addBtn: $("trackerAddBtn"),
+    dropBtn: $("trackerDropBtn"),
+    collapseBtn: $("trackerCollapseBtn"),
     paperGroups: $("trackerPaperGroups"),
 
     statsGrid: $("trackerStatsGrid"),
@@ -46,8 +49,10 @@ export function initTrackerTool(deps, context = {}) {
   let allSubjects = [];
   let subjectNodes = [];
   let boardsBySubject = {}; // subject -> examBoard (from subject nodes)
+  let focusedSubject = context.subject || null;
   let editingId = null;
   let slotSeq = 0;
+  const expandedNotes = new Set();
 
   function nowISO() { return new Date().toISOString(); }
   function pct(score, max) {
@@ -114,7 +119,10 @@ export function initTrackerTool(deps, context = {}) {
   }
 
   async function removePaper(paper) {
-    if (!confirm(`Delete "${paper.subject}" ${paper.year}${paper.series ? " (" + paper.series + ")" : ""}?`)) return;
+    const label = `${paper.subject} ${paper.year ?? ""}${paper.series ? " (" + paper.series + ")" : ""}`.trim();
+    const confirmed = await dialog.confirm(`Delete this sitting?\n\n${label}`, "Delete", "danger");
+    if (!confirmed) return;
+    if (!paper.id) paper.id = `paper-${crypto.randomUUID()}`;
     await deleteNode(paper.id);
     await loadPapers();
     renderPapers();
@@ -193,11 +201,10 @@ export function initTrackerTool(deps, context = {}) {
     el.subjectList.innerHTML = Array.from(seen).map((s) => `<option value="${escapeHtml(s)}">`).join("");
   }
 
-  function currentFilter() { return (el.filter.value || "").trim().toLowerCase(); }
-
-  function sittingSlotKeys(s) {
-    const seen = new Set(s.results.map((r) => r.paper).filter(Boolean));
-    return Array.from(seen);
+  function sittingAverage(sitting) {
+    const scored = (sitting.results || []).map((r) => bestAttemptPct(r)).filter((p) => p !== null);
+    if (scored.length === 0) return null;
+    return Math.round(scored.reduce((m, p) => m + p, 0) / scored.length);
   }
 
   function latestAttempt(result) {
@@ -210,6 +217,19 @@ export function initTrackerTool(deps, context = {}) {
     return Number.isFinite(n) ? n : null;
   }
 
+  function bestAttemptPct(result) {
+    const list = (result.attempts && result.attempts.length ? result.attempts : [result]);
+    let best = null;
+    for (const a of list) {
+      const score = numberEq(a.score);
+      const max = numberEq(a.maxMarks);
+      if (score === null || max === null || max <= 0) continue;
+      const p = pct(score, max);
+      if (best === null || p > best) best = p;
+    }
+    return best;
+  }
+
   function compareSorted(a, b) {
     const yb = (numberEq(b.year) || 0) - (numberEq(a.year) || 0);
     if (yb !== 0) return yb;
@@ -219,60 +239,101 @@ export function initTrackerTool(deps, context = {}) {
     return 0;
   }
 
+  function visiblePapers() {
+    return focusedSubject
+      ? papers.filter((p) => (p.subject || "Unassigned") === focusedSubject)
+      : papers;
+  }
+
+  function setAllNotes(open) {
+    const visible = visiblePapers();
+    for (const s of visible) {
+      if (!s.notes) continue;
+      if (open) expandedNotes.add(s.id);
+      else expandedNotes.delete(s.id);
+    }
+    renderPapers();
+  }
+
   function renderPapers() {
     refreshSubjectDatalist();
 
-    const filter = currentFilter();
-    const visible = papers.filter((p) => !filter || (p.subject || "").toLowerCase().includes(filter));
+    const showAll = !focusedSubject;
+    const visible = visiblePapers();
 
     el.resultCount.textContent = `${visible.length} sitting${visible.length === 1 ? "" : "s"}`;
+
+    const anyNotes = visible.some((s) => !!s.notes);
+    el.dropBtn.disabled = !anyNotes;
+    el.collapseBtn.disabled = !anyNotes;
+
+    if (showAll) {
+      el.scope.innerHTML = `Scope: <b>All subjects</b>`;
+    } else {
+      const q = qualFor(focusedSubject);
+      const b = boardFor(focusedSubject);
+      el.scope.innerHTML = `Scope: <b>${escapeHtml(focusedSubject)}</b>` +
+        (q ? ` <span class="tracker-sitting-badge">${escapeHtml(q)}</span>` : "") +
+        (b ? ` <span class="tracker-sitting-badge">${escapeHtml(b)}</span>` : "");
+    }
 
     el.paperGroups.innerHTML = "";
     if (visible.length === 0) {
       el.paperGroups.innerHTML =
-        '<div class="tracker-empty">No past papers tracked yet.' +
+        '<div class="tracker-empty">' + (showAll ? "No past papers tracked yet." : `No past papers for <b>${escapeHtml(focusedSubject)}</b> yet.`) +
         '<br><button id="trackerEmptyAddBtn" class="tracker-btn primary">Add a sitting</button></div>';
       const b = $("trackerEmptyAddBtn");
       if (b) b.addEventListener("click", () => openModal(null));
       return;
     }
 
-    const bySubject = {};
-    for (const p of visible) {
-      const s = p.subject || "Unassigned";
-      (bySubject[s] = bySubject[s] || []).push(p);
-    }
+    const sorted = visible.slice().sort(compareSorted);
 
-    for (const subject of Object.keys(bySubject).sort()) {
-      const set = bySubject[subject];
-      const board = boardFor(subject);
-      const q = qualFor(subject);
-      const section = document.createElement("section");
-      section.className = "tracker-subject-group";
-      section.innerHTML =
-        `<h3>${escapeHtml(subject)} ${q ? `<span class="tracker-sitting-badge">${escapeHtml(q)}</span>` : ""} <span class="count">${set.length}</span>` +
-        `<span class="board-edit" data-board-edit="${escapeHtml(subject)}">` +
-        (board ? `${escapeHtml(board)} &#9998;` : "+ Board") +
-        `</span></h3>`;
+    const table = document.createElement("table");
+    table.className = "sit-table";
+    const thead = document.createElement("thead");
+    thead.innerHTML =
+      `<tr>` +
+      (showAll ? `<th class="col-subject">Subject</th>` : "") +
+      `<th class="col-session">Sitting</th>` +
+      `<th class="col-papers">Papers</th>` +
+      `<th class="col-boundary">Boundary</th>` +
+      `<th class="col-avg">Avg</th>` +
+      `<th class="col-actions"></th>` +
+      `</tr>`;
+    table.appendChild(thead);
 
-      const boardEditBtn = section.querySelector(".board-edit");
-      boardEditBtn.addEventListener("click", () => promptBoard(subject));
-
-      for (const sitting of set.slice().sort(compareSorted)) {
-        section.appendChild(renderSittingCard(sitting));
+    const tbody = document.createElement("tbody");
+    const openNow = new Set(expandedNotes);
+    for (const sitting of sorted) {
+      const hasNote = !!sitting.notes;
+      const row = renderMainRow(sitting, showAll, hasNote && openNow.has(sitting.id));
+      tbody.appendChild(row.main);
+      if (hasNote) {
+        row.note.hidden = !openNow.has(sitting.id);
+        tbody.appendChild(row.note);
       }
-      el.paperGroups.appendChild(section);
     }
+    table.appendChild(tbody);
+    el.paperGroups.appendChild(table);
+  }
+
+  function shortSeries(s) {
+    if (!s) return "";
+    const m = { june: "J", jun: "J", summer: "S", november: "N", nov: "N", autumn: "A", winter: "W", march: "M" };
+    const k = String(s).toLowerCase();
+    return m[k] ? m[k] : String(s);
   }
 
   function sessionTitle(sitting) {
     if (sitting.year == null || sitting.year === "") {
-      if (sitting.series) return escapeHtml(sitting.series);
+      if (sitting.series) return escapeHtml(shortSeries(sitting.series));
       if (sitting.label) return escapeHtml(String(sitting.label));
       return "Unstated";
     }
     let t = String(sitting.year);
-    if (sitting.series) t += " <span class=\"series\">(" + escapeHtml(sitting.series) + ")</span>";
+    const ser = shortSeries(sitting.series);
+    if (ser) t += " <span class=\"series\">(" + escapeHtml(ser) + ")</span>";
     return t;
   }
 
@@ -289,20 +350,6 @@ export function initTrackerTool(deps, context = {}) {
     }).filter(Boolean);
     if (parts.length === 0) return `<span class="tracker-sitting-badge">no scores</span>`;
     return `<span class="head-scores">${parts.join("")}</span>`;
-  }
-
-  function slotScoreLine(result) {
-    const at = latestAttempt(result);
-    const score = numberEq(at.score);
-    const max = numberEq(at.maxMarks);
-    const p = pct(score, max);
-    const cls = p !== null && isLow(p) ? " low" : "";
-    let out = `<span class="score${cls}">${score != null ? escapeHtml(String(score)) : "?"} / ${max != null ? escapeHtml(String(max)) : "?"}</span>`;
-    if (p !== null) out += ` <span>(${p}%)</span>`;
-    if (result.attempts && result.attempts.length > 1) {
-      out += ` <span class="attempts" title="Retakes">&#8645; ${result.attempts.length} attempts</span>`;
-    }
-    return out;
   }
 
   function highestGradeLabel(subject) {
@@ -332,9 +379,9 @@ export function initTrackerTool(deps, context = {}) {
 
     let answer = null;
     if (missing.length === 1) {
-      answer = window.prompt(`Is ${missing[0]} GCSE or A-Level?`, "GCSE");
+      answer = await dialog.prompt(`Is ${missing[0]} GCSE or A-Level?`, "GCSE");
     } else {
-      answer = window.prompt(`What level are these subjects: ${missing.join(", ")}?\n(GCSE or A-Level - stored per subject, editable later)`, "GCSE");
+      answer = await dialog.prompt(`What level are these subjects: ${missing.join(", ")}?\n(GCSE or A-Level - stored per subject, editable later)`, "GCSE");
     }
     if (answer === null) return; // user declined
     const qual = (answer || "").trim();
@@ -347,61 +394,70 @@ export function initTrackerTool(deps, context = {}) {
     await loadSubjects();
   }
 
-  function renderSittingCard(sitting) {
-    const card = document.createElement("div");
-    card.className = "tracker-sitting open"; // open by default so scores are visible at a glance
-    card.dataset.id = sitting.id || "";
-    card.dataset.subject = sitting.subject || "";
-
-    const slots = sittingSlotKeys(sitting);
+  function renderMainRow(sitting, showSubject, noteOpen) {
     const boundary = numberEq(sitting.gradeBoundary);
+    const boundaryEl = boundary !== null
+      ? `<span class="tracker-sitting-badge bnd">${escapeHtml(highestGradeLabel(sitting.subject))} &ge; ${boundary}</span>`
+      : `<span class="tracker-sitting-badge">&ndash;</span>`;
 
-    let headMeta = "";
-    if (boundary !== null) headMeta += `<span class="tracker-sitting-badge bnd">${escapeHtml(highestGradeLabel(sitting.subject))} &ge; ${boundary}</span>`;
+    const avg = sittingAverage(sitting);
+    const avgEl = avg !== null
+      ? `<span style="color:${avg < 60 ? "#ff8c8c" : "var(--accent)"};font-weight:700;">${avg}%</span>`
+      : `<span class="tracker-sitting-badge">&ndash;</span>`;
 
-    const head = document.createElement("div");
-    head.className = "tracker-sitting-head";
-    head.innerHTML =
-      `<span class="tracker-sitting-chev">&#9660;</span>` +
-      `<span class="tracker-sitting-title">${sessionTitle(sitting)}</span>` +
-      scoreSummary(sitting) +
-      headMeta +
-      (sitting.notes ? `<span class="tracker-sitting-badge" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(sitting.notes)}">${escapeHtml(sitting.notes)}</span>` : "");
-    head.addEventListener("click", () => {
-      card.classList.toggle("open");
-      const chev = card.querySelector(".tracker-sitting-chev");
-      if (chev) chev.innerHTML = card.classList.contains("open") ? "&#9660;" : "&#9656;";
-    });
+    const tr = document.createElement("tr");
+    tr.className = "row-main";
 
-    const body = document.createElement("div");
-    body.className = "tracker-sitting-body";
-
-    for (const key of slots) {
-      const result = (sitting.results || []).find((r) => r.paper === key) || {};
-      body.appendChild(renderSlotRow(key, result));
+    const cells = [];
+    if (showSubject) {
+      cells.push(td(`<span class="sit-subject">${escapeHtml(sitting.subject || "Unassigned")}</span>`, "col-subject"));
     }
+    cells.push(td(`<span class="sit-session">${sessionTitle(sitting)}</span>`, "col-session"));
+    cells.push(td(`<div class="sit-papers">${scoreSummary(sitting)}</div>`, "col-papers"));
+    cells.push(td(boundaryEl, "col-boundary"));
+    cells.push(td(avgEl, "col-avg"));
 
-    const actions = document.createElement("div");
-    actions.className = "tracker-sitting-actions";
-    actions.innerHTML =
-      `<button class="tracker-btn" data-act="edit">Edit</button>` +
-      `<button class="tracker-btn danger" data-act="del">Delete</button>`;
-    actions.querySelector('[data-act="edit"]').addEventListener("click", () => openModal(sitting));
-    actions.querySelector('[data-act="del"]').addEventListener("click", () => removePaper(sitting));
-    body.appendChild(actions);
+    const hasNote = !!sitting.notes;
+    const actionsCell = document.createElement("td");
+    actionsCell.className = "col-actions";
+    actionsCell.innerHTML =
+      (hasNote ? `<button class="row-btn note-toggle ${noteOpen ? "open" : ""}" data-act="note" title="${noteOpen ? "Collapse" : "Expand"} note">\u2139</button>` : "") +
+      `<button class="row-btn" data-act="edit" title="Edit">&#9998;</button>` +
+      `<button class="row-btn danger" data-act="del" title="Delete">&#10005;</button>`;
+    if (hasNote) {
+      actionsCell.querySelector('[data-act="note"]').addEventListener("click", () => toggleNote(sitting));
+    }
+    actionsCell.querySelector('[data-act="edit"]').addEventListener("click", () => openModal(sitting));
+    actionsCell.querySelector('[data-act="del"]').addEventListener("click", () => removePaper(sitting));
+    cells.push(actionsCell);
 
-    card.appendChild(head);
-    card.appendChild(body);
-    return card;
+    for (const c of cells) tr.appendChild(c);
+
+    let note = null;
+    if (hasNote) {
+      note = document.createElement("tr");
+      note.className = "note-row";
+      const ntd = document.createElement("td");
+      ntd.colSpan = cells.length;
+      ntd.innerHTML = `<div class="note-inner"></div>`;
+      ntd.firstChild.textContent = sitting.notes;
+      note.appendChild(ntd);
+    }
+    return { main: tr, note };
   }
 
-  function renderSlotRow(key, result) {
-    const row = document.createElement("div");
-    row.className = "tracker-result-slot";
-    row.innerHTML =
-      `<span class="paper-name">${escapeHtml(key)}</span>${slotScoreLine(result)}` +
-      (result.date ? `<span class="attempts">${escapeHtml(result.date)}</span>` : "");
-    return row;
+  function td(html, cls) {
+    const c = document.createElement("td");
+    if (cls) c.className = cls;
+    c.innerHTML = html;
+    return c;
+  }
+
+  function toggleNote(sitting) {
+    const id = sitting.id;
+    if (expandedNotes.has(id)) expandedNotes.delete(id);
+    else expandedNotes.add(id);
+    renderPapers();
   }
 
   // ---- modal (add / edit a sitting) ----
@@ -578,6 +634,7 @@ export function initTrackerTool(deps, context = {}) {
     });
     closeModal();
     renderPapers();
+    if (window.__neuronetRefreshSubjects) window.__neuronetRefreshSubjects();
   }
 
   // ---- stats ----
@@ -627,11 +684,11 @@ export function initTrackerTool(deps, context = {}) {
   }
 
   // ---- prompt for board (per subject) ----
-  function promptBoard(subject) {
+  async function promptBoard(subject) {
     const current = boardFor(subject);
-    const val = window.prompt(`Exam board for ${subject}:`, current || "");
+    const val = await dialog.prompt(`Exam board for ${subject}:`, current || "");
     if (val === null) return;
-    setSubjectBoard(subject, val);
+    await setSubjectBoard(subject, val);
   }
 
   // ---- export / import ----
@@ -692,6 +749,7 @@ export function initTrackerTool(deps, context = {}) {
       await ensureQualifications();
       flash(`Imported ${toAdd.length} sitting${toAdd.length === 1 ? "" : "s"} across ${subjects.length} subjects. Set each subject's exam board once.`, true);
       renderPapers();
+      if (window.__neuronetRefreshSubjects) window.__neuronetRefreshSubjects();
       return;
     }
 
@@ -749,6 +807,7 @@ export function initTrackerTool(deps, context = {}) {
     await ensureQualifications();
     flash(`Imported ${toAdd.length} sitting${toAdd.length === 1 ? "" : "s"}.`, true);
     renderPapers();
+    if (window.__neuronetRefreshSubjects) window.__neuronetRefreshSubjects();
   }
 
   async function setSubjectMeta(name, meta) {
@@ -786,11 +845,12 @@ export function initTrackerTool(deps, context = {}) {
     el.papersBtn.addEventListener("click", () => showView("papers"));
     el.statsBtn.addEventListener("click", () => showView("stats"));
     el.addBtn.addEventListener("click", () => openModal(null));
+    el.dropBtn.addEventListener("click", () => setAllNotes(true));
+    el.collapseBtn.addEventListener("click", () => setAllNotes(false));
     el.saveBtn.addEventListener("click", save);
     el.cancelBtn.addEventListener("click", () => closeModal());
     el.modalClose.addEventListener("click", () => closeModal());
     el.modalOverlay.addEventListener("click", () => closeModal());
-    el.filter.addEventListener("input", () => renderPapers());
     el.addSlotBtn.addEventListener("click", () => addSlotRow(null));
     el.exportBtn.addEventListener("click", exportData);
     el.importBtn.addEventListener("click", () => el.importFile.click());
