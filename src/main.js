@@ -1085,6 +1085,9 @@ async function renderSidebarSubjects() {
 }
 
 async function selectSidebarSubject(subject) {
+  if (typeof window.closeSubjectDrawer === "function") {
+    window.closeSubjectDrawer();
+  }
   const next = subject || null;
   const subjectChanged = next !== currentSubject;
   currentSubject = next;
@@ -1336,6 +1339,31 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   document.addEventListener("click", () => {
     if (dropdown) dropdown.style.display = "none";
+  });
+
+  // Mobile navigation drawer: hamburger opens, backdrop / selection closes.
+  const hamburger = document.getElementById("sidebarHamburger");
+  const mobileNavPanel = document.getElementById("mobileNavPanel");
+  const subjectBackdrop = document.getElementById("sidebarSubjectBackdrop");
+  window.closeSubjectDrawer = closeSubjectDrawer;
+  function closeSubjectDrawer() {
+    mobileNavPanel?.classList.remove("open");
+    subjectBackdrop?.classList.remove("show");
+    hamburger?.setAttribute("aria-expanded", "false");
+  }
+  function openSubjectDrawer() {
+    mobileNavPanel?.classList.add("open");
+    subjectBackdrop?.classList.add("show");
+    hamburger?.setAttribute("aria-expanded", "true");
+  }
+  hamburger?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = mobileNavPanel?.classList.contains("open");
+    open ? closeSubjectDrawer() : openSubjectDrawer();
+  });
+  subjectBackdrop?.addEventListener("click", closeSubjectDrawer);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeSubjectDrawer();
   });
 
   // Keep the sidebar subject pills (and launchpad subjects) in sync with any
