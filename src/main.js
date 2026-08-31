@@ -1001,6 +1001,8 @@ async function renderPinnedToolsSidebar() {
   if (!container) return;
 
   const pinnedTools = await getPinnedTools();
+  const toolCount = document.getElementById("sidebarToolCount");
+  if (toolCount) toolCount.textContent = String(pinnedTools.length);
 
   container.innerHTML = pinnedTools.map((pinned, index) => {
     const def = toolDefinitions[pinned.toolId];
@@ -1008,7 +1010,10 @@ async function renderPinnedToolsSidebar() {
     const isActive = currentToolName === pinned.toolId ? "active" : "";
     return `
       <div class="tool-btn-wrapper entering ${isActive}" data-tool="${pinned.toolId}">
-        <button class="tool-btn" data-tool="${pinned.toolId}">${def.icon} ${def.name}</button>
+        <button class="tool-btn" data-tool="${pinned.toolId}" aria-label="Open ${escapeHtml(def.name)}" title="${escapeHtml(def.name)}" ${isActive ? 'aria-current="page"' : ''}>
+          <span class="tool-icon" aria-hidden="true">${escapeHtml(def.icon)}</span>
+          <span class="tool-label">${escapeHtml(def.name)}</span>
+        </button>
         <div class="tool-actions-menu">
           <button class="tool-action-btn pin" data-action="unpin" data-tool="${pinned.toolId}" title="Unpin">Unpin</button>
         </div>
@@ -1067,21 +1072,48 @@ async function renderPinnedToolsSidebar() {
 
 async function renderSidebarSubjects() {
   const listEl = document.getElementById("sidebarSubjectList");
+  const quickListEl = document.getElementById("sidebarQuickSubjectList");
   const allBtn = document.getElementById("sidebarSubjectAll");
-  if (!listEl || !allBtn) return;
+  if (!allBtn) return;
 
   const subjects = await getSubjects();
+  const subjectCount = document.getElementById("sidebarSubjectCount");
+  // “All” is a filter, not a subject, so keep the header count aligned with
+  // the actual subject entries shown below it.
+  if (subjectCount) subjectCount.textContent = String(subjects.length);
   const norm = (s) => String(s || "").trim().toLowerCase();
 
   allBtn.classList.toggle("active", !currentSubject);
+  allBtn.setAttribute("aria-current", !currentSubject ? "page" : "false");
 
-  listEl.innerHTML = subjects.map(subject => `
+  const subjectButtons = subjects.map(subject => `
     <button type="button" class="subject-pill ${norm(subject) === norm(currentSubject) ? "active" : ""}"
             data-subject="${escapeHtml(subject)}">${escapeHtml(subject)}</button>
   `).join("");
+  if (listEl) listEl.innerHTML = subjectButtons;
+  if (quickListEl) {
+    quickListEl.innerHTML = `
+      <button type="button" role="menuitem" class="quick-subject-item ${!currentSubject ? "active" : ""}" data-subject="">
+        <span class="quick-subject-dot"></span><span>All subjects</span>
+      </button>
+      ${subjects.map(subject => `
+        <button type="button" role="menuitem" class="quick-subject-item ${norm(subject) === norm(currentSubject) ? "active" : ""}" data-subject="${escapeHtml(subject)}">
+          <span class="quick-subject-dot"></span><span>${escapeHtml(subject)}</span>
+        </button>
+      `).join("")}
+    `;
+  }
 
-  listEl.querySelectorAll(".subject-pill").forEach(btn => {
-    btn.addEventListener("click", () => selectSidebarSubject(btn.dataset.subject));
+  listEl?.querySelectorAll(".subject-pill").forEach(btn => {
+      btn.setAttribute("aria-current", btn.classList.contains("active") ? "page" : "false");
+      btn.addEventListener("click", () => selectSidebarSubject(btn.dataset.subject));
+  });
+  quickListEl?.querySelectorAll(".quick-subject-item").forEach(btn => {
+    btn.addEventListener("click", () => {
+      selectSidebarSubject(btn.dataset.subject);
+      document.getElementById("sidebarQuickSubjectsMenu")?.classList.remove("open");
+      document.getElementById("sidebarQuickSubjects")?.setAttribute("aria-expanded", "false");
+    });
   });
 }
 
@@ -1330,36 +1362,77 @@ document.addEventListener("DOMContentLoaded", async () => {
   const importDemoBtn = document.getElementById("importDemoBtn");
   const deleteDataBtn = document.getElementById("deleteDataBtn");
 
+  const setProfileDropdown = (open) => {
+    if (!dropdown) return;
+    dropdown.style.display = open ? "block" : "none";
+    dropdown.classList.toggle("profile-menu-open", open);
+  };
+
   if (profileElem) {
     profileElem.addEventListener("click", (e) => {
       e.stopPropagation();
-      dropdown.style.display =
-        dropdown.style.display === "block" ? "none" : "block";
+      setProfileDropdown(dropdown.style.display !== "block");
     });
   }
 
   document.addEventListener("click", () => {
-    if (dropdown) dropdown.style.display = "none";
+    setProfileDropdown(false);
+    document.getElementById("sidebarQuickSubjectsMenu")?.classList.remove("open");
+    document.getElementById("sidebarQuickSubjects")?.setAttribute("aria-expanded", "false");
   });
 
   // Mobile navigation drawer: hamburger opens, backdrop / selection closes.
   const hamburger = document.getElementById("sidebarHamburger");
+  const collapseBtn = document.getElementById("sidebarCollapseBtn");
+  const quickSubjectsBtn = document.getElementById("sidebarQuickSubjects");
+  const quickSubjectsMenu = document.getElementById("sidebarQuickSubjectsMenu");
+  const mobileNavClose = document.getElementById("mobileNavClose");
   const mobileNavPanel = document.getElementById("mobileNavPanel");
   const subjectBackdrop = document.getElementById("sidebarSubjectBackdrop");
   const mobileSubjectsToggle = document.getElementById("mobileSubjectsToggle");
   const mobileToolsToggle = document.getElementById("mobileToolsToggle");
   const mobileSubjectsSection = document.getElementById("mobileSubjectsSection");
   const mobileToolsSection = document.getElementById("mobileToolsSection");
+
+  const desktopSidebarQuery = window.matchMedia("(min-width: 701px)");
+  function setSidebarCollapsed(collapsed) {
+    if (!desktopSidebarQuery.matches || !sidebarEl) return;
+    sidebarEl.classList.toggle("collapsed", collapsed);
+    collapseBtn?.setAttribute("aria-expanded", String(!collapsed));
+    collapseBtn?.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
+    collapseBtn?.setAttribute("title", collapsed ? "Expand sidebar" : "Collapse sidebar");
+    if (collapseBtn) collapseBtn.innerHTML = `<span aria-hidden="true">${collapsed ? "›" : "‹"}</span>`;
+    quickSubjectsMenu?.classList.remove("open");
+    quickSubjectsBtn?.setAttribute("aria-expanded", "false");
+    localStorage.setItem("nn-sidebar-collapsed", collapsed ? "1" : "0");
+  }
+  const savedSidebarState = localStorage.getItem("nn-sidebar-collapsed") === "1";
+  if (desktopSidebarQuery.matches) setSidebarCollapsed(savedSidebarState);
+  collapseBtn?.addEventListener("click", () => setSidebarCollapsed(!sidebarEl.classList.contains("collapsed")));
+  quickSubjectsBtn?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const open = quickSubjectsMenu?.classList.toggle("open") || false;
+    quickSubjectsBtn.setAttribute("aria-expanded", String(open));
+  });
+  quickSubjectsMenu?.addEventListener("click", (event) => event.stopPropagation());
+  desktopSidebarQuery.addEventListener?.("change", (event) => {
+    if (!event.matches) sidebarEl?.classList.remove("collapsed");
+    else setSidebarCollapsed(localStorage.getItem("nn-sidebar-collapsed") === "1");
+  });
   window.closeSubjectDrawer = closeSubjectDrawer;
   function closeSubjectDrawer() {
     mobileNavPanel?.classList.remove("open");
     subjectBackdrop?.classList.remove("show");
     hamburger?.setAttribute("aria-expanded", "false");
+    mobileNavPanel?.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("nav-drawer-open");
   }
   function openSubjectDrawer() {
     mobileNavPanel?.classList.add("open");
     subjectBackdrop?.classList.add("show");
     hamburger?.setAttribute("aria-expanded", "true");
+    mobileNavPanel?.setAttribute("aria-hidden", "false");
+    document.body.classList.add("nav-drawer-open");
   }
   hamburger?.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -1367,6 +1440,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     open ? closeSubjectDrawer() : openSubjectDrawer();
   });
   subjectBackdrop?.addEventListener("click", closeSubjectDrawer);
+  mobileNavClose?.addEventListener("click", closeSubjectDrawer);
   function setMobileNavSection(section, toggle, open) {
     if (!section || !toggle) return;
     section.classList.toggle("mobile-section-open", open);
@@ -1377,16 +1451,22 @@ document.addEventListener("DOMContentLoaded", async () => {
     const section = isSubjects ? mobileSubjectsSection : mobileToolsSection;
     const toggle = isSubjects ? mobileSubjectsToggle : mobileToolsToggle;
     const open = toggle?.getAttribute("aria-expanded") !== "true";
-    setMobileNavSection(mobileSubjectsSection, mobileSubjectsToggle, isSubjects && open);
-    setMobileNavSection(mobileToolsSection, mobileToolsToggle, !isSubjects && open);
+    setMobileNavSection(section, toggle, open);
   }
   mobileSubjectsToggle?.addEventListener("click", () => toggleMobileNavSection("subjects"));
   mobileToolsToggle?.addEventListener("click", () => toggleMobileNavSection("tools"));
-  if (window.matchMedia("(max-width: 700px), (pointer: coarse) and (hover: none)").matches) {
+  if (window.matchMedia("(max-width: 700px)").matches) {
+    closeSubjectDrawer();
     setMobileNavSection(mobileToolsSection, mobileToolsToggle, false);
+  } else {
+    mobileNavPanel?.removeAttribute("aria-hidden");
   }
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeSubjectDrawer();
+    if (e.key === "Escape") {
+      closeSubjectDrawer();
+      quickSubjectsMenu?.classList.remove("open");
+      quickSubjectsBtn?.setAttribute("aria-expanded", "false");
+    }
   });
 
   // Keep the sidebar subject pills (and launchpad subjects) in sync with any
@@ -1453,7 +1533,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       window.currentUser = null;
       setProfileUI(null);
-      if (dropdown) dropdown.style.display = "none";
+      setProfileDropdown(false);
     });
   }
 
@@ -1461,7 +1541,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     exportJsonBtn.addEventListener("click", async (e) => {
       e.stopPropagation();
       await exportDatabaseJson();
-      if (dropdown) dropdown.style.display = "none";
+      setProfileDropdown(false);
     });
   }
 
@@ -1482,7 +1562,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       try {
         await importDatabaseJson(file);
-        if (dropdown) dropdown.style.display = "none";
+        setProfileDropdown(false);
       } catch (error) {
         console.error("Import failed", error);
         dialog.alert("Import failed. Please check the JSON file format.");
@@ -1495,7 +1575,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (importDemoBtn) {
     importDemoBtn.addEventListener("click", async (e) => {
       e.stopPropagation();
-      if (dropdown) dropdown.style.display = "none";
+      setProfileDropdown(false);
       await importDemoData();
     });
   }
@@ -1503,7 +1583,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (deleteDataBtn) {
     deleteDataBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (dropdown) dropdown.style.display = "none";
+      setProfileDropdown(false);
       deleteAllData();
     });
   }
@@ -1528,7 +1608,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           action: {
             label: "Open",
             onClick: () => {
-              if (dropdown) dropdown.style.display = "block";
+              setProfileDropdown(true);
             }
           }
         });

@@ -212,6 +212,7 @@ canvas { position: fixed; inset:0; z-index:-1; }
 
 #sidebar {
   position: relative;
+  z-index: 1000;
   width: 240px;
   background: var(--glass-surface);
   backdrop-filter: blur(var(--glass-blur));
@@ -382,6 +383,7 @@ canvas { position: fixed; inset:0; z-index:-1; }
   flex: 1;
   padding: 0;
   backdrop-filter: blur(var(--backdrop-blur));
+  -webkit-backdrop-filter: blur(var(--backdrop-blur));
   display: flex;
   position: relative;
   min-width: 0;
@@ -577,13 +579,23 @@ canvas { position: fixed; inset:0; z-index:-1; }
   border-radius: 18px;
   overflow: hidden;
   min-width: 200px;
-  z-index: 150;
+  z-index: 9999;
   box-shadow:
     0 18px 50px rgba(0,0,0,0.55),
     0 4px 16px rgba(0,0,0,0.35),
     inset 0 1px 0 rgba(255,255,255,0.12),
     inset 0 0 0 0.5px rgba(255,255,255,0.04);
   padding: 6px;
+}
+
+#dropdown.profile-menu-open {
+  animation: profileDropdownIn 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transform-origin: bottom left;
+}
+
+@keyframes profileDropdownIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 #dropdown > button {
@@ -1172,7 +1184,8 @@ canvas { position: fixed; inset:0; z-index:-1; }
   #sidebar { width: 212px; }
 }
 
-@media (max-width: 700px), (pointer: coarse) and (hover: none) {
+@media (max-width: 700px) {
+  body.nav-drawer-open { overflow: hidden; }
   #app {
     flex-direction: column;
     width: 100%;
@@ -1262,7 +1275,7 @@ canvas { position: fixed; inset:0; z-index:-1; }
     text-transform: uppercase;
     margin-bottom: 8px;
   }
-  .mobile-nav-section-toggle::after {
+.mobile-nav-section-toggle::after {
     content: "▾";
     flex: 0 0 auto;
     margin-left: 12px;
@@ -1363,6 +1376,15 @@ canvas { position: fixed; inset:0; z-index:-1; }
   .nn-toast { font-size: 0.85rem; padding: 11px 14px; }
 }
 
+/* Keep the count visually attached to the chevron instead of distributing it
+   across the full width of the section button. */
+.mobile-nav-section-toggle > .section-count {
+  margin-left: auto;
+}
+.mobile-nav-section-toggle::after {
+  margin-left: 3px;
+}
+
 /* Narrow phones: preserve readable controls and avoid horizontal clipping. */
 @media (max-width: 420px) {
   #sidebar { padding-inline: 10px; gap: 8px; }
@@ -1405,6 +1427,324 @@ canvas { position: fixed; inset:0; z-index:-1; }
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Keep the launchpad subject tools in one compact control row on phones.
+   The previous mobile wrap made the heading and controls look like a broken
+   second header row, especially at narrow widths. */
+@media (max-width: 700px) {
+  .subjects-section .section-header {
+    align-items: center;
+    flex-direction: row;
+    gap: 6px;
+    min-width: 0;
+  }
+  .subjects-section .kicker {
+    flex: 0 0 auto;
+    font-size: 0.85rem;
+  }
+  .subjects-section .subject-controls {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto;
+    margin-left: 0;
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
+  .subjects-section .subject-controls .inline-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto;
+    padding-inline: 7px;
+  }
+  .subjects-section .subject-controls .btn {
+    flex: 0 0 auto;
+    min-width: 0;
+    padding-inline: 9px;
+  }
+  .subjects-section #addSubjectBtn {
+    width: 34px;
+    padding-inline: 0;
+  }
+}
+
+/* Sidebar refinement: calmer hierarchy, stronger hit targets, and a consistent
+   width-based responsive model (touch capability should not change layout). */
+#sidebar {
+  width: 264px;
+  padding: 18px 14px 16px;
+  background: linear-gradient(180deg, rgba(14, 39, 29, 0.88), rgba(8, 25, 18, 0.86));
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-right: 1px solid rgba(162, 255, 220, 0.12);
+  box-shadow: 16px 0 36px rgba(0, 0, 0, 0.12);
+  gap: 16px;
+}
+
+#sidebarBrand {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 10px 18px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+#sidebar h2 { margin: 0; padding: 0; font-size: 1.55rem; letter-spacing: -0.02em; }
+.sidebar-status,
+.sidebar-eyebrow {
+  color: rgba(230,255,245,0.45);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.nav-eyebrow { display: block; margin: 4px 10px -8px; }
+.mobile-nav-header { display: none; }
+.mobile-nav-section-toggle {
+  display: flex;
+  min-height: 44px;
+  margin: 0 0 5px;
+  padding: 8px 11px;
+  background: rgba(255,255,255,0.035);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  color: rgba(230,255,245,0.8);
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+}
+.mobile-nav-section-toggle:hover { background: rgba(255,255,255,0.07); border-color: rgba(44,255,179,0.25); }
+.mobile-nav-section-toggle > span:first-child { font-weight: 750; text-transform: uppercase; }
+.section-count {
+  min-width: 22px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(44,255,179,0.1);
+  color: var(--accent);
+  font-size: 0.68rem;
+  letter-spacing: 0;
+  text-align: center;
+}
+#mobileSubjectsSection.mobile-section-open,
+#mobileToolsSection.mobile-section-open { display: block; }
+#mobileSubjectsSection,
+#mobileToolsSection { display: none; }
+#sidebarCollapseBtn {
+  position: absolute;
+  top: 19px;
+  right: 14px;
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.04);
+  color: rgba(230,255,245,0.62);
+  font-size: 1.45rem;
+  line-height: 20px;
+  cursor: pointer;
+  transition: color .2s ease, background .2s ease, transform .2s ease;
+}
+#sidebarCollapseBtn:hover { color: var(--accent); background: rgba(44,255,179,0.1); }
+#sidebar.collapsed { width: 76px; padding-inline: 10px; }
+#sidebar.collapsed #mobileNavPanel {
+  overflow: visible;
+  /* Reserve the row occupied by the floating Subjects shortcut. */
+  padding-top: 56px;
+}
+#sidebar.collapsed #mobileToolsSection { display: block; }
+#sidebar.collapsed #toolButtonsContainer { display: flex; width: 56px; }
+#sidebar.collapsed #sidebarBrand { align-items: center; padding-inline: 0; }
+#sidebar.collapsed #logo,
+#sidebar.collapsed .mobile-nav-section-toggle,
+#sidebar.collapsed #mobileSubjectsSection,
+#sidebar.collapsed #sidebarProfile span { display: none; }
+#sidebar.collapsed #sidebarCollapseBtn { position: static; }
+#sidebar.collapsed #toolButtonsContainer { gap: 8px; }
+#sidebar.collapsed #toolButtonsContainer { position: relative; flex: 0 0 auto; }
+#sidebar.collapsed .tool-btn-wrapper { flex: 0 0 44px; height: 44px; opacity: 1; transform: none !important; }
+#sidebar.collapsed .tool-btn { width: 56px; height: 44px; min-height: 44px; justify-content: center; padding: 8px; }
+#sidebar.collapsed .tool-icon { display: inline-flex; visibility: visible; opacity: 1; }
+#sidebar.collapsed .tool-label { display: none; }
+#sidebar.collapsed .tool-actions-menu { display: none !important; }
+#sidebar.collapsed .tool-btn.active { box-shadow: inset 0 0 0 1px var(--accent); }
+#sidebar.collapsed #sidebarProfile { justify-content: center; padding-inline: 0; }
+#sidebarQuickSubjects,
+#sidebarQuickSubjectsMenu { display: none; }
+#sidebar.collapsed #sidebarQuickSubjects {
+  display: flex;
+  position: absolute;
+  top: 88px;
+  left: 10px;
+  width: 56px;
+  height: 48px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: rgba(230,255,245,0.68);
+  cursor: pointer;
+}
+#sidebar.collapsed #sidebarQuickSubjects:hover,
+#sidebar.collapsed #sidebarQuickSubjects[aria-expanded="true"] {
+  background: rgba(44,255,179,0.12);
+  border-color: rgba(44,255,179,0.3);
+  color: var(--accent);
+}
+.quick-subjects-icon {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+.quick-subjects-label { display: none; }
+#sidebarQuickSubjectsMenu {
+  position: absolute;
+  top: 88px;
+  left: 76px;
+  width: 238px;
+  max-height: min(420px, calc(100vh - 32px));
+  padding: 9px;
+  overflow-y: auto;
+  border: 1px solid rgba(255,255,255,0.13);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(22, 50, 38, 0.98), rgba(8, 25, 18, 0.99));
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: 12px 12px 34px rgba(0,0,0,0.38);
+  z-index: 9999;
+}
+
+/* These menus belong to the navigation layer and must paint above tool pages,
+   including pages that create their own positioned/translated stacking layers. */
+#sidebarQuickSubjectsMenu,
+#dropdown,
+.tool-actions-menu {
+  z-index: 9999;
+}
+#sidebarQuickSubjectsMenu.open { display: block; animation: sidebarPopoverIn .16s ease-out; }
+@keyframes sidebarPopoverIn {
+  from { opacity: 0; transform: translateX(-5px) scale(.98); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+.quick-menu-heading {
+  padding: 5px 9px 9px;
+  color: rgba(230,255,245,0.48);
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.quick-subject-item {
+  display: flex;
+  width: 100%;
+  min-height: 40px;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 9px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: rgba(230,255,245,0.72);
+  text-align: left;
+  cursor: pointer;
+  font-size: 0.86rem;
+}
+.quick-subject-item:hover { background: rgba(255,255,255,0.07); color: var(--text-main); }
+.quick-subject-item.active { background: rgba(44,255,179,0.12); color: var(--accent); }
+.quick-subject-dot { width: 7px; height: 7px; flex: 0 0 7px; border: 1px solid rgba(230,255,245,0.35); border-radius: 50%; }
+.quick-subject-item.active .quick-subject-dot { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 8px var(--accent-glow); }
+
+#sidebarSubjects {
+  gap: 3px;
+  margin: 0;
+  padding: 5px;
+  background: rgba(255,255,255,0.025);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-color: rgba(255,255,255,0.07);
+  border-radius: 13px;
+}
+#sidebarSubjectsHead { padding: 0; }
+.subject-pill {
+  position: relative;
+  min-height: 38px;
+  padding: 9px 11px 9px 14px;
+  color: rgba(230,255,245,0.62);
+  border-radius: 9px;
+}
+.subject-pill::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  border-radius: 2px;
+  background: transparent;
+}
+.subject-pill:hover { color: var(--text-main); background: rgba(255,255,255,0.06); }
+.subject-pill.active { background: rgba(44,255,179,0.11); color: var(--accent); }
+.subject-pill.active::before { background: var(--accent); box-shadow: 0 0 10px var(--accent-glow); }
+
+#toolButtonsContainer { display: flex; flex-direction: column; gap: 5px; }
+.tool-btn-wrapper { margin: 0; }
+.tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 44px;
+  padding: 9px 11px;
+  color: rgba(230,255,245,0.68);
+  border: 1px solid transparent;
+  border-radius: 10px;
+}
+.tool-icon {
+  display: inline-flex;
+  width: 25px;
+  height: 25px;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 25px;
+  border: 1px solid rgba(44,255,179,0.25);
+  border-radius: 7px;
+  color: var(--accent);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+.tool-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-btn:hover { transform: translateX(2px); color: var(--text-main); background: rgba(255,255,255,0.055); border-color: rgba(255,255,255,0.08); }
+.tool-btn.active { color: var(--accent); background: rgba(44,255,179,0.12); border-color: rgba(44,255,179,0.35); box-shadow: inset 3px 0 0 var(--accent); }
+#sidebarProfile { padding: 14px 8px 0; background: linear-gradient(180deg, transparent, rgba(10,30,22,0.65)); }
+#sidebarProfile img { width: 38px; height: 38px; border-width: 1px; }
+#sidebarProfile span { font-size: 0.82rem; }
+
+@media (min-width: 701px) and (max-width: 1100px) {
+  #sidebar { width: 224px; padding-inline: 11px; }
+  #sidebarBrand { padding-inline: 8px; }
+  #sidebar h2 { font-size: 1.4rem; }
+}
+
+@media (max-width: 700px) {
+  #sidebar { gap: 10px; padding: 10px 12px; background: rgba(10,30,22,0.92); box-shadow: 0 8px 24px rgba(0,0,0,0.12); }
+  #sidebarBrand { flex: 1; min-width: 0; flex-direction: row; align-items: center; gap: 10px; padding: 0; border: 0; }
+  #sidebar h2 { font-size: 1.2rem; }
+  #sidebarCollapseBtn { display: none; }
+  #sidebarQuickSubjects,
+  #sidebarQuickSubjectsMenu { display: none !important; }
+  #mobileNavPanel { gap: 10px; padding: calc(16px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom)); background: linear-gradient(180deg, rgba(13,39,28,0.99), rgba(7,23,17,1)); }
+  .mobile-nav-header { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 16px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+  .mobile-nav-header strong { display: block; margin-top: 3px; font-size: 1.25rem; letter-spacing: -0.02em; }
+  #mobileNavClose { width: 38px; height: 38px; border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; background: rgba(255,255,255,0.05); color: var(--text-main); font-size: 1.6rem; line-height: 1; cursor: pointer; }
+  .nav-eyebrow { display: none; }
+  .mobile-nav-section-toggle { display: flex; margin: 0; min-height: 48px; background: rgba(255,255,255,0.045); border-color: rgba(255,255,255,0.09); }
+  #mobileNavPanel #sidebarSubjects { padding-bottom: 14px; border-bottom: 1px solid var(--glass-border); }
+  #mobileNavPanel #toolButtonsContainer { gap: 6px; }
+  .tool-btn { min-height: 48px; padding: 10px 12px; }
+  #sidebarProfile { padding-top: 0; }
+}
 </style>
 </head>
 <body>
@@ -1419,11 +1759,21 @@ canvas { position: fixed; inset:0; z-index:-1; }
 
 <div id="app">
   <aside id="sidebar" class="entering">
-    <button id="sidebarHamburger" aria-label="Open navigation" aria-controls="mobileNavPanel" aria-expanded="false" title="Open navigation">&equiv;</button>
-    <h2 id="logo" style="cursor: pointer;">NeuroNet</h2>
+    <div id="sidebarBrand">
+      <button id="sidebarHamburger" aria-label="Open navigation" aria-controls="mobileNavPanel" aria-expanded="false" title="Open navigation"><span aria-hidden="true">☰</span></button>
+      <h2 id="logo" style="cursor: pointer;">NeuroNet</h2>
+      <button id="sidebarCollapseBtn" type="button" aria-label="Collapse sidebar" aria-expanded="true" title="Collapse sidebar"><span aria-hidden="true">‹</span></button>
+    </div>
     <div id="sidebarSubjectBackdrop"></div>
     <div id="mobileNavPanel">
-      <button id="mobileSubjectsToggle" class="mobile-nav-section-toggle" type="button" aria-controls="mobileSubjectsSection" aria-expanded="true">Subjects</button>
+      <div class="mobile-nav-header">
+        <div>
+          <span class="sidebar-eyebrow">Workspace</span>
+          <strong>Navigate</strong>
+        </div>
+        <button id="mobileNavClose" type="button" aria-label="Close navigation" title="Close navigation">×</button>
+      </div>
+      <button id="mobileSubjectsToggle" class="mobile-nav-section-toggle" type="button" aria-controls="mobileSubjectsSection" aria-expanded="true"><span>Subjects</span><span class="section-count" id="sidebarSubjectCount">0</span></button>
       <div id="mobileSubjectsSection" class="mobile-section-open">
         <div id="sidebarSubjects">
           <div id="sidebarSubjectsHead">
@@ -1432,10 +1782,18 @@ canvas { position: fixed; inset:0; z-index:-1; }
           <div id="sidebarSubjectList"></div>
         </div>
       </div>
-      <button id="mobileToolsToggle" class="mobile-nav-section-toggle" type="button" aria-controls="mobileToolsSection" aria-expanded="false">Tools</button>
+      <button id="mobileToolsToggle" class="mobile-nav-section-toggle" type="button" aria-controls="mobileToolsSection" aria-expanded="true"><span>Pinned tools</span><span class="section-count" id="sidebarToolCount">0</span></button>
       <div id="mobileToolsSection" class="mobile-section-open">
         <div id="toolButtonsContainer"></div>
       </div>
+    </div>
+    <button id="sidebarQuickSubjects" type="button" aria-label="Open subjects" aria-expanded="false" title="Subjects">
+      <span class="quick-subjects-icon" aria-hidden="true">S</span>
+      <span class="quick-subjects-label">Subjects</span>
+    </button>
+    <div id="sidebarQuickSubjectsMenu" role="menu" aria-label="Subjects">
+      <div class="quick-menu-heading">Switch subject</div>
+      <div id="sidebarQuickSubjectList"></div>
     </div>
 
     <div id="sidebarProfile">
