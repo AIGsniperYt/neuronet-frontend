@@ -133,6 +133,7 @@ function enforceUserSelect() {
     sources: [],
     analysisNodes: [],
     selectedSubject: "",
+    view: "launchpad",
     selectedSourceId: "",
     selectedRange: null,
     subjectEditMode: false,
@@ -166,6 +167,17 @@ function enforceUserSelect() {
   // Handle context subject from global launchpad
   if (contextSubject) {
     state.selectedSubject = contextSubject;
+    state.view = "study";
+  }
+
+  // Capture mode: open straight into the source editor in the "Unfiled" bucket,
+  // so users can start typing/pasting immediately without picking a subject.
+  if (context.capture) {
+    state.view = "study";
+    if (!contextSubject) state.selectedSubject = "";
+    state.selectedSourceId = "";
+    state.viewMode = "editor";
+    context.nodeId = null;
   }
 
   function htmlToMarkdown(html) {
@@ -2288,35 +2300,49 @@ function htmlToPlainText(html) {
       ...state.sources.map((source) => source.subject)
     ].filter(Boolean))).sort((a, b) => a.localeCompare(b));
 
-    if (!subjects.length) {
+    const subjectListEl = document.getElementById("sourceSubjectList");
+    if (subjectListEl) {
+      subjectListEl.innerHTML = subjects.map((s) => `<option value="${escapeHtml(s)}"></option>`).join("");
+    }
+
+    const unfiledSources = state.sources.filter((source) => !String(source.subject || "").trim());
+
+    if (!subjects.length && !unfiledSources.length) {
       subjectList.innerHTML = `<div class="empty-note">No subjects yet. Add your first subject to begin.</div>`;
       return;
     }
 
-    subjectList.innerHTML = subjects
-      .map((subject) => `
-        <article class="subject-card" data-subject="${escapeHtml(subject)}">
-          <span class="subject-name">${escapeHtml(subject)}</span>
-          <div class="subject-actions" ${state.subjectEditMode ? "" : "hidden"}>
-            <button class="btn" type="button" data-action="rename-subject" data-subject="${escapeHtml(subject)}">Rename</button>
-            <button class="btn" type="button" data-action="delete-subject" data-subject="${escapeHtml(subject)}">Delete</button>
-          </div>
-        </article>
-      `)
-      .join("");
+    const cardSubject = (subject) => `
+      <article class="subject-card" data-subject="${escapeHtml(subject)}">
+        <span class="subject-name">${escapeHtml(subject)}</span>
+        <div class="subject-actions" ${state.subjectEditMode ? "" : "hidden"}>
+          <button class="btn" type="button" data-action="rename-subject" data-subject="${escapeHtml(subject)}">Rename</button>
+          <button class="btn" type="button" data-action="delete-subject" data-subject="${escapeHtml(subject)}">Delete</button>
+        </div>
+      </article>
+    `;
+
+    const cards = subjects
+      .map((subject) => cardSubject(subject))
+      .concat(unfiledSources.length
+        ? `<article class="subject-card unfiled-card" data-subject="">
+            <span class="subject-name">Unfiled <span style="opacity:.55;font-size:.75rem">(${unfiledSources.length})</span></span>
+            <div class="subject-actions" ${state.subjectEditMode ? "" : "hidden"}></div>
+          </article>`
+        : []);
+
+    subjectList.innerHTML = cards.join("");
 
     // Make entire card clickable
     subjectList.querySelectorAll(".subject-card").forEach(card => {
       card.addEventListener("click", (e) => {
         if (e.target.closest(".subject-actions")) return;
-        const subject = card.dataset.subject;
-        if (subject) {
-          state.selectedSubject = subject;
-          state.selectedSourceId = "";
-          resetSourceForm();
-          resetAnalysisForm();
-          renderState();
-        }
+        state.selectedSubject = card.dataset.subject || "";
+        state.view = "study";
+        state.selectedSourceId = "";
+        resetSourceForm();
+        resetAnalysisForm();
+        renderState();
       });
     });
   }
@@ -2622,15 +2648,15 @@ const updateLayerSelection = () => {
   }
 
   function renderState() {
-    const inStudy = Boolean(state.selectedSubject);
+    const inStudy = state.view === "study";
     launchpadView.hidden = inStudy;
     studyView.hidden = !inStudy;
-    studySubjectTitle.textContent = state.selectedSubject || "Subject";
+    studySubjectTitle.textContent = state.selectedSubject || "Unfiled";
 
     if (typeof window.__neuronetCanFocus !== "function") {
-      window.__neuronetCanFocus = () => Boolean(state.selectedSubject);
+      window.__neuronetCanFocus = () => inStudy;
     }
-    window.__neuronetCanFocus = () => Boolean(state.selectedSubject);
+    window.__neuronetCanFocus = () => inStudy;
 
     if (inStudy) {
       setSourceViewMode(state.viewMode);
@@ -2734,6 +2760,7 @@ const updateLayerSelection = () => {
     if (state.selectedSubject === subjectName) {
       state.selectedSubject = "";
       state.selectedSourceId = "";
+      state.view = "launchpad";
     }
 
     await refreshData();
@@ -2793,14 +2820,12 @@ const updateLayerSelection = () => {
     // Otherwise, clicking on card body opens subject
     const card = event.target.closest(".subject-card");
     if (card && !event.target.closest(".subject-actions")) {
-      const subject = card.dataset.subject;
-      if (subject) {
-        state.selectedSubject = subject;
-        state.selectedSourceId = "";
-        resetSourceForm();
-        resetAnalysisForm();
-        renderState();
-      }
+      state.selectedSubject = card.dataset.subject || "";
+      state.view = "study";
+      state.selectedSourceId = "";
+      resetSourceForm();
+      resetAnalysisForm();
+      renderState();
     }
   });
 
@@ -2811,6 +2836,7 @@ const updateLayerSelection = () => {
       state.selectedSourceId = "";
       state.viewMode = "reader";
       state.wasInStudy = false;
+      state.view = "launchpad";
       resetSourceForm();
       resetAnalysisForm();
       // Hide study view, show analysis tool launchpad
@@ -2829,6 +2855,7 @@ const updateLayerSelection = () => {
         state.selectedSourceId = "";
         state.viewMode = "reader";
         state.wasInStudy = false;
+        state.view = "launchpad";
         resetSourceForm();
         resetAnalysisForm();
         if (launchpadView && studyView) {
@@ -2899,13 +2926,14 @@ const updateLayerSelection = () => {
   if (sourceForm) {
     sourceForm.addEventListener("submit", async (event) => {
       event.preventDefault();
-      if (!state.selectedSubject) return;
 
       const title = (sourceTitleInput.value || "").trim();
       if (!title) return;
 
+      const subject = (sourceSubjectInput.value || "").trim();
+
       const path = normalizeHierarchyPath([
-        state.selectedSubject,
+        subject,
         sourceLevel1Input?.value || "",
         sourceLevel2Input?.value || "",
         sourceLevel3Input?.value || ""
@@ -2927,7 +2955,7 @@ const updateLayerSelection = () => {
       await addNode({
         id: sourceId,
         type: "source",
-        subject: state.selectedSubject,
+        subject,
         section: buildSection(path),
         title,
         content: contentText,
@@ -2946,6 +2974,11 @@ const updateLayerSelection = () => {
         createdAt: existing?.createdAt || now,
         updatedAt: now
       });
+
+      // If the saved source carried a subject, enter that subject's workspace.
+      if (subject && subject !== state.selectedSubject) {
+        state.selectedSubject = subject;
+      }
 
       state.selectedSourceId = sourceId;
       resetSourceForm();
@@ -3712,7 +3745,11 @@ if (saveSourceBtn) {
       if (nodeSubject && nodeSubject !== state.selectedSubject) {
         state.selectedSubject = nodeSubject;
         await refreshData();
+      } else if (state.selectedSubject !== nodeSubject) {
+        state.selectedSubject = nodeSubject || "";
+        await refreshData();
       }
+      state.view = "study";
       if (launchpadView) launchpadView.style.display = "none";
       if (studyView) studyView.style.display = "block";
 

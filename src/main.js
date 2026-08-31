@@ -857,9 +857,7 @@ async function renderQuickActions() {
   const newSourceBtn = document.getElementById("dashNewSource");
   if (newSourceBtn) {
     newSourceBtn.onclick = () => {
-      const sub = last?.subject || (subjects.length === 1 ? subjects[0] : null);
-      if (sub) enterSubjectWorkspace(sub);
-      else if (subjects.length > 0) enterSubjectWorkspace(subjects[0]);
+      loadTool("analysis", { capture: true });
     };
   }
 

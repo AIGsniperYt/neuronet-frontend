@@ -922,7 +922,10 @@ button.analysis-quote-jump.active-quote,
               </div>
               <form id="sourceForm" class="form-grid">
                 <input type="hidden" id="sourceId" />
-                <input type="hidden" id="sourceSubject" />
+                <div class="form-row">
+                  <input id="sourceSubject" class="inline-input source-subject-input" type="text" list="sourceSubjectList" placeholder="Subject (optional — save unlinked)" maxlength="80" />
+                  <datalist id="sourceSubjectList"></datalist>
+                </div>
                 <input id="sourceTitle" class="inline-input" type="text" placeholder="Source title" maxlength="120" required />
                 <input id="sourceLevel1" class="inline-input" type="text" placeholder="Layer 1 (optional)" maxlength="80" />
                 <input id="sourceLevel2" class="inline-input" type="text" placeholder="Layer 2 (optional)" maxlength="80" />
