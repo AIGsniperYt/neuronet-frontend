@@ -813,6 +813,45 @@ button.analysis-quote-jump.active-quote,
   .launch-top { grid-template-columns: 1fr; }
   .subject-card { min-width: 0; }
 }
+
+@media (max-width: 700px) {
+  .analysis-shell {
+    height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .analysis-study {
+    height: auto;
+    min-height: 100%;
+    overflow: visible;
+  }
+  .study-grid,
+  .study-grid.editor-expanded {
+    min-height: 0;
+    overflow: visible;
+  }
+  .main-surface,
+  .source-panel {
+    min-height: auto;
+    overflow: visible;
+  }
+  #sourceEditor {
+    height: clamp(260px, 52dvh, 460px);
+    min-height: 260px;
+  }
+  .reader-surface {
+    max-height: min(60dvh, 520px);
+  }
+  .floating-card {
+    position: fixed;
+    right: 12px;
+    bottom: max(12px, env(safe-area-inset-bottom));
+    left: 12px;
+    width: auto;
+    max-height: calc(100dvh - 24px);
+  }
+}
 </style>
 
 <div class="analysis-shell" style="user-select: text !important; -webkit-user-select: text !important;">

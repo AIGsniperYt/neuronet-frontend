@@ -342,6 +342,8 @@ canvas { position: fixed; inset:0; z-index:-1; }
   backdrop-filter: blur(var(--backdrop-blur));
   display: flex;
   position: relative;
+  min-width: 0;
+  min-height: 0;
 }
 
 #sidebar,
@@ -355,6 +357,8 @@ canvas { position: fixed; inset:0; z-index:-1; }
 #toolContainer {
   width: 100%;
   height: 100%;
+  min-width: 0;
+  min-height: 0;
 }
 
 #toolContainer.entering {
@@ -1155,6 +1159,7 @@ canvas { position: fixed; inset:0; z-index:-1; }
 
   /* Tools and subjects share one compact navigation drawer. */
   #mobileNavPanel {
+    display: block;
     position: fixed;
     top: 0;
     bottom: 0;
@@ -1248,6 +1253,7 @@ canvas { position: fixed; inset:0; z-index:-1; }
 
   /* Main content + launchpad */
   #mainContent { padding: 14px; }
+  #toolContainer { overflow: hidden; }
   .launchpad { padding: 12px; gap: 12px; }
 
   /* Stats: 2x2 instead of 4 cramped columns */

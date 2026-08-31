@@ -3098,6 +3098,9 @@
   }
 
   @media (max-width: 700px) {
+    #memoryTool,
+    #memoryContent,
+    #memoryMainArea { min-height: 0; min-width: 0; }
     #memoryHeader {
       flex-direction: column;
       align-items: stretch;
@@ -3112,5 +3115,29 @@
     .stats-grid,
     .focus-stats { grid-template-columns: repeat(2, 1fr); gap: 10px; }
     .live-metrics { grid-template-columns: 1fr; }
+    #flashcardContainer { padding: 12px; overflow-y: auto; }
+    #flashcard {
+      width: min(94vw, 620px);
+      height: auto;
+      max-width: 100%;
+      max-height: 58dvh;
+      min-height: 260px;
+      aspect-ratio: 1.25 / 1;
+    }
+    .deck-builder-container {
+      width: calc(100vw - 16px);
+      max-width: none;
+      max-height: calc(100dvh - 16px);
+      border-radius: 14px;
+    }
+    .deck-builder-header { padding: 14px; }
+    .deck-builder-content { padding: 12px; }
+    .deck-builder-body { flex-direction: column !important; overflow: auto; }
+    .deck-sidebar,
+    .deck-main-area { width: 100%; min-width: 0; }
+    .deck-sidebar { max-height: 28dvh; }
+    #memoryStats { top: 0; left: 0; bottom: 0; width: 100%; max-width: 100%; border-left: 0; }
+    .builder-sticky-actions { flex-wrap: wrap; gap: 8px; padding-inline: 8px; }
+    .builder-sticky-actions > div { display: flex; flex-wrap: wrap; gap: 8px; }
   }
 </style>

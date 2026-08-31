@@ -207,6 +207,8 @@
     .tracker-form-msg.err { color: #ff8c8c; }
 
     @media (max-width: 700px) {
+      #trackerTool,
+      #trackerContent { min-height: 0; min-width: 0; }
       #trackerHeader { flex-direction: column; align-items: stretch; padding: 12px; }
       #trackerControls { justify-content: flex-start; }
       #trackerPapers, #trackerStats { padding: 14px 12px; }
@@ -217,7 +219,7 @@
       .head-scores { width: 100%; }
       .sit-table { min-width: 620px; }
       .tracker-form-grid { grid-template-columns: 1fr; }
-      #trackerModalBox { padding: 16px; width: min(94%, 560px); max-height: 90%; }
+      #trackerModalBox { padding: 16px; width: min(94%, 560px); max-height: calc(100dvh - 24px); }
     }
   </style>
 
