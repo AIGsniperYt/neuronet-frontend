@@ -317,8 +317,11 @@ canvas { position: fixed; inset:0; z-index:-1; }
 
 #mobileSubjectsSection,
 #mobileToolsSection {
-  display: block;
+  display: none;
 }
+
+#mobileSubjectsSection.mobile-section-open,
+#mobileToolsSection.mobile-section-open { display: block; }
 
 /* Subject switcher in sidebar */
 #sidebarSubjects {
@@ -1430,7 +1433,7 @@ canvas { position: fixed; inset:0; z-index:-1; }
         </div>
       </div>
       <button id="mobileToolsToggle" class="mobile-nav-section-toggle" type="button" aria-controls="mobileToolsSection" aria-expanded="false">Tools</button>
-      <div id="mobileToolsSection">
+      <div id="mobileToolsSection" class="mobile-section-open">
         <div id="toolButtonsContainer"></div>
       </div>
     </div>

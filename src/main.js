@@ -1382,6 +1382,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   mobileSubjectsToggle?.addEventListener("click", () => toggleMobileNavSection("subjects"));
   mobileToolsToggle?.addEventListener("click", () => toggleMobileNavSection("tools"));
+  if (window.matchMedia("(max-width: 700px), (pointer: coarse) and (hover: none)").matches) {
+    setMobileNavSection(mobileToolsSection, mobileToolsToggle, false);
+  }
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeSubjectDrawer();
   });
