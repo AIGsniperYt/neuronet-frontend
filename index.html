@@ -1188,8 +1188,11 @@ canvas { position: fixed; inset:0; z-index:-1; }
     max-height: none;
     overflow-x: hidden;
     overflow-y: scroll;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(44,255,179,0.45) transparent;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
+    touch-action: pan-y;
     border-right: 1px solid var(--glass-border);
     border-radius: 0 16px 16px 0;
     background: linear-gradient(180deg, rgba(18,46,34,0.99), rgba(10,30,22,1));
