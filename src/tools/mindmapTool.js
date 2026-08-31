@@ -97,7 +97,8 @@ const state = {
       "tag": 0.5, // tag grouping is for many quotes with same tag, so show earlier
       "quote": 0.9,
       "analysis": 0.9,
-      "cue": 1.0
+      "cue": 1.0,
+      "pastpaper": 0.65
     },
     colors: {
       subject: "#ff6b6b",
@@ -108,7 +109,8 @@ const state = {
       quote: "#ff9b39",
       analysis: "#2cffb3",
       cue: "#ff79c6",
-      tag: "#f1fa8c"
+      tag: "#f1fa8c",
+      pastpaper: "#ffd166"
     }
   };
 
@@ -313,6 +315,7 @@ const state = {
       case "analysis": return "💡";
       case "cue": return "🎯";
       case "tag": return "🏷️";
+      case "pastpaper": return "✅";
       default: return "●";
     }
   }
@@ -348,6 +351,9 @@ const state = {
     if (node.type === "tag") {
       return `#${node.title || "Untitled Tag"}`;
     }
+    if (node.type === "pastpaper") {
+      return [node.subject, node.year, node.series].filter(Boolean).join(" \u2014 ") || "Past Paper";
+    }
     return node.subject || node.title || "Unknown";
   }
 
@@ -357,6 +363,7 @@ const state = {
     if (node.type?.startsWith("layer")) return (node?.meta?.layerPath || []).join(" > ") || "";
     if (node.type === "source") return node.content?.substring(0, maxLength) || node.contentText?.substring(0, maxLength) || "";
     if (node.type === "cue") return node.cue || "";
+    if (node.type === "pastpaper") return pastPaperSummary(node);
     return "";
   }
 
@@ -366,11 +373,33 @@ const state = {
     if (node.type?.startsWith("layer")) return (node?.meta?.layerPath || []).join(" > ") || "";
     if (node.type === "source") return node.content || node.contentText || "";
     if (node.type === "cue") return node.cue || "";
+    if (node.type === "pastpaper") return pastPaperSummary(node);
     return "";
   }
 
   function getNodeType(node) {
     return node.type || node.itemType || "unknown";
+  }
+
+  function bestAttemptPct(r) {
+    const attempts = r?.attempts || [];
+    if (attempts.length === 0) return null;
+    let best = 0;
+    for (const a of attempts) {
+      const pct = a.maxMarks ? Math.round((a.score / a.maxMarks) * 100) : 0;
+      if (pct > best) best = pct;
+    }
+    return best;
+  }
+
+  function pastPaperSummary(node) {
+    const lines = [node.examBoard && `Board: ${node.examBoard}`];
+    const percentages = (node.results || []).map(bestAttemptPct).filter((p) => p !== null);
+    if (percentages.length > 0) {
+      const avg = Math.round(percentages.reduce((m, p) => m + p, 0) / percentages.length);
+      lines.push(`${percentages.length} question${percentages.length !== 1 ? "s" : ""}, avg ${avg}%`);
+    }
+    return lines.filter(Boolean).join("\n") || "Past paper sitting";
   }
 
   function formatTimestamp(ms) {
@@ -609,6 +638,7 @@ const state = {
     const quotes = items.filter(n => n.type === "quote");
     const analyses = items.filter(n => n.type === "analysis");
     const cues = items.filter(n => n.type === "cue");
+    const pastpapers = items.filter(n => n.type === "pastpaper");
 
     items.forEach(item => {
       graph.nodes.set(item.id, {
@@ -657,6 +687,13 @@ const state = {
       } else {
         addEdge(subjectNode.id, source.id, "subject-source", 3);
       }
+    });
+
+    pastpapers.forEach(paper => {
+      if (!paper.subject) return;
+      const subjectNode = subjectNodes.find(s => s.subject === paper.subject);
+      if (!subjectNode) return;
+      addEdge(subjectNode.id, paper.id, "subject-pastpaper", 2.6);
     });
 
     quotes.forEach(quote => {

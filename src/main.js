@@ -27,7 +27,6 @@ const DEFAULT_PROFILE = {
 };
 
 let syncInProgress = false;
-let subjectEditMode = false;
 
 let currentToolName = "";
 let currentSubject = null;
@@ -140,10 +139,10 @@ const tools = {
 };
 
 const toolDefinitions = {
-  analysis: { name: "Analysis", file: "analysis.html", icon: "A", desc: "Create source-linked analysis nodes and analyse a source text" },
-  memory: { name: "Memory", file: "memory.html", icon: "M", desc: "Flashcard study across subjects to memorise nodes you analyse" },
-  mindmap: { name: "Mindmap", file: "mindmap.html", icon: "N", desc: "Visual database overview for establishing connections" },
-  tracker: { name: "Tracker", file: "tracker.html", icon: "T", desc: "Track study progress with past paper data" }
+  analysis: { name: "Analysis", file: "analysis.html", icon: "fa-solid fa-pen-clip", desc: "Create source-linked analysis nodes and analyse a source text" },
+  memory: { name: "Memory", file: "memory.html", icon: "fa-solid fa-brain", desc: "Flashcard study across subjects to memorise nodes you analyse" },
+  mindmap: { name: "Mindmap", file: "mindmap.html", icon: "fa-solid fa-diagram-project", desc: "Visual database overview for establishing connections" },
+  tracker: { name: "Tracker", file: "tracker.html", icon: "fa-solid fa-chart-column", desc: "Track study progress with past paper data" }
 };
 
 // ========== AUTH & API ==========
@@ -232,6 +231,7 @@ async function loadTool(toolName, context = {}) {
   currentToolName = toolName;
   currentSubject = context.subject || null;
   setActiveTool(toolName);
+  logActivity(context.subject || currentSubject, toolName);
 
   const tool = tools[toolName];
   toolContainer.innerHTML = "";
@@ -577,8 +577,7 @@ async function importPayload(payload) {
   }
 
   // Refresh global launchpad with fresh data
-  await updateGlobalStats();
-  await renderSubjectList();
+  await renderDashboard();
 
   // Notify tools that DB has changed so they can refresh
   document.dispatchEvent(new Event("db-change"));
@@ -713,20 +712,18 @@ async function wipeDatabase() {
       console.log("Cloud wipe skipped", error);
     }
   }
-  await updateGlobalStats();
-  await renderSubjectList();
+  await renderDashboard();
   document.dispatchEvent(new Event("db-change"));
   if (currentToolName) await loadTool(currentToolName);
 }
 
-// ========== LAUNCHPAD FUNCTIONS ==========
+// ========== LAUNCHPAD SHOW/HIDE ==========
 
 function showLaunchpad() {
   const tc = document.getElementById("toolContainer");
   const launchpad = document.getElementById("globalLaunchpad");
   if (!launchpad) return;
 
-  // Animate tool container out if it exists
   if (tc) {
     tc.classList.add("exiting");
     setTimeout(() => {
@@ -736,10 +733,9 @@ function showLaunchpad() {
     }, 350);
   }
 
-  // Animate launchpad in
   launchpad.style.display = "flex";
   launchpad.classList.add("entering");
-  void launchpad.offsetWidth; // force reflow
+  void launchpad.offsetWidth;
   launchpad.classList.remove("entering");
   launchpad.classList.add("entered");
 }
@@ -749,7 +745,6 @@ function hideLaunchpad() {
   const launchpad = document.getElementById("globalLaunchpad");
   if (!launchpad) return;
 
-  // Animate launchpad out
   launchpad.classList.add("exiting");
   launchpad.classList.remove("entered");
   setTimeout(() => {
@@ -757,7 +752,6 @@ function hideLaunchpad() {
     launchpad.classList.remove("exiting");
   }, 350);
 
-  // Show tool container
   if (tc) {
     tc.style.display = "block";
     tc.classList.add("entering");
@@ -780,165 +774,280 @@ function openTool(toolName, context = {}) {
   });
 }
 
-async function updateGlobalStats() {
-  const [allNodes, allQuotes] = await Promise.all([getAllNodes(), getAllQuotes()]);
+// ========== ACTIVITY TRACKING (localStorage) ==========
 
-  const subjects = new Set();
-  const sources = [];
-  const analyses = [];
+const ACTIVITY_KEY = "nn-last-activity";
+const SESSIONS_KEY = "nn-study-sessions";
 
-  allNodes.forEach(node => {
-    if (node.subject) subjects.add(node.subject);
-    if (node.type === "source" || node.meta?.kind === "source") sources.push(node);
-    if (node.type === "analysis") analyses.push(node);
-  });
-
-  document.getElementById("statSubjects").textContent = subjects.size;
-  document.getElementById("statSources").textContent = sources.length;
-  document.getElementById("statQuotes").textContent = allQuotes.length;
-  document.getElementById("statAnalyses").textContent = analyses.length;
+function logActivity(subject, toolName) {
+  try {
+    localStorage.setItem(ACTIVITY_KEY, JSON.stringify({
+      subject, tool: toolName, timestamp: Date.now()
+    }));
+    const sessions = JSON.parse(localStorage.getItem(SESSIONS_KEY) || "[]");
+    const today = new Date().toISOString().slice(0, 10);
+    const lastSession = sessions[sessions.length - 1];
+    if (!lastSession || lastSession.date !== today) {
+      sessions.push({ date: today, subject, tool: toolName });
+      if (sessions.length > 60) sessions.splice(0, sessions.length - 60);
+      localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+    }
+  } catch {}
 }
 
-async function renderSubjectList() {
-  const subjectList = document.getElementById("subjectList");
-  const [allNodes, allQuotes] = await Promise.all([getAllNodes(), getAllQuotes()]);
+function getLastActivity() {
+  try { return JSON.parse(localStorage.getItem(ACTIVITY_KEY) || "null"); } catch { return null; }
+}
 
-  const subjectData = {};
-  allNodes.forEach(node => {
-    if (node.subject) {
-      if (!subjectData[node.subject]) {
-        subjectData[node.subject] = { sources: 0, analyses: 0 };
-      }
-      if (node.type === "source" || node.meta?.kind === "source") {
-        subjectData[node.subject].sources++;
-      }
-      if (node.type === "analysis") {
-        subjectData[node.subject].analyses++;
-      }
-    }
-  });
-  allQuotes.forEach(quote => {
-    if (quote.subject && subjectData[quote.subject]) {
-      subjectData[quote.subject].quotes = (subjectData[quote.subject].quotes || 0) + 1;
-    }
-  });
+function getStudySessions() {
+  try { return JSON.parse(localStorage.getItem(SESSIONS_KEY) || "[]"); } catch { return []; }
+}
 
-  const subjects = Object.keys(subjectData).sort();
+// ========== DASHBOARD RENDERERS ==========
 
-  if (subjects.length === 0) {
-    subjectList.innerHTML = '<p class="empty-note">No subjects yet. Create one to get started.</p>';
-    return;
+function dashEmpty(msg) {
+  return `<p class="dash-empty-note">${escapeHtml(msg)}</p>`;
+}
+
+async function renderQuickActions() {
+  const last = getLastActivity();
+  const resumeBtn = document.getElementById("dashResume");
+  const resumeSub = document.getElementById("dashResumeSub");
+  const studyBtn = document.getElementById("dashStudyNow");
+  const studySub = document.getElementById("dashStudySub");
+
+  if (last && last.subject) {
+    resumeBtn.disabled = false;
+    const toolLabel = last.tool ? last.tool.charAt(0).toUpperCase() + last.tool.slice(1) : "Analysis";
+    resumeSub.textContent = `${last.subject} \u2192 ${toolLabel}`;
+    resumeBtn.onclick = () => {
+      if (last.tool === "memory" || last.tool === "mindmap" || last.tool === "tracker") {
+        loadTool(last.tool, { subject: last.subject });
+      } else {
+        enterSubjectWorkspace(last.subject);
+      }
+    };
+  } else {
+    resumeBtn.disabled = true;
+    resumeSub.textContent = "No recent activity";
+    resumeBtn.onclick = null;
   }
 
-  subjectList.innerHTML = subjects.map(subject => `
-    <article class="subject-card" data-subject="${escapeHtml(subject)}">
-      <span class="subject-name">${escapeHtml(subject)}</span>
-      <div class="subject-actions" ${subjectEditMode ? "" : "hidden"} data-subject="${escapeHtml(subject)}">
-        <button type="button" data-action="rename-subject" data-subject="${escapeHtml(subject)}">Rename</button>
-        <button type="button" data-action="delete-subject" data-subject="${escapeHtml(subject)}">Delete</button>
-      </div>
-    </article>
-  `).join("");
+  const subjects = await getSubjects();
+  let bestSubject = null;
+  let bestDue = 0;
+  for (const s of subjects) {
+    const [dueQ, dueA] = await Promise.all([
+      getDueQuotesForSubject(s, { limit: 999 }),
+      getDueAnalysisNodesForSubject(s, { limit: 999 })
+    ]);
+    const total = dueQ.length + dueA.length;
+    if (total > bestDue) { bestDue = total; bestSubject = s; }
+  }
+  if (bestSubject && bestDue > 0) {
+    studyBtn.disabled = false;
+    studySub.textContent = `${bestDue} card${bestDue !== 1 ? "s" : ""} due \u2014 ${bestSubject}`;
+    studyBtn.onclick = () => loadTool("memory", { subject: bestSubject });
+  } else {
+    studyBtn.disabled = true;
+    studySub.textContent = "No cards due";
+    studyBtn.onclick = null;
+  }
 
-  subjectList.querySelectorAll(".subject-card").forEach(card => {
-    card.addEventListener("click", (e) => {
-      if (e.target.closest(".subject-actions")) return;
-      if (card.dataset.subject) {
-        enterSubjectWorkspace(card.dataset.subject);
-      }
-    });
-  });
+  const newSourceBtn = document.getElementById("dashNewSource");
+  if (newSourceBtn) {
+    newSourceBtn.onclick = () => {
+      const sub = last?.subject || (subjects.length === 1 ? subjects[0] : null);
+      if (sub) enterSubjectWorkspace(sub);
+      else if (subjects.length > 0) enterSubjectWorkspace(subjects[0]);
+    };
+  }
 
-  subjectList.querySelectorAll("[data-action]").forEach(btn => {
-    btn.addEventListener("click", async (e) => {
-      const action = e.target.dataset.action;
-      const subject = e.target.dataset.subject;
-      if (!action || !subject) return;
-
-      if (action === "rename-subject") {
-        const updated = await dialog.prompt(`Rename subject "${subject}" to:`, subject);
-        const next = (updated || "").trim();
-        if (!next || next === subject) return;
-        await renameSubject(subject, next);
-      } else if (action === "delete-subject") {
-        const ok = await dialog.confirm(`Delete subject "${subject}" and all its content?`, "Delete", "danger");
-        if (!ok) return;
-        await deleteSubject(subject);
-      }
-      await updateGlobalStats();
-      await renderSubjectList();
+  const addSubBtn = document.getElementById("dashAddSubject");
+  if (addSubBtn) {
+    addSubBtn.onclick = async () => {
+      const name = await dialog.prompt("New subject name:", "");
+      const clean = (name || "").trim();
+      if (!clean) return;
+      const existing = await getSubjects();
+      if (existing.includes(clean)) return;
+      await addSubject(clean);
+      await renderDashboard();
       await renderSidebarSubjects();
-    });
+    };
+  }
+}
+
+async function renderStudyStreak() {
+  const sessions = getStudySessions();
+  const msgEl = document.getElementById("dashStreakMsg");
+  const daysEl = document.getElementById("dashStreakDays");
+  if (!msgEl || !daysEl) return;
+
+  const studiedDates = new Set(sessions.map(s => s.date));
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+  const studiedToday = studiedDates.has(todayStr);
+
+  let streak = 0;
+  const d = new Date(today);
+  while (true) {
+    const ds = d.toISOString().slice(0, 10);
+    if (studiedDates.has(ds)) { streak++; d.setDate(d.getDate() - 1); }
+    else break;
+  }
+
+  if (studiedToday) {
+    if (streak <= 1) {
+      msgEl.innerHTML = `Great to see you here today. Ready to make progress?`;
+    } else {
+      msgEl.innerHTML = `Back again day ${streak} in a row \u2014 great consistency.`;
+    }
+  } else {
+    const lastSession = sessions.length > 0 ? sessions[sessions.length - 1] : null;
+    if (lastSession) {
+      const diff = Math.floor((today - new Date(lastSession.date)) / 86400000);
+      msgEl.textContent = diff === 1
+        ? "You studied yesterday. Pick up where you left off?"
+        : `It's been a few days \u2014 jump back in when you're ready.`;
+    } else {
+      msgEl.textContent = "Welcome \u2014 start a subject to begin studying.";
+    }
+  }
+
+  const dayLabels = ["M", "T", "W", "T", "F", "S", "S"];
+  const startOfWeek = new Date(today);
+  const dayOfWeek = (startOfWeek.getDay() + 6) % 7;
+  startOfWeek.setDate(startOfWeek.getDate() - dayOfWeek);
+
+  const dots = daysEl.querySelectorAll(".dash-day");
+  dots.forEach((dot, i) => {
+    const d = new Date(startOfWeek);
+    d.setDate(d.getDate() + i);
+    const ds = d.toISOString().slice(0, 10);
+    dot.classList.toggle("studied", studiedDates.has(ds));
+    dot.classList.toggle("today", ds === todayStr);
+    dot.querySelector(".dash-day-label").textContent = dayLabels[i];
   });
 }
 
-async function addSubjectFromInput() {
-  const input = document.getElementById("newSubjectName");
-  const name = input.value.trim();
-  if (!name) return;
+async function renderDueForReview() {
+  const list = document.getElementById("dashDueList");
+  if (!list) return;
+  const subjects = await getSubjects();
+  const rows = [];
 
-  await addSubject(name);
-  input.value = "";
-  await renderSubjectList();
-  await updateGlobalStats();
-  await renderSidebarSubjects();
-  const addSubjectBtn = document.getElementById("addSubjectBtn");
-  if (addSubjectBtn) addSubjectBtn.disabled = true;
+  for (const s of subjects) {
+    const [dueQ, dueA] = await Promise.all([
+      getDueQuotesForSubject(s, { limit: 999 }),
+      getDueAnalysisNodesForSubject(s, { limit: 999 })
+    ]);
+    const total = dueQ.length + dueA.length;
+    if (total > 0) {
+      rows.push(`
+        <div class="dash-due-row">
+          <span class="dash-due-name">${escapeHtml(s)}</span>
+          <div class="dash-due-counts">
+            ${dueQ.length ? `<span><span class="count">${dueQ.length}</span> quotes</span>` : ""}
+            ${dueA.length ? `<span><span class="count">${dueA.length}</span> analyses</span>` : ""}
+          </div>
+          <button class="dash-due-btn" data-subject="${escapeHtml(s)}">Study</button>
+        </div>
+      `);
+    }
+  }
+
+  list.innerHTML = rows.length > 0 ? rows.join("") : dashEmpty("Nothing due for review");
+  list.querySelectorAll(".dash-due-btn").forEach(btn => {
+    btn.addEventListener("click", () => loadTool("memory", { subject: btn.dataset.subject }));
+  });
+}
+
+async function renderRecentActivity() {
+  const list = document.getElementById("dashActivityList");
+  if (!list) return;
+
+  const [allNodes, allQuotes] = await Promise.all([getAllNodes(), getAllQuotes()]);
+  const rows = [];
+
+  const papers = allNodes.filter(n => n.type === "pastpaper").sort((a, b) => {
+    return Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0);
+  }).slice(0, 3);
+
+  for (const p of papers) {
+    const sittingAvg = (() => {
+      if (!p.results || p.results.length === 0) return null;
+      let total = 0, count = 0;
+      for (const r of p.results) {
+        const attempts = r.attempts || [];
+        if (attempts.length > 0) {
+          let best = 0;
+          for (const a of attempts) {
+            const pct = a.maxMarks ? Math.round((a.score / a.maxMarks) * 100) : 0;
+            if (pct > best) best = pct;
+          }
+          total += best; count++;
+        }
+      }
+      return count > 0 ? Math.round(total / count) : null;
+    })();
+    const label = [p.subject, p.year, p.series].filter(Boolean).join(" \u2014 ");
+    const badge = sittingAvg !== null
+      ? `<span class="dash-activity-badge ${sittingAvg >= 60 ? "good" : "low"}">${sittingAvg}%</span>`
+      : "";
+    rows.push(`
+      <div class="dash-activity-row">
+        <span class="dash-activity-icon"><i class="fa-solid fa-file-circle-check"></i></span>
+        <div class="dash-activity-info">
+          <div class="dash-activity-title">${escapeHtml(label || "Past Paper")}</div>
+          <div class="dash-activity-meta">${(p.results || []).length} paper${(p.results || []).length !== 1 ? "s" : ""}</div>
+        </div>
+        ${badge}
+      </div>
+    `);
+  }
+
+  const sources = allNodes.filter(n => isSourceNode(n)).sort((a, b) => {
+    return getNodeTimestamp(b) - getNodeTimestamp(a);
+  }).slice(0, 3 - rows.length);
+
+  for (const s of sources) {
+    rows.push(`
+      <div class="dash-activity-row">
+        <span class="dash-activity-icon"><i class="fa-solid fa-file-lines"></i></span>
+        <div class="dash-activity-info">
+          <div class="dash-activity-title">${escapeHtml(s.title || s.name || "Untitled Source")}</div>
+          <div class="dash-activity-meta">${escapeHtml(s.subject || "No subject")}</div>
+        </div>
+      </div>
+    `);
+  }
+
+  list.innerHTML = rows.length > 0 ? rows.join("") : dashEmpty("No activity yet");
+}
+
+async function renderDashboard() {
+  await Promise.all([
+    renderQuickActions(),
+    renderStudyStreak(),
+    renderDueForReview(),
+    renderRecentActivity()
+  ]);
 }
 
 async function initLaunchpad() {
-  await updateGlobalStats();
-  await renderSubjectList();
-  await renderToolCatalogue();
+  await renderDashboard();
   await renderSidebarSubjects();
 
   const allBtn = document.getElementById("sidebarSubjectAll");
   if (allBtn) {
     allBtn.addEventListener("click", () => selectSidebarSubject(""));
   }
-
-  const addSubjectBtn = document.getElementById("addSubjectBtn");
-  const newSubjectInput = document.getElementById("newSubjectName");
-  const toggleSubjectEdit = document.getElementById("toggleSubjectEdit");
-
-  async function updateSubjectCreateState() {
-    if (!newSubjectInput || !addSubjectBtn) return;
-    const subject = (newSubjectInput.value || "").trim();
-    const existingSubjects = await getSubjects();
-    const disabled = !subject || existingSubjects.includes(subject);
-    addSubjectBtn.disabled = disabled;
-  }
-
-  if (addSubjectBtn) {
-    addSubjectBtn.addEventListener("click", addSubjectFromInput);
-  }
-  if (newSubjectInput) {
-    newSubjectInput.addEventListener("keypress", (e) => {
-      if (e.key === "Enter") addSubjectFromInput();
-    });
-    newSubjectInput.addEventListener("input", updateSubjectCreateState);
-    await updateSubjectCreateState();
-  }
-  async function refreshSubjectAddState() {
-    await updateSubjectCreateState();
-  }
-  window.refreshSubjectAddState = refreshSubjectAddState;
-  const toggleBtn = document.getElementById("toggleSubjectEdit");
-  if (toggleBtn) {
-    toggleBtn.addEventListener("click", () => {
-      subjectEditMode = !subjectEditMode;
-      toggleBtn.textContent = subjectEditMode ? "Done" : "Edit";
-
-      const actions = document.querySelectorAll(".subject-actions");
-      actions.forEach(el => {
-        el.hidden = !subjectEditMode;
-      });
-    });
-  }
 }
 
 async function enterSubjectWorkspace(subject) {
   currentSubject = subject;
+  logActivity(subject, "analysis");
   hideLaunchpad();
   await renderSidebarSubjects();
   await loadTool("analysis", { subject });
@@ -955,6 +1064,7 @@ function returnToGlobalLaunchpad() {
   }
   showLaunchpad();
   renderSidebarSubjects();
+  renderDashboard();
 
   // Make the transition back to home prominent on the neural background
   if (window.__neuronetCanvas) {
@@ -1011,7 +1121,7 @@ async function renderPinnedToolsSidebar() {
     return `
       <div class="tool-btn-wrapper entering ${isActive}" data-tool="${pinned.toolId}">
         <button class="tool-btn" data-tool="${pinned.toolId}" aria-label="Open ${escapeHtml(def.name)}" title="${escapeHtml(def.name)}" ${isActive ? 'aria-current="page"' : ''}>
-          <span class="tool-icon" aria-hidden="true">${escapeHtml(def.icon)}</span>
+          <span class="tool-icon" aria-hidden="true"><i class="${escapeHtml(def.icon)}"></i></span>
           <span class="tool-label">${escapeHtml(def.name)}</span>
         </button>
         <div class="tool-actions-menu">
@@ -1070,6 +1180,21 @@ async function renderPinnedToolsSidebar() {
 
 // ========== SIDEBAR SUBJECT SWITCHER ==========
 
+let subjectPillMenu = null;
+
+function ensureSubjectPillMenu() {
+  if (subjectPillMenu) return subjectPillMenu;
+  subjectPillMenu = document.createElement("div");
+  subjectPillMenu.className = "subject-pill-menu";
+  subjectPillMenu.innerHTML = `
+    <button data-action="rename">Rename</button>
+    <button data-action="delete" class="danger">Delete</button>
+  `;
+  document.body.appendChild(subjectPillMenu);
+  document.addEventListener("click", () => subjectPillMenu.classList.remove("open"));
+  return subjectPillMenu;
+}
+
 async function renderSidebarSubjects() {
   const listEl = document.getElementById("sidebarSubjectList");
   const quickListEl = document.getElementById("sidebarQuickSubjectList");
@@ -1107,6 +1232,33 @@ async function renderSidebarSubjects() {
   listEl?.querySelectorAll(".subject-pill").forEach(btn => {
       btn.setAttribute("aria-current", btn.classList.contains("active") ? "page" : "false");
       btn.addEventListener("click", () => selectSidebarSubject(btn.dataset.subject));
+      btn.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        const menu = ensureSubjectPillMenu();
+        const subj = btn.dataset.subject;
+        menu.style.left = e.clientX + "px";
+        menu.style.top = e.clientY + "px";
+        menu.classList.add("open");
+        menu.querySelectorAll("button").forEach(b => {
+          b.onclick = async () => {
+            menu.classList.remove("open");
+            if (b.dataset.action === "rename") {
+              const updated = await dialog.prompt(`Rename "${subj}" to:`, subj);
+              const next = (updated || "").trim();
+              if (!next || next === subj) return;
+              await renameSubject(subj, next);
+              await renderDashboard();
+              await renderSidebarSubjects();
+            } else if (b.dataset.action === "delete") {
+              const ok = await dialog.confirm(`Delete "${subj}" and all its content?`, "Delete", "danger");
+              if (!ok) return;
+              await deleteSubject(subj);
+              await renderDashboard();
+              await renderSidebarSubjects();
+            }
+          };
+        });
+      });
   });
   quickListEl?.querySelectorAll(".quick-subject-item").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -1164,79 +1316,9 @@ async function confirmUnpin() {
   await unpinTool(pendingUnpinTool);
   hideUnpinModal();
   await renderPinnedToolsSidebar();
-  await renderToolCatalogue();
 }
 
 // ========== TOOL CATALOGUE ==========
-
-async function renderToolCatalogue() {
-  const grid = document.getElementById("toolCardsGrid");
-  if (!grid) return;
-
-  const pinnedTools = await getPinnedTools();
-  const pinnedIds = new Set(pinnedTools.map(t => t.toolId));
-
-  grid.innerHTML = Object.entries(toolDefinitions).map(([toolId, def]) => {
-    const isPinned = pinnedIds.has(toolId);
-    const actionText = isPinned ? "Unpin" : "Pin";
-    return `
-      <div class="tool-card" data-tool="${toolId}">
-        <div class="tool-card-actions">
-          <button class="tool-card-action-btn" data-action="${isPinned ? 'unpin' : 'pin'}" data-tool="${toolId}">${actionText}</button>
-        </div>
-        <div class="tool-card-icon">${def.icon}</div>
-        <div class="tool-card-title">${def.name}</div>
-        <div class="tool-card-desc">${def.desc}</div>
-      </div>
-    `;
-  }).join("");
-
-  const cards = grid.querySelectorAll(".tool-card");
-  cards.forEach((card) => {
-    card.style.opacity = "1";
-    card.style.transform = "translateY(0) scale(1)";
-  });
-
-  grid.querySelectorAll(".tool-card").forEach(card => {
-    card.addEventListener("click", (e) => {
-      if (e.target.closest(".tool-card-actions")) return;
-      const toolName = card.dataset.tool;
-      hideLaunchpad();
-      loadTool(toolName, {});
-    });
-
-    card.addEventListener("contextmenu", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      grid.querySelectorAll(".tool-card.show-actions").forEach(el => {
-        if (el !== card) el.classList.remove("show-actions");
-      });
-      card.classList.toggle("show-actions");
-    });
-  });
-
-  document.addEventListener("click", () => {
-    grid.querySelectorAll(".tool-card.show-actions").forEach(el => {
-      el.classList.remove("show-actions");
-    });
-  });
-
-  grid.querySelectorAll(".tool-card-action-btn").forEach(btn => {
-    btn.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      const action = btn.dataset.action;
-      const toolId = btn.dataset.tool;
-
-      if (action === "unpin") {
-        showUnpinModal(toolId);
-      } else if (action === "pin") {
-        await pinTool(toolId);
-        await renderPinnedToolsSidebar();
-        await renderToolCatalogue();
-      }
-    });
-  });
-}
 
 // ========== EVENT LISTENERS ==========
 document.addEventListener("DOMContentLoaded", async () => {
@@ -1328,14 +1410,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     launchpadEl.classList.remove("entering");
     launchpadEl.classList.add("entered");
   }
-
-  const toolCards = document.querySelectorAll(".tool-card.entering");
-  toolCards.forEach((card, i) => {
-    setTimeout(() => {
-      card.classList.remove("entering");
-      card.classList.add("entered");
-    }, 50 + i * 50);
-  });
 
   const sidebarTools = document.querySelectorAll(".tool-btn-wrapper.entering");
   sidebarTools.forEach((tool, i) => {
@@ -1473,6 +1547,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // database change across all tools.
   document.addEventListener("db-change", async () => {
     await renderSidebarSubjects();
+    await renderDashboard();
   });
 
   const unpinCancel = document.getElementById("unpinCancel");

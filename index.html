@@ -4,6 +4,8 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>NeuroNet</title>
+<link rel="stylesheet" href="./src/vendor/icons/fontawesome/fontawesome.min.css">
+<link rel="stylesheet" href="./src/vendor/icons/remixicon/remixicon.css">
 <link rel="stylesheet" href="./src/vendor/md-format/mdeditor.css">
 <style>
 :root {
@@ -717,8 +719,9 @@ canvas { position: fixed; inset:0; z-index:-1; }
 }
 
 .launchpad.entered > .panel:nth-child(1) { transition-delay: 0.1s; }
-.launchpad.entered > .panel:nth-child(2) { transition-delay: 0.2s; }
-.launchpad.entered > .panel:nth-child(3) { transition-delay: 0.3s; }
+.launchpad.entered > .panel:nth-child(2) { transition-delay: 0.18s; }
+.launchpad.entered > .panel:nth-child(3) { transition-delay: 0.26s; }
+.launchpad.entered > .panel:nth-child(4) { transition-delay: 0.34s; }
 
 .launchpad.entering > .panel {
   opacity: 0;
@@ -736,19 +739,8 @@ canvas { position: fixed; inset:0; z-index:-1; }
   flex-shrink: 0;
 }
 
-.global-stats {
-  margin-bottom: 8px;
-}
-
 .launchpad * {
   user-select: none;
-}
-
-.kicker {
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  font-size: 0.72rem;
-  color: rgba(44, 255, 179, 0.75);
 }
 
 .btn {
@@ -868,261 +860,271 @@ canvas { position: fixed; inset:0; z-index:-1; }
   backdrop-filter: blur(var(--glass-blur));
 }
 
-#globalStats .stats-grid {
+/* Dashboard: Quick Actions */
+.dash-quick-actions .kicker { display: block; margin-bottom: 12px; }
+.dash-actions-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(80px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 12px;
 }
-
-.stat-card {
+.dash-action-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.08);
   border-radius: 14px;
-  padding: 12px;
-  text-align: center;
-  min-height: auto;
+  padding: 16px 18px;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+  text-align: left;
+  color: inherit;
+  font: inherit;
 }
-
-.stat-card strong {
-  display: block;
-  font-size: 1.2rem;
+.dash-action-card:hover:not(:disabled) {
+  background: rgba(44, 255, 179, 0.08);
+  border-color: rgba(44, 255, 179, 0.25);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(44, 255, 179, 0.08);
+}
+.dash-action-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.dash-action-icon {
+  font-size: 1.5rem;
+  line-height: 1;
   color: var(--accent);
 }
-
-.stat-label {
-  display: block;
-  font-size: 0.8rem;
-  color: rgba(230,255,245,0.65);
-  margin-bottom: 4px;
+.dash-action-label {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text-main);
+}
+.dash-action-sub {
+  font-size: 0.78rem;
+  color: rgba(230,255,245,0.55);
+  line-height: 1.3;
 }
 
-.section-header {
+/* Dashboard: Study Streak */
+.dash-streak-body {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+}
+.dash-streak-flame {
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: rgba(44, 255, 179, 0.12);
+  border: 1px solid rgba(44, 255, 179, 0.25);
+  color: var(--accent);
+  font-size: 1.3rem;
+}
+.dash-streak-info { flex: 1; }
+.dash-streak-info .kicker { display: block; margin-bottom: 6px; }
+.dash-streak-msg {
+  margin: 0;
+  font-size: 0.9rem;
+  color: rgba(230,255,245,0.75);
+  line-height: 1.4;
+}
+.dash-streak-msg strong {
+  color: var(--accent);
+}
+.dash-streak-days {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.dash-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.dash-day-label {
+  font-size: 0.7rem;
+  color: rgba(230,255,245,0.45);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+.dash-day-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.06);
+  border: 1.5px solid rgba(255,255,255,0.1);
+  transition: all 0.3s ease;
+}
+.dash-day.studied .dash-day-dot {
+  background: rgba(44, 255, 179, 0.3);
+  border-color: var(--accent);
+  box-shadow: 0 0 8px rgba(44, 255, 179, 0.25);
+}
+.dash-day.today .dash-day-dot {
+  border-color: rgba(230,255,245,0.35);
+}
+.dash-day.today.studied .dash-day-dot {
+  border-color: var(--accent);
+}
+
+/* Dashboard: Due for Review */
+.dash-due .kicker { display: block; margin-bottom: 10px; }
+.dash-due-list { display: flex; flex-direction: column; gap: 8px; }
+.dash-due-row {
+  display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 14px;
+  padding: 12px 14px;
+  background: rgba(255,255,255,0.035);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 10px;
+  transition: background 0.15s ease;
+}
+.dash-due-row:hover {
+  background: rgba(255,255,255,0.06);
+}
+.dash-due-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text-main);
+  flex: 1;
+}
+.dash-due-counts {
+  display: flex;
+  gap: 10px;
+  font-size: 0.78rem;
+  color: rgba(230,255,245,0.55);
+}
+.dash-due-counts span {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.dash-due-counts .count {
+  color: var(--accent);
+  font-weight: 600;
+}
+.dash-due-btn {
+  border-radius: 8px;
+  border: 1px solid rgba(44, 255, 179, 0.3);
+  background: rgba(44, 255, 179, 0.1);
+  color: var(--accent);
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.dash-due-btn:hover {
+  background: rgba(44, 255, 179, 0.2);
+  border-color: var(--accent);
+}
+
+/* Dashboard: Recent Activity */
+.dash-activity .kicker { display: block; margin-bottom: 10px; }
+.dash-activity-list { display: flex; flex-direction: column; gap: 8px; }
+.dash-activity-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: rgba(255,255,255,0.035);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 10px;
+}
+.dash-activity-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+  width: 28px;
+  text-align: center;
+}
+.dash-activity-info { flex: 1; min-width: 0; }
+.dash-activity-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dash-activity-meta {
+  font-size: 0.75rem;
+  color: rgba(230,255,245,0.5);
+  margin-top: 2px;
+}
+.dash-activity-badge {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.dash-activity-badge.good {
+  color: var(--accent);
+  background: rgba(44, 255, 179, 0.12);
+}
+.dash-activity-badge.low {
+  color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.12);
+}
+.dash-empty-note {
+  text-align: center;
+  color: rgba(230, 255, 245, 0.45);
+  font-size: 0.85rem;
+  padding: 10px;
 }
 
 .kicker {
   flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.72rem;
+  color: rgba(44, 255, 179, 0.75);
 }
 
-.subject-controls {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin-left: auto;
-}
-
-.subject-controls .inline-input {
-  width: 160px;
-}
-
-.subject-controls .btn.primary {
-  padding: 6px 12px;
-}
-
-.subject-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
-}
-
-.subject-create-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
-  margin-bottom: 14px;
-}
-
-.subject-card {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 14px;
-  padding: 18px 20px;
-  min-height: 62px;
-  box-sizing: border-box;
-  cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
-}
-
-.subject-card:hover {
-  background: rgba(44, 255, 179, 0.08);
-  border-color: rgba(44, 255, 179, 0.25);
-  transform: translateX(4px);
-  box-shadow: 0 0 20px rgba(44, 255, 179, 0.1);
-}
-
-.subject-card-btn {
-  background: transparent;
-  border: none;
-  color: var(--text-main);
-  font-size: 1rem;
-  font-weight: 600;
-  text-align: left;
-  cursor: pointer;
-  padding: 0;
-  flex: 1;
-}
-
-.subject-card-btn:hover {
-  color: var(--accent);
-}
-
-.subject-name {
-  font-size: 1rem;
-  font-weight: 600;
-  flex: 1;
-  color: var(--text-main);
-}
-
-.subject-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.subject-actions[hidden] {
-  display: none !important;
-}
-
-.subject-actions button {
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 0.8rem;
-  padding: 6px 10px;
-  border-radius: 6px;
-  transition: all 0.2s ease;
-}
-
-.subject-actions button:hover {
-  background: rgba(255,255,255,0.1);
-  color: var(--text-main);
-}
-
-.subject-actions button[data-action="delete-subject"]:hover {
-  color: #ff6b6b;
-}
-
-.tool-cards-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 14px;
-  margin-top: 20px;
-}
-
-.tool-card {
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 14px;
-  padding: 20px;
-  cursor: pointer;
-  transition: transform 0.5s cubic-bezier(0.23, 1, 0.32, 1), opacity 0.6s ease, border-color 0.2s ease, background 0.2s ease;
-  position: relative;
-  overflow: visible;
-}
-
-.tool-card.entering {
-  opacity: 0;
-  transform: translateY(24px) scale(0.96);
-}
-
-.tool-card.entered {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-}
-
-.tool-card:hover {
-  border-color: var(--accent-soft);
-  background: rgba(44,255,179,0.08);
-}
-
-.tool-card-icon {
-  font-size: 1.5rem;
-  margin-bottom: 10px;
-}
-
-.tool-card-title {
-  font-weight: 600;
-  font-size: 1.1rem;
-  margin-bottom: 4px;
-}
-
-.tool-card-desc {
-  font-size: 0.85rem;
-  color: rgba(230,255,245,0.65);
-}
-
-.tool-card-pin {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  background: transparent;
-  border: none;
-  color: rgba(255,255,255,0.4);
-  cursor: pointer;
-  font-size: 1rem;
-  padding: 4px;
-}
-
-.tool-card-pin:hover,
-.tool-card-pin.pinned {
-  color: var(--accent);
-}
-
-.tool-card-actions {
-  position: absolute;
-  top: 12px;
-  right: -4px;
-  background: rgba(10,30,22,0.95);
+/* Sidebar subject context menu */
+.subject-pill-menu {
+  position: fixed;
+  z-index: 200;
+  background: rgba(10,30,22,0.97);
   border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 8px;
-  padding: 6px;
-  display: flex;
-  gap: 4px;
-  opacity: 0;
-  width: 0;
-  padding: 0;
-  overflow: hidden;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  z-index: 10;
+  border-radius: 10px;
+  padding: 4px;
+  min-width: 130px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  display: none;
 }
-
-.tool-card.show-actions .tool-card-actions {
-  opacity: 1;
-  width: auto;
-  padding: 6px;
-}
-
-.tool-card-action-btn {
-  padding: 8px 12px;
+.subject-pill-menu.open { display: flex; flex-direction: column; gap: 2px; }
+.subject-pill-menu button {
   background: transparent;
   border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 0.8rem;
+  color: rgba(230,255,245,0.8);
+  padding: 8px 12px;
   border-radius: 6px;
-  transition: all 0.2s ease;
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease;
 }
-
-.tool-card-action-btn[data-action="unpin"] {
+.subject-pill-menu button:hover {
+  background: rgba(255,255,255,0.08);
+}
+.subject-pill-menu button.danger {
   color: #ff6b6b;
 }
-
-.tool-card-action-btn:hover {
-  background: rgba(44,255,179,0.15);
-  color: var(--accent);
-}
-
-.tool-card-action-btn[data-action="unpin"]:hover {
-  background: rgba(255,107,107,0.15);
+.subject-pill-menu button.danger:hover {
+  background: rgba(255, 107, 107, 0.12);
 }
 
 /* Modal styles */
@@ -1362,15 +1364,14 @@ canvas { position: fixed; inset:0; z-index:-1; }
   #toolContainer { overflow: hidden; }
   .launchpad { padding: 12px; gap: 12px; }
 
-  /* Stats: 2x2 instead of 4 cramped columns */
-  #globalStats .stats-grid {
+  /* Quick actions: 2x2 on phones */
+  .dash-actions-grid {
     grid-template-columns: repeat(2, 1fr);
     gap: 10px;
   }
-
-  /* Subject controls: stack on one tight row */
-  .subject-controls { flex-wrap: wrap; }
-  .subject-controls .inline-input { width: 100%; }
+  .dash-action-card { padding: 14px; }
+  .dash-streak-body { flex-direction: column; align-items: flex-start; gap: 14px; }
+  .dash-due-row { flex-wrap: wrap; gap: 8px; }
 
   #nnToastRoot { left: 8px; right: 8px; bottom: 12px; transform: none; align-items: stretch; }
   .nn-toast { font-size: 0.85rem; padding: 11px 14px; }
@@ -1394,17 +1395,11 @@ canvas { position: fixed; inset:0; z-index:-1; }
   #mainContent { padding: 8px; min-width: 0; }
   .launchpad { padding: 4px; gap: 8px; }
   .panel { padding: 12px; border-radius: 10px; }
-  #globalStats .stats-grid { gap: 8px; }
-  .stat-card { padding: 10px 6px; }
-  .stat-card strong { font-size: 1.05rem; }
-  .stat-label { font-size: 0.72rem; }
-  .section-header { align-items: flex-start; flex-direction: column; gap: 10px; }
-  .subject-controls { width: 100%; margin-left: 0; }
-  .subject-controls .btn { min-width: 44px; }
-  .subject-create-row { grid-template-columns: 1fr; }
-  .subject-card { padding: 14px; }
-  .tool-cards-grid { grid-template-columns: 1fr; gap: 10px; }
-  .tool-card { padding: 16px; }
+  .dash-actions-grid { gap: 8px; }
+  .dash-action-card { padding: 12px; }
+  .dash-action-icon { font-size: 1.2rem; }
+  .dash-action-label { font-size: 0.85rem; }
+  .dash-day-dot { width: 24px; height: 24px; }
   .modal-content { width: calc(100% - 24px); padding: 18px; }
   .modal-actions { flex-direction: column-reverse; }
   .modal-actions .btn { width: 100%; min-height: 44px; }
@@ -1414,9 +1409,9 @@ canvas { position: fixed; inset:0; z-index:-1; }
   .btn,
   .tool-btn,
   .subject-pill,
-  .subject-actions button,
-  .tool-action-btn,
-  .tool-card-action-btn { min-height: 44px; }
+  .dash-action-card,
+  .dash-due-btn,
+  .tool-action-btn { min-height: 44px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1425,45 +1420,6 @@ canvas { position: fixed; inset:0; z-index:-1; }
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
-  }
-}
-
-/* Keep the launchpad subject tools in one compact control row on phones.
-   The previous mobile wrap made the heading and controls look like a broken
-   second header row, especially at narrow widths. */
-@media (max-width: 700px) {
-  .subjects-section .section-header {
-    align-items: center;
-    flex-direction: row;
-    gap: 6px;
-    min-width: 0;
-  }
-  .subjects-section .kicker {
-    flex: 0 0 auto;
-    font-size: 0.85rem;
-  }
-  .subjects-section .subject-controls {
-    flex: 1 1 auto;
-    min-width: 0;
-    width: auto;
-    margin-left: 0;
-    flex-wrap: nowrap;
-    gap: 4px;
-  }
-  .subjects-section .subject-controls .inline-input {
-    flex: 1 1 auto;
-    min-width: 0;
-    width: auto;
-    padding-inline: 7px;
-  }
-  .subjects-section .subject-controls .btn {
-    flex: 0 0 auto;
-    min-width: 0;
-    padding-inline: 9px;
-  }
-  .subjects-section #addSubjectBtn {
-    width: 34px;
-    padding-inline: 0;
   }
 }
 
@@ -1829,43 +1785,66 @@ canvas { position: fixed; inset:0; z-index:-1; }
     <div id="toolContainer"></div>
     <!-- Global Launchpad (outside toolContainer) -->
     <div id="globalLaunchpad" class="launchpad entering">
-        <section class="panel global-stats" id="globalStats">
-          <div class="stats-grid">
-            <div class="stat-card">
-              <span class="stat-label">Subjects</span>
-              <strong id="statSubjects">0</strong>
+
+        <!-- Study Streak (greeting) -->
+        <section class="panel dash-streak" id="dashStreak">
+          <div class="dash-streak-body">
+            <span class="dash-streak-flame"><i class="fa-solid fa-fire"></i></span>
+            <div class="dash-streak-info">
+              <span class="kicker">Study Streak</span>
+              <p class="dash-streak-msg" id="dashStreakMsg">Start studying to build your streak!</p>
             </div>
-            <div class="stat-card">
-              <span class="stat-label">Sources</span>
-              <strong id="statSources">0</strong>
-            </div>
-            <div class="stat-card">
-              <span class="stat-label">Quotes</span>
-              <strong id="statQuotes">0</strong>
-            </div>
-            <div class="stat-card">
-              <span class="stat-label">Analyses</span>
-              <strong id="statAnalyses">0</strong>
+            <div class="dash-streak-days" id="dashStreakDays">
+              <div class="dash-day" data-day="0"><span class="dash-day-label">M</span><span class="dash-day-dot"></span></div>
+              <div class="dash-day" data-day="1"><span class="dash-day-label">T</span><span class="dash-day-dot"></span></div>
+              <div class="dash-day" data-day="2"><span class="dash-day-label">W</span><span class="dash-day-dot"></span></div>
+              <div class="dash-day" data-day="3"><span class="dash-day-label">T</span><span class="dash-day-dot"></span></div>
+              <div class="dash-day" data-day="4"><span class="dash-day-label">F</span><span class="dash-day-dot"></span></div>
+              <div class="dash-day" data-day="5"><span class="dash-day-label">S</span><span class="dash-day-dot"></span></div>
+              <div class="dash-day" data-day="6"><span class="dash-day-label">S</span><span class="dash-day-dot"></span></div>
             </div>
           </div>
         </section>
 
-        <section class="panel subjects-section">
-          <div class="section-header">
-            <span class="kicker">Subjects</span>
-            <span class="subject-controls">
-              <input id="newSubjectName" class="inline-input" type="text" placeholder="New subject name" maxlength="80" />
-              <button id="addSubjectBtn" class="btn primary" type="button" disabled>+</button>
-              <button id="toggleSubjectEdit" class="btn" type="button">Edit</button>
-            </span>
+        <!-- Quick Actions -->
+        <section class="panel dash-quick-actions" id="dashQuickActions">
+          <span class="kicker">Quick Actions</span>
+          <div class="dash-actions-grid" id="dashActionsGrid">
+            <button class="dash-action-card" id="dashResume" disabled>
+              <span class="dash-action-icon"><i class="fa-solid fa-bookmark"></i></span>
+              <span class="dash-action-label">Resume</span>
+              <span class="dash-action-sub" id="dashResumeSub">No recent activity</span>
+            </button>
+            <button class="dash-action-card" id="dashStudyNow" disabled>
+              <span class="dash-action-icon"><i class="fa-solid fa-brain"></i></span>
+              <span class="dash-action-label">Study Now</span>
+              <span class="dash-action-sub" id="dashStudySub">No cards due</span>
+            </button>
+            <button class="dash-action-card" id="dashNewSource">
+              <span class="dash-action-icon"><i class="fa-solid fa-file-lines"></i></span>
+              <span class="dash-action-label">New Source</span>
+              <span class="dash-action-sub">Add material to analyse</span>
+            </button>
+            <button class="dash-action-card" id="dashAddSubject">
+              <span class="dash-action-icon"><i class="fa-solid fa-folder-plus"></i></span>
+              <span class="dash-action-label">Add Subject</span>
+              <span class="dash-action-sub">Create a new topic</span>
+            </button>
           </div>
-          <div id="subjectList" class="subject-list"></div>
         </section>
 
-        <section class="panel tool-catalogue">
-          <h3 class="kicker">Tool Catalogue</h3>
-          <div id="toolCardsGrid" class="tool-cards-grid"></div>
+        <!-- Due for Review -->
+        <section class="panel dash-due" id="dashDue">
+          <span class="kicker">Due for Review</span>
+          <div id="dashDueList" class="dash-due-list"></div>
         </section>
+
+        <!-- Recent Activity -->
+        <section class="panel dash-activity" id="dashActivity">
+          <span class="kicker">Recent Activity</span>
+          <div id="dashActivityList" class="dash-activity-list"></div>
+        </section>
+
     </div>
   </main>
 </div>
