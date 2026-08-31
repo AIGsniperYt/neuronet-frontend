@@ -1287,16 +1287,20 @@ canvas { position: fixed; inset:0; z-index:-1; }
   }
   #sidebarSubjectBackdrop.show { opacity: 1; pointer-events: auto; }
 
-  /* Profile dropdown: bottom-sheet style, never overflows the viewport */
+  /* Profile menu: anchor it below the top-right profile control. */
   #dropdown {
     position: fixed;
-    top: auto;
-    bottom: 12px;
-    left: 12px;
-    right: 12px;
+    top: calc(64px + env(safe-area-inset-top));
+    bottom: auto;
+    left: auto;
+    right: 8px;
+    width: min(320px, calc(100vw - 16px));
     min-width: 0;
-    max-height: 70vh;
+    max-height: calc(100dvh - 80px - env(safe-area-inset-top));
     overflow-y: auto;
+    overscroll-behavior: contain;
+    z-index: 220;
+    border-radius: 16px;
   }
 
   /* Main content + launchpad */
