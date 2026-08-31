@@ -274,6 +274,15 @@ canvas { position: fixed; inset:0; z-index:-1; }
   display: contents;
 }
 
+.mobile-nav-section-toggle {
+  display: none;
+}
+
+#mobileSubjectsSection,
+#mobileToolsSection {
+  display: contents;
+}
+
 /* Subject switcher in sidebar */
 #sidebarSubjects {
   display: flex;
@@ -1167,6 +1176,7 @@ canvas { position: fixed; inset:0; z-index:-1; }
     width: min(86vw, 340px);
     padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
     z-index: 190;
+    max-height: 100dvh;
     overflow-y: auto;
     overscroll-behavior: contain;
     border-right: 1px solid var(--glass-border);
@@ -1177,6 +1187,37 @@ canvas { position: fixed; inset:0; z-index:-1; }
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   }
   #mobileNavPanel.open { transform: translateX(0); }
+  .mobile-nav-section-toggle {
+    appearance: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    min-height: 46px;
+    padding: 10px 2px;
+    border: 1px solid rgba(44,255,179,0.2);
+    border-radius: 10px;
+    background: rgba(44,255,179,0.07);
+    color: var(--text-main);
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-align: left;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .mobile-nav-section-toggle::after {
+    content: "▾";
+    color: var(--accent);
+    font-size: 1rem;
+    transition: transform 0.2s ease;
+  }
+  .mobile-nav-section-toggle[aria-expanded="false"]::after { transform: rotate(-90deg); }
+  #mobileSubjectsSection,
+  #mobileToolsSection { display: none; }
+  #mobileSubjectsSection.mobile-section-open,
+  #mobileToolsSection.mobile-section-open { display: block; }
   #mobileNavPanel #sidebarSubjects,
   #mobileNavPanel #toolButtonsContainer {
     position: static;
@@ -1190,22 +1231,12 @@ canvas { position: fixed; inset:0; z-index:-1; }
     border-radius: 0;
     box-shadow: none;
   }
-  #mobileNavPanel #sidebarSubjects { padding: 0 0 18px; margin: 0 0 18px; border-bottom: 1px solid var(--glass-border); }
+  #mobileNavPanel #sidebarSubjects { padding: 0 0 18px; margin: 0 0 10px; border-bottom: 1px solid var(--glass-border); }
   #mobileNavPanel #toolButtonsContainer {
     display: flex;
     flex-direction: column;
     flex-wrap: nowrap;
     gap: 8px;
-  }
-  #mobileNavPanel #toolButtonsContainer::before {
-    content: "Tools";
-    display: block;
-    padding: 0 2px 4px;
-    color: var(--text-muted);
-    font-size: 0.62rem;
-    font-weight: 600;
-    letter-spacing: 1.6px;
-    text-transform: uppercase;
   }
   #toolButtonsContainer {
     order: 3;
@@ -1330,14 +1361,20 @@ canvas { position: fixed; inset:0; z-index:-1; }
     <h2 id="logo" style="cursor: pointer;">NeuroNet</h2>
     <div id="sidebarSubjectBackdrop"></div>
     <div id="mobileNavPanel">
-      <div id="sidebarSubjects">
-        <div id="sidebarSubjectsHead">
-          <span>Subjects</span>
-          <button id="sidebarSubjectAll" class="subject-pill active" data-subject="">All</button>
+      <button id="mobileSubjectsToggle" class="mobile-nav-section-toggle" type="button" aria-controls="mobileSubjectsSection" aria-expanded="true">Subjects</button>
+      <div id="mobileSubjectsSection" class="mobile-section-open">
+        <div id="sidebarSubjects">
+          <div id="sidebarSubjectsHead">
+            <span>Subjects</span>
+            <button id="sidebarSubjectAll" class="subject-pill active" data-subject="">All</button>
+          </div>
+          <div id="sidebarSubjectList"></div>
         </div>
-        <div id="sidebarSubjectList"></div>
       </div>
-      <div id="toolButtonsContainer"></div>
+      <button id="mobileToolsToggle" class="mobile-nav-section-toggle" type="button" aria-controls="mobileToolsSection" aria-expanded="false">Tools</button>
+      <div id="mobileToolsSection">
+        <div id="toolButtonsContainer"></div>
+      </div>
     </div>
 
     <div id="sidebarProfile">

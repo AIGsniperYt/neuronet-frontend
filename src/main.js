@@ -1027,6 +1027,7 @@ async function renderPinnedToolsSidebar() {
     btn.addEventListener("click", () => {
       const toolName = btn.dataset.tool;
       const subject = currentSubject;
+      window.closeSubjectDrawer?.();
       hideLaunchpad();
       loadTool(toolName, { subject });
     });
@@ -1345,6 +1346,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   const hamburger = document.getElementById("sidebarHamburger");
   const mobileNavPanel = document.getElementById("mobileNavPanel");
   const subjectBackdrop = document.getElementById("sidebarSubjectBackdrop");
+  const mobileSubjectsToggle = document.getElementById("mobileSubjectsToggle");
+  const mobileToolsToggle = document.getElementById("mobileToolsToggle");
+  const mobileSubjectsSection = document.getElementById("mobileSubjectsSection");
+  const mobileToolsSection = document.getElementById("mobileToolsSection");
   window.closeSubjectDrawer = closeSubjectDrawer;
   function closeSubjectDrawer() {
     mobileNavPanel?.classList.remove("open");
@@ -1362,6 +1367,21 @@ document.addEventListener("DOMContentLoaded", async () => {
     open ? closeSubjectDrawer() : openSubjectDrawer();
   });
   subjectBackdrop?.addEventListener("click", closeSubjectDrawer);
+  function setMobileNavSection(section, toggle, open) {
+    if (!section || !toggle) return;
+    section.classList.toggle("mobile-section-open", open);
+    toggle.setAttribute("aria-expanded", String(open));
+  }
+  function toggleMobileNavSection(sectionName) {
+    const isSubjects = sectionName === "subjects";
+    const section = isSubjects ? mobileSubjectsSection : mobileToolsSection;
+    const toggle = isSubjects ? mobileSubjectsToggle : mobileToolsToggle;
+    const open = toggle?.getAttribute("aria-expanded") !== "true";
+    setMobileNavSection(mobileSubjectsSection, mobileSubjectsToggle, isSubjects && open);
+    setMobileNavSection(mobileToolsSection, mobileToolsToggle, !isSubjects && open);
+  }
+  mobileSubjectsToggle?.addEventListener("click", () => toggleMobileNavSection("subjects"));
+  mobileToolsToggle?.addEventListener("click", () => toggleMobileNavSection("tools"));
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeSubjectDrawer();
   });
