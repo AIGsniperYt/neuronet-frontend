@@ -277,27 +277,10 @@ canvas { position: fixed; inset:0; z-index:-1; }
   flex-direction: column;
   min-height: 0;
   overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(44,255,179,0.55) rgba(255,255,255,0.06);
-  scrollbar-gutter: stable;
+  scrollbar-width: none;
 }
 
-#mobileNavPanel::-webkit-scrollbar {
-  display: block;
-  width: 9px;
-}
-
-#mobileNavPanel::-webkit-scrollbar-track {
-  background: rgba(255,255,255,0.05);
-  border-radius: 999px;
-}
-
-#mobileNavPanel::-webkit-scrollbar-thumb {
-  display: block;
-  background: rgba(44,255,179,0.5);
-  border-radius: 999px;
-  border: 2px solid rgba(10,30,22,0.9);
-}
+#mobileNavPanel::-webkit-scrollbar { display: none; }
 
 .mobile-nav-section-toggle {
   appearance: none;
@@ -1245,8 +1228,7 @@ canvas { position: fixed; inset:0; z-index:-1; }
     max-height: none;
     overflow-x: hidden;
     overflow-y: scroll;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(44,255,179,0.45) transparent;
+    scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
     touch-action: pan-y;
