@@ -1208,7 +1208,7 @@ canvas { position: fixed; inset:0; z-index:-1; }
     justify-content: space-between;
     width: 100%;
     min-height: 46px;
-    padding: 10px 2px;
+    padding: 10px 14px;
     border: 1px solid rgba(44,255,179,0.2);
     border-radius: 10px;
     background: rgba(44,255,179,0.07);
@@ -1223,6 +1223,9 @@ canvas { position: fixed; inset:0; z-index:-1; }
   }
   .mobile-nav-section-toggle::after {
     content: "▾";
+    flex: 0 0 auto;
+    margin-left: 12px;
+    padding: 3px 4px;
     color: var(--accent);
     font-size: 1rem;
     transition: transform 0.2s ease;
