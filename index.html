@@ -211,6 +211,7 @@ canvas { position: fixed; inset:0; z-index:-1; }
 }
 
 #sidebar {
+  position: relative;
   width: 240px;
   background: var(--glass-surface);
   backdrop-filter: blur(var(--glass-blur));
@@ -271,16 +272,69 @@ canvas { position: fixed; inset:0; z-index:-1; }
 }
 
 #mobileNavPanel {
-  display: contents;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(44,255,179,0.55) rgba(255,255,255,0.06);
+  scrollbar-gutter: stable;
+}
+
+#mobileNavPanel::-webkit-scrollbar {
+  display: block;
+  width: 9px;
+}
+
+#mobileNavPanel::-webkit-scrollbar-track {
+  background: rgba(255,255,255,0.05);
+  border-radius: 999px;
+}
+
+#mobileNavPanel::-webkit-scrollbar-thumb {
+  display: block;
+  background: rgba(44,255,179,0.5);
+  border-radius: 999px;
+  border: 2px solid rgba(10,30,22,0.9);
 }
 
 .mobile-nav-section-toggle {
-  display: none;
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid rgba(44,255,179,0.2);
+  border-radius: 10px;
+  background: rgba(44,255,179,0.07);
+  color: var(--text-main);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+  margin: 0 0 8px;
 }
+
+.mobile-nav-section-toggle::after {
+  content: "▾";
+  flex: 0 0 auto;
+  margin-left: 12px;
+  padding: 3px 4px;
+  color: var(--accent);
+  font-size: 1rem;
+  transition: transform 0.2s ease;
+}
+
+.mobile-nav-section-toggle[aria-expanded="false"]::after { transform: rotate(-90deg); }
 
 #mobileSubjectsSection,
 #mobileToolsSection {
-  display: contents;
+  display: block;
 }
 
 /* Subject switcher in sidebar */
@@ -306,13 +360,6 @@ canvas { position: fixed; inset:0; z-index:-1; }
   align-items: center;
   justify-content: space-between;
   padding: 0 2px 6px;
-}
-#sidebarSubjectsHead > span {
-  font-size: 0.62rem;
-  text-transform: uppercase;
-  letter-spacing: 1.6px;
-  color: var(--text-muted);
-  font-weight: 600;
 }
 #sidebarSubjectList {
   display: flex;
@@ -506,6 +553,11 @@ canvas { position: fixed; inset:0; z-index:-1; }
 /* Profile section in sidebar */
 #sidebarProfile {
   margin-top: auto;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  flex-shrink: 0;
+  background: linear-gradient(180deg, rgba(10,30,22,0.72), rgba(10,30,22,1) 28%);
   padding-top: 24px;
   border-top: 1px solid var(--glass-border);
   display: flex;
@@ -1168,15 +1220,20 @@ canvas { position: fixed; inset:0; z-index:-1; }
   #sidebar h2 { order: 1; font-size: 1.3rem; margin: 0; padding-left: 0; }
   #sidebarProfile {
     order: 2;
-    margin: 0 0 0 auto;
-    padding-top: 0;
-    border-top: none;
+    margin: auto 0 0;
+    padding-top: 16px;
+    border-top: 1px solid var(--glass-border);
+    position: sticky;
+    bottom: 0;
+    background: linear-gradient(180deg, rgba(10,30,22,0.72), rgba(10,30,22,1) 28%);
+    z-index: 2;
   }
-  #sidebarProfile span { display: none; }
+  #sidebarProfile span { display: block; }
 
   /* Tools and subjects share one compact navigation drawer. */
   #mobileNavPanel {
-    display: block;
+    display: flex;
+    flex-direction: column;
     position: fixed;
     top: 0;
     bottom: 0;
@@ -1290,13 +1347,13 @@ canvas { position: fixed; inset:0; z-index:-1; }
   /* Profile menu: anchor it below the top-right profile control. */
   #dropdown {
     position: fixed;
-    top: calc(64px + env(safe-area-inset-top));
-    bottom: auto;
-    left: auto;
+    top: auto;
+    bottom: calc(72px + env(safe-area-inset-bottom));
+    left: 8px;
     right: 8px;
-    width: min(320px, calc(100vw - 16px));
+    width: auto;
     min-width: 0;
-    max-height: calc(100dvh - 80px - env(safe-area-inset-top));
+    max-height: calc(100dvh - 88px - env(safe-area-inset-bottom));
     overflow-y: auto;
     overscroll-behavior: contain;
     z-index: 220;
@@ -1386,7 +1443,6 @@ canvas { position: fixed; inset:0; z-index:-1; }
       <div id="mobileSubjectsSection" class="mobile-section-open">
         <div id="sidebarSubjects">
           <div id="sidebarSubjectsHead">
-            <span>Subjects</span>
             <button id="sidebarSubjectAll" class="subject-pill active" data-subject="">All</button>
           </div>
           <div id="sidebarSubjectList"></div>
@@ -1396,20 +1452,19 @@ canvas { position: fixed; inset:0; z-index:-1; }
       <div id="mobileToolsSection">
         <div id="toolButtonsContainer"></div>
       </div>
-    </div>
-
-    <div id="sidebarProfile">
-      <img id="userPfp" src="" alt="Profile" style="position: relative;">
-      <span id="userName">Loading...</span>
-    </div>
-    <div id="dropdown" style="display: none;">
-      <button id="authActionBtn">Log In with Google</button>
-      <button id="logoutBtn">Logout</button>
-      <button id="exportJsonBtn">Export JSON Data</button>
-      <button id="importJsonBtn">Import JSON Data</button>
-      <button id="importDemoBtn">Import Demo Data</button>
-      <button id="deleteDataBtn" class="danger">Delete Data</button>
-      <input id="importJsonInput" type="file" accept=".json,application/json" hidden />
+      <div id="sidebarProfile">
+        <img id="userPfp" src="" alt="Profile" style="position: relative;">
+        <span id="userName">Loading...</span>
+      </div>
+      <div id="dropdown" style="display: none;">
+        <button id="authActionBtn">Log In with Google</button>
+        <button id="logoutBtn">Logout</button>
+        <button id="exportJsonBtn">Export JSON Data</button>
+        <button id="importJsonBtn">Import JSON Data</button>
+        <button id="importDemoBtn">Import Demo Data</button>
+        <button id="deleteDataBtn" class="danger">Delete Data</button>
+        <input id="importJsonInput" type="file" accept=".json,application/json" hidden />
+      </div>
     </div>
   </aside>
 
