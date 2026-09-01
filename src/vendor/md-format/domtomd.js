@@ -41,8 +41,11 @@ function mdBlock(node, depth) {
         /* `div` is what browsers inject when you hit Enter inside a
          * contenteditable paragraph — treat it like a paragraph. */
         case "p":
-        case "div":
-            return mdInlineChildren(node);
+        case "div": {
+            const inner = mdInlineChildren(node);
+            if (!inner.trim()) return "<br>";
+            return inner;
+        }
 
         case "blockquote": {
             /* A blockquote is usually dialogue or an excerpt: short inline

@@ -337,14 +337,43 @@ html, body, * {
 }
 
 #sourceEditor {
-  height: 460px;
+  flex: 1;
+  min-height: 160px;
   padding: 0;
   overflow: hidden;
   display: flex;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(5, 18, 13, 0.85);
+  border-radius: 8px;
+  box-shadow: none;
 }
 
 #sourceEditor .mdedit {
   flex: 1;
+}
+
+/* the editor is the field that replaces the reader surface: give the inner
+ * scroll a distinct page/input look (not the flat card bg) and let it grow to
+ * fill the pane, so it reads as the editing surface instead of a small well. */
+#sourceEditor .mdedit-scroll {
+  background: var(--md-bg, rgba(5, 18, 13, 0.85));
+  padding: 8px 12px;
+}
+#sourceEditor .mdedit-scroll.raw {
+  padding: 0;
+}
+
+/* deliberate, non-jumpy focus: accent ring on the field, no browser outline
+ * that would expose the small interior area. */
+#sourceEditor:focus-within {
+  border-color: rgba(44, 255, 179, 0.45);
+  box-shadow: 0 0 0 3px rgba(44, 255, 179, 0.08);
+  outline: none;
+}
+#sourceEditor .mdedit-scroll:focus,
+#sourceEditor .mdedit-scroll .md:focus {
+  outline: none;
+  box-shadow: none;
 }
 
 .panel-header {
@@ -577,14 +606,62 @@ html, body, * {
   overflow-y: auto;
   overflow-x: hidden;
   padding: 22px;
-  line-height: 1.75;
+  line-height: 1.48;
   color: rgba(237, 255, 248, 0.92);
   user-select: text !important;
   -webkit-user-select: text !important;
 }
 
 .reader-surface p {
-  margin-bottom: 1em;
+  margin: 0 0 0.45em 0;
+}
+
+.reader-surface p:last-child {
+  margin-bottom: 0;
+}
+
+.reader-surface h1,
+.reader-surface h2,
+.reader-surface h3,
+.reader-surface h4,
+.reader-surface h5,
+.reader-surface h6 {
+  font-weight: 700;
+  color: #e6fff5;
+  margin: 0.8em 0 0.3em;
+  line-height: 1.25;
+}
+
+.reader-surface h1 { font-size: 1.7em; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 0.2em; }
+.reader-surface h2 { font-size: 1.4em; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 0.2em; }
+.reader-surface h3 { font-size: 1.2em; }
+.reader-surface h4 { font-size: 1.05em; }
+
+.reader-surface ul,
+.reader-surface ol {
+  padding-left: 1.5em;
+  margin: 0.4em 0;
+}
+
+.reader-surface li {
+  margin: 0.15em 0;
+}
+
+.reader-surface blockquote {
+  border-left: 3px solid rgba(44, 255, 179, 0.45);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 0 8px 8px 0;
+  margin: 0.5em 0;
+  padding: 0.4em 0.9em;
+}
+
+.reader-surface pre {
+  background: rgba(5, 18, 13, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin: 0.5em 0;
 }
 
 .reader-surface::-webkit-scrollbar {
@@ -610,8 +687,22 @@ html, body, * {
 }
 
 .form-grid {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
+  flex: 1;
+  min-height: 0;
+}
+
+.form-error {
+  color: #ff7a7a;
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+
+.inline-input.input-invalid {
+  border-color: #ff6b6b;
+  box-shadow: 0 0 0 2px rgba(255, 107, 107, 0.25);
 }
 
 .form-actions {
@@ -837,6 +928,7 @@ button.analysis-quote-jump.active-quote,
     overflow: visible;
   }
   #sourceEditor {
+    flex: 0 0 auto;
     height: clamp(260px, 52dvh, 460px);
     min-height: 260px;
   }

@@ -616,15 +616,19 @@ function htmlToPlainText(html) {
 
   function showQuoteButton(range) {
     if (!quoteSelectionBtn || !range || !readerWrapper) return;
-    const rect = range.getBoundingClientRect();
-    const wrapperRect = readerWrapper.getBoundingClientRect();
+    try {
+      const rect = range.getBoundingClientRect();
+      const wrapperRect = readerWrapper.getBoundingClientRect();
 
-    const top = rect.top - wrapperRect.top - 42;
-    const left = rect.left - wrapperRect.left;
+      const top = rect.top - wrapperRect.top - 42;
+      const left = rect.left - wrapperRect.left;
 
-    quoteSelectionBtn.style.top = `${Math.max(10, top)}px`;
-    quoteSelectionBtn.style.left = `${Math.max(10, Math.min(left, wrapperRect.width - 140))}px`;
-    quoteSelectionBtn.style.display = "block";
+      quoteSelectionBtn.style.top = `${Math.max(10, Math.min(top, wrapperRect.height - 45))}px`;
+      quoteSelectionBtn.style.left = `${Math.max(10, Math.min(left, wrapperRect.width - 140))}px`;
+      quoteSelectionBtn.style.display = "block";
+    } catch (err) {
+      if (quoteSelectionBtn) quoteSelectionBtn.style.display = "none";
+    }
   }
 
   function hideQuoteButton() {
@@ -1303,36 +1307,55 @@ function htmlToPlainText(html) {
 
   function getSelectionFromReader() {
     const source = getSourceById(state.selectedSourceId);
-    if (!source) return null;
+    if (!source || !analysisReader) return null;
 
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) return null;
 
     const range = selection.getRangeAt(0);
-    if (range.collapsed) return null;
-    if (!analysisReader.contains(range.commonAncestorContainer)) return null;
+    if (!range || range.collapsed) return null;
+
+    // Verify the selection intersects the reader area
+    if (typeof range.intersectsNode === "function") {
+      if (!range.intersectsNode(analysisReader)) return null;
+    } else {
+      if (!analysisReader.contains(range.startContainer) && !analysisReader.contains(range.endContainer)) return null;
+    }
+
+    // Clamp range boundaries so start and end are strictly inside analysisReader
+    const clampedRange = range.cloneRange();
+    if (!analysisReader.contains(clampedRange.startContainer)) {
+      try { clampedRange.setStart(analysisReader, 0); } catch (e) {}
+    }
+    if (!analysisReader.contains(clampedRange.endContainer)) {
+      try { clampedRange.setEnd(analysisReader, analysisReader.childNodes.length); } catch (e) {}
+    }
+
+    if (clampedRange.collapsed) return null;
 
     const pre = document.createRange();
     pre.selectNodeContents(analysisReader);
-    pre.setEnd(range.startContainer, range.startOffset);
+    try {
+      pre.setEnd(clampedRange.startContainer, clampedRange.startOffset);
+    } catch (e) {
+      pre.setEnd(analysisReader, 0);
+    }
 
     const rawStart = pre.toString().length;
 
     // Extract HTML content from the range to preserve formatting (bold, italics, etc.)
     const quoteContainer = document.createElement("div");
-    quoteContainer.appendChild(range.cloneContents());
+    try {
+      quoteContainer.appendChild(clampedRange.cloneContents());
+    } catch (e) {}
     const rawQuoteHtml = quoteContainer.innerHTML;
-    const rawQuote = range.toString();
+    const rawQuote = clampedRange.toString();
     if (!rawQuote.trim()) return null;
 
     const leading = rawQuote.length - rawQuote.trimStart().length;
     const start = rawStart + leading;
     const quote = rawQuote.trim();
     const end = start + quote.length;
-    // Prefix/suffix must come from the READER's live text: the offsets above
-    // are already in that space (range against analysisReader), while
-    // normalizeSource().contentText can be the old legacy space for sources not
-    // yet re-saved. This keeps the SSS fingerprints aligned with the offsets.
     const sourceText = analysisReader.textContent || "";
 
     const prefix = sourceText.substring(Math.max(0, start - 20), start);
@@ -1346,7 +1369,7 @@ function htmlToPlainText(html) {
       suffix,
       quoteHtml: rawQuoteHtml,
       sourceId: source.id,
-      range
+      range: clampedRange
     };
   }
 
@@ -2526,9 +2549,15 @@ const updateLayerSelection = () => {
     const normalized = normalizeSource(source);
     const path = source?.meta?.hierarchyPath || [source.subject, ...(source.section ? source.section.split(" > ") : [])].filter(Boolean);
 
-    const hierarchyLabel = path.length > 1 ? path.join(" > ") : path.join("");
+    if (studySubjectTitle) {
+      studySubjectTitle.textContent = source.title || source.subject || "Untitled Source";
+    }
     if (currentHierarchy) {
-      currentHierarchy.textContent = hierarchyLabel || source.title || source.subject || "No hierarchy";
+      const bucket = source.subject || "Unfiled";
+      const rest = source.subject
+        ? path.slice(1).filter(Boolean).join(" > ")
+        : path.filter(Boolean).join(" > ");
+      currentHierarchy.textContent = rest ? `${bucket} · ${rest}` : bucket;
     }
     const contentMd = sourceMarkdown(source);
     analysisReader.innerHTML = (contentMd.trim() ? render(parse(contentMd), "html") : "") || (normalized.contentHtml || "<p><br></p>");
@@ -2652,6 +2681,9 @@ const updateLayerSelection = () => {
     launchpadView.hidden = inStudy;
     studyView.hidden = !inStudy;
     studySubjectTitle.textContent = state.selectedSubject || "Unfiled";
+    if (!getSourceById(state.selectedSourceId)) {
+      if (currentHierarchy) currentHierarchy.textContent = "";
+    }
 
     if (typeof window.__neuronetCanFocus !== "function") {
       window.__neuronetCanFocus = () => inStudy;
@@ -2928,7 +2960,18 @@ const updateLayerSelection = () => {
       event.preventDefault();
 
       const title = (sourceTitleInput.value || "").trim();
-      if (!title) return;
+      if (!title) {
+        sourceTitleInput.classList.add("input-invalid");
+        sourceTitleInput.setAttribute("aria-invalid", "true");
+        sourceTitleInput.focus();
+        if (!sourceForm.querySelector(".title-error")) {
+          const err = document.createElement("span");
+          err.className = "title-error form-error";
+          err.textContent = "Add a title to save this source.";
+          sourceTitleInput.insertAdjacentElement("afterend", err);
+        }
+        return;
+      }
 
       const subject = (sourceSubjectInput.value || "").trim();
 
@@ -2939,7 +2982,20 @@ const updateLayerSelection = () => {
         sourceLevel3Input?.value || ""
       ]);
 
-      const contentMarkdown = mdEditor.getMarkdown() || "";
+      if (typeof mdEditor.flush === "function") {
+        mdEditor.flush();
+      }
+      const rawMd = mdEditor.getMarkdown() || "";
+      const contentMarkdown = rawMd.trim()
+        ? rawMd
+        : (() => {
+          // WYSIWYG edits are folded back into the source textarea on a short
+          // debounce — if the user saved before that flushed, recover the typed
+          // content from the rendered preview rather than saving a blank body.
+          const root = mdEditor.preview && (mdEditor.preview.querySelector(".md") || mdEditor.preview);
+          if (!root || !root.textContent || !root.textContent.trim()) return "";
+          return domToMarkdown(root) || "";
+        })();
       const contentAst = parse(contentMarkdown);
       const contentHtml = render(contentAst, "html") || "<p><br></p>";
       // Plain text must match the READER's text (analysisReader.textContent of the
@@ -2975,16 +3031,23 @@ const updateLayerSelection = () => {
         updatedAt: now
       });
 
-      // If the saved source carried a subject, enter that subject's workspace.
-      if (subject && subject !== state.selectedSubject) {
-        state.selectedSubject = subject;
-      }
+      // Enter the saved source's subject workspace (or unfiled if subject is empty).
+      state.selectedSubject = subject;
 
       state.selectedSourceId = sourceId;
       resetSourceForm();
       setSourceViewMode("reader");
       await refreshData();
       await backupLocalNodesToCloud();
+    });
+
+    sourceTitleInput.addEventListener("input", () => {
+      if (sourceTitleInput.value.trim()) {
+        sourceTitleInput.classList.remove("input-invalid");
+        sourceTitleInput.removeAttribute("aria-invalid");
+        const err = sourceForm.querySelector(".title-error");
+        if (err) err.remove();
+      }
     });
   }
 
@@ -3011,7 +3074,7 @@ function selectSource(sourceId) {
 
 if (saveSourceBtn) {
     saveSourceBtn.addEventListener("click", () => {
-      sourceForm.dispatchEvent(new Event("submit"));
+      sourceForm.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
     });
   }
 
@@ -3055,12 +3118,23 @@ if (saveSourceBtn) {
     });
   }
 
-  function captureSelection() {
-    state.selectedRange = getSelectionFromReader();
-    if (state.selectedRange?.range && state.viewMode === "reader") {
-      showQuoteButton(state.selectedRange.range);
-    } else {
+  function captureSelection(e) {
+    if (state.viewMode !== "reader") {
       hideQuoteButton();
+      return;
+    }
+    if (e && e.target && quoteSelectionBtn && (e.target === quoteSelectionBtn || quoteSelectionBtn.contains(e.target))) {
+      return;
+    }
+    const selRange = getSelectionFromReader();
+    if (selRange?.range) {
+      state.selectedRange = selRange;
+      showQuoteButton(selRange.range);
+    } else {
+      if (document.activeElement !== quoteSelectionBtn) {
+        state.selectedRange = null;
+        hideQuoteButton();
+      }
     }
   }
 
@@ -3068,6 +3142,14 @@ if (saveSourceBtn) {
     analysisReader.addEventListener("mouseup", captureSelection);
     analysisReader.addEventListener("keyup", captureSelection);
   }
+
+  document.addEventListener("selectionchange", () => {
+    if (state.viewMode === "reader") {
+      captureSelection();
+    }
+  });
+  document.addEventListener("mouseup", captureSelection);
+  document.addEventListener("pointerup", captureSelection);
 
   if (quoteSelectionBtn) {
     quoteSelectionBtn.addEventListener("click", async () => {

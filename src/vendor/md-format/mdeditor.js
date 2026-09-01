@@ -234,7 +234,7 @@ export function createEditor(container, opts = {}) {
         divider: dividerEl, toolbarBar,
         syncEnabled: opts.syncScroll !== false,
         tabSize, readonly,
-        focus() { (currentView === "preview" ? preview : editor).focus(); },
+        focus() { (currentView === "preview" ? (preview.querySelector(".md") || preview) : editor).focus(); },
     };
 
     /* abort controller: destroy() pulls the plug on every listener at once */
@@ -281,10 +281,18 @@ export function createEditor(container, opts = {}) {
                     const html = render(ast, "html");
                     preview.innerHTML = `<div class="md">${html}</div>`;
                     preview.removeAttribute("data-raw");
+                    preview.classList.remove("raw");
                     // THE WYSIWYG switch: in html mode the preview is an
-                    // editing surface (unless we're in md-only view).
+                    // editing surface (unless we're in md-only view). We mark
+                    // the .md CONTENT element editable — not the scrolling
+                    // container. Otherwise, with an empty/blank source the
+                    // caret lands on the container itself and typed text
+                    // becomes a stray text node outside .md, so rootForMd()
+                    // (which reads .md) sees nothing and every keystroke is
+                    // lost on save.
                     wysiwyg = currentView !== "md";
-                    preview.contentEditable = wysiwyg && !readonly ? "true" : "false";
+                    const mdEl = preview.querySelector(".md");
+                    (mdEl || preview).contentEditable = wysiwyg && !readonly ? "true" : "false";
                     // typing depends on the checkbox being clickable — the
                     // renderer emits it `disabled`, undo that.
                     for (const cb of preview.querySelectorAll('input[type="checkbox"]')) {
@@ -309,6 +317,7 @@ export function createEditor(container, opts = {}) {
                     }
                     preview.innerHTML = `<pre class="source ansi">${esc(out)}</pre>`;
                     preview.setAttribute("data-raw", "1");
+                    preview.classList.add("raw");
                     break;
                 }
                 case "ast": {
@@ -316,6 +325,7 @@ export function createEditor(container, opts = {}) {
                     preview.contentEditable = "false";
                     preview.innerHTML = `<pre class="source">${esc(JSON.stringify(ast, null, 2))}</pre>`;
                     preview.setAttribute("data-raw", "1");
+                    preview.classList.add("raw");
                     break;
                 }
             }
@@ -331,6 +341,7 @@ export function createEditor(container, opts = {}) {
         } catch (err) {
             // never let a parse error nuke the host page — surface it
             preview.innerHTML = `<pre class="source" style="color:#ff6b6b">${esc(String(err && err.stack || err))}</pre>`;
+            preview.classList.add("raw");
             currentStats.error = err;
             emitRender();
         }
@@ -355,7 +366,14 @@ export function createEditor(container, opts = {}) {
         editorPane.classList.toggle("gone", pvOnly);
         previewPane.classList.toggle("gone", mdOnly);
         dividerEl.style.display = mdOnly || pvOnly ? "none" : "";
-        if (currentView !== "md") editor.focus();
+        if (pvOnly) {
+            /* preview-only: the textarea is hidden, the contenteditable .md
+             * is the typing surface — focus it, not the invisible textarea. */
+            (preview.querySelector(".md") || preview).focus();
+        } else if (!mdOnly) {
+            /* split view: the source textarea is the primary input */
+            editor.focus();
+        }
         refresh();
     }
 
@@ -385,13 +403,22 @@ export function createEditor(container, opts = {}) {
         scrollSync(preview, editor);
     }, sig);
 
-    /* Tab in the source inserts spaces instead of jumping out of the pane */
+    /* Tab in the source inserts spaces instead of jumping out of the pane.
+     * Enter in the textarea (inside a <form>) triggers implicit form submission
+     * in the browser before the submit handler fires — kill that so the newline
+     * stays in the textarea and focus is not yanked. */
     editor.addEventListener("keydown", (e) => {
         if (e.key === "Tab") {
             e.preventDefault();
             const start = editor.selectionStart, end = editor.selectionEnd;
             editor.value = editor.value.slice(0, start) + " ".repeat(tabSize) + editor.value.slice(end);
             editor.selectionStart = editor.selectionEnd = start + tabSize;
+            refresh();
+        } else if (e.key === "Enter") {
+            e.preventDefault();
+            const start = editor.selectionStart, end = editor.selectionEnd;
+            editor.value = editor.value.slice(0, start) + "\n" + editor.value.slice(end);
+            editor.selectionStart = editor.selectionEnd = start + 1;
             refresh();
         }
     }, sig);
@@ -410,58 +437,113 @@ export function createEditor(container, opts = {}) {
      * ================================================================== */
 
     /* snap the caret into {path, offset, context} — path is the child-index
-     * list from the .md root down to the caret text node; context is a prefix
-     * of that node's text, used as a fallback anchor if the path shifts. */
+    /* Filter out formatting-only whitespace text nodes between top-level block elements */
+    function getFilteredKids(parent, rootContainer) {
+        if (parent === rootContainer) {
+            return Array.from(parent.childNodes).filter(c => !(c.nodeType === Node.TEXT_NODE && /^\s+$/.test(c.data)));
+        }
+        return Array.from(parent.childNodes);
+    }
+
+    /* snap the caret into {path, offset, isText, len, context} — path is the child-index
+     * list from the .md root down to the caret node (text or element); context is a prefix
+     * of that node's text (if text node), used as a fallback anchor if the path shifts. */
     function saveCaretPath(container) {
         const sel = window.getSelection();
-        if (!sel.rangeCount) return null;
+        if (!sel || !sel.rangeCount) return null;
         const node = sel.focusNode;
         if (!node || !container.contains(node)) return null;
         const off = sel.focusOffset;
-        if (node.nodeType !== Node.TEXT_NODE) return null;   // text carets only
+        const isText = node.nodeType === Node.TEXT_NODE;
         const path = [];
         let n = node;
         while (n && n !== container) {
-            path.unshift(Array.from(n.parentNode.childNodes).indexOf(n));
+            const kids = getFilteredKids(n.parentNode, container);
+            const idx = kids.indexOf(n);
+            if (idx < 0) return null;
+            path.unshift(idx);
             n = n.parentNode;
         }
         if (n !== container) return null;
-        return { path, off, len: node.data.length, context: node.data.slice(0, 160) };
+        return {
+            path,
+            off,
+            isText,
+            len: isText ? node.data.length : 0,
+            context: isText ? node.data.slice(0, 160) : ""
+        };
     }
 
-    /* walk the captured path down a FRESH dom; on shape change fall back to
-     * hunting for a node whose text still contains the captured window. */
-    function locateTextNode(container, path) {
+    /* walk the captured path down a FRESH dom */
+    function locateCaretNode(container, path) {
         let node = container;
         for (const idx of path) {
-            const kids = node.childNodes;
+            const kids = getFilteredKids(node, container);
             if (idx < kids.length) node = kids[idx];
             else return null;
         }
-        return node.nodeType === Node.TEXT_NODE ? node : null;
+        return node;
     }
 
     function restoreCaretPath(container, state) {
+        const mdEl = container.closest?.(".md") || container;
+        mdEl.focus({ preventScroll: true });
         if (!state) return;
-        let node = locateTextNode(container, state.path);
+
+        let node = locateCaretNode(container, state.path);
         if (!node) {
             // structure moved under us — find the survivor whose text matches.
-            // If even that is gone, give up quietly: typing continues.
-            const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-            let n;
-            while ((n = walker.nextNode())) {
-                if (state.context && n.data.startsWith(state.context.slice(0, 40))) { node = n; break; }
+            if (state.context && state.context.trim()) {
+                const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+                let n;
+                while ((n = walker.nextNode())) {
+                    if (n.data && !/^\s+$/.test(n.data) && n.data.startsWith(state.context.slice(0, 40))) {
+                        node = n;
+                        break;
+                    }
+                }
             }
-            if (!node) return;
         }
-        const off = Math.min(state.off, node.data.length);
-        const range = document.createRange();
-        range.setStart(node, off);
-        range.collapse(true);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-        preview.focus({ preventScroll: true });   // never yank the viewport
+
+        // If path or context search failed, target the block element corresponding to path[0] or last block
+        if (!node) {
+            const topKids = getFilteredKids(container, container);
+            if (topKids.length) {
+                const blockIdx = Math.min(state.path[0] ?? 0, topKids.length - 1);
+                node = topKids[blockIdx];
+            } else {
+                node = container;
+            }
+        }
+
+        try {
+            const range = document.createRange();
+            if (node.nodeType === Node.TEXT_NODE) {
+                const off = Math.min(state.off, node.data.length);
+                range.setStart(node, off);
+                range.collapse(true);
+            } else if (node.nodeType === Node.ELEMENT_NODE) {
+                const textChild = Array.from(node.childNodes).find(c => c.nodeType === Node.TEXT_NODE);
+                if (textChild) {
+                    const off = Math.min(state.off, textChild.data.length);
+                    range.setStart(textChild, off);
+                    range.collapse(true);
+                } else if (node.childNodes.length > 0) {
+                    const off = Math.min(state.off, node.childNodes.length);
+                    range.setStart(node, off);
+                    range.collapse(true);
+                } else {
+                    range.selectNodeContents(node);
+                    range.collapse(true);
+                }
+            }
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        } catch (err) {
+            // fallback: focus container
+        }
+        mdEl.focus({ preventScroll: true });
     }
 
     /* the full round trip for one preview edit */
@@ -470,8 +552,7 @@ export function createEditor(container, opts = {}) {
         const caret = saveCaretPath(rootForMd());   // capture BEFORE serialize
         let md;
         try { md = domToMarkdown(rootForMd()); }
-        catch { return; }
-
+        catch (err) { return; }
         if (md !== editor.value) {
             // heal any self-links a previous round trip already minted:
             // `[https://x.y](https://x.y)` → plain `https://x.y`
@@ -488,8 +569,9 @@ export function createEditor(container, opts = {}) {
         clearTimeout(wysiwygTimer);
         wysiwygTimer = setTimeout(wysiwygSync, 120);
     };
-    preview.addEventListener("input", () => {
-        if (wysiwyg) scheduleWysiwyg();
+    preview.addEventListener("input", (ev) => {
+        if (!wysiwyg) return;
+        scheduleWysiwyg();
     }, sig);
 
     /* a clicked task checkbox edits the DOM; fold it back too. We deliberately
@@ -503,18 +585,55 @@ export function createEditor(container, opts = {}) {
         }
     }, sig);
 
+    function getCaretRangeFromPoint(x, y) {
+        if (typeof document.caretRangeFromPoint === "function") {
+            return document.caretRangeFromPoint(x, y);
+        } else if (typeof document.caretPositionFromPoint === "function") {
+            const pos = document.caretPositionFromPoint(x, y);
+            if (pos && pos.offsetNode) {
+                const range = document.createRange();
+                range.setStart(pos.offsetNode, pos.offset);
+                range.collapse(true);
+                return range;
+            }
+        }
+        return null;
+    }
+
     /* Cmd/Ctrl+click a link in the preview opens it rather than placing a
-     * caret — a plain click still moves the caret (it's an editing surface). */
+     * caret — a plain click still moves the caret (it's an editing surface).
+     * Clicking anywhere on the preview pane places caret precisely at clicked coordinates. */
     preview.addEventListener("mousedown", (e) => {
         if (!(e.metaKey || e.ctrlKey)) return;
         if (e.target.closest("a")) e.preventDefault();
     }, sig);
     preview.addEventListener("click", (e) => {
-        if (!(e.metaKey || e.ctrlKey)) return;
+        if (!wysiwyg || readonly) return;
+
         const a = e.target.closest("a");
-        if (!a) return;
-        e.preventDefault();
-        window.open(a.getAttribute("href") || a.href, "_blank", "noopener");
+        if (a && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            window.open(a.getAttribute("href") || a.href, "_blank", "noopener");
+            return;
+        }
+
+        const mdEl = preview.querySelector(".md") || preview;
+        mdEl.focus({ preventScroll: true });
+
+        const sel = window.getSelection();
+        if (sel && !sel.isCollapsed && mdEl.contains(sel.focusNode)) return;
+
+        const pointRange = getCaretRangeFromPoint(e.clientX, e.clientY);
+        if (pointRange && mdEl.contains(pointRange.startContainer)) {
+            sel?.removeAllRanges();
+            sel?.addRange(pointRange);
+        } else {
+            const range = document.createRange();
+            range.selectNodeContents(mdEl);
+            range.collapse(false);
+            sel?.removeAllRanges();
+            sel?.addRange(range);
+        }
     }, sig);
 
     /* ====================================================================
@@ -712,7 +831,7 @@ export function createEditor(container, opts = {}) {
         editor.value = out.text;
         if (caretInPreview) {
             refresh();
-            preview.focus({ preventScroll: true });
+            (preview.querySelector(".md") || preview).focus({ preventScroll: true });
             restoreByContext(rootForMd(), ctx);
         } else {
             editor.focus();
@@ -780,8 +899,21 @@ export function createEditor(container, opts = {}) {
     ed.command = (tool) => { applyTool(tool); return ed; };
     ed.onChange = (cb) => { onChangeCbs.push(cb); return () => onChangeCbs.splice(onChangeCbs.indexOf(cb), 1); };
     ed.onRender = (cb) => { onRenderCbs.push(cb); return () => onRenderCbs.splice(onRenderCbs.indexOf(cb), 1); };
+    ed.flush = () => {
+        if (wysiwyg) {
+            clearTimeout(wysiwygTimer);
+            try {
+                let md = domToMarkdown(rootForMd());
+                if (md !== null && md !== undefined && md !== editor.value) {
+                    md = md.replace(/\[((?:https?:\/\/|www\.)[^\s\]\\]+)\]\(\1(?:\s*"[^"]*")?\)/g, "$1");
+                    editor.value = md;
+                }
+            } catch (err) { /* fall through, keep last editor value */ }
+        }
+        return editor.value;
+    };
     ed.setMarkdown = (md) => { editor.value = md; refresh(); return ed; };
-    ed.getMarkdown = () => editor.value;
+    ed.getMarkdown = () => { ed.flush(); return editor.value; };
     ed.getTheme = () => container.dataset.theme || (readonly ? "green" : "green");
     ed.resize = () => { applySplit(); };
     ed.destroy = () => {
