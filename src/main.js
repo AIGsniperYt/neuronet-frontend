@@ -5,6 +5,7 @@ import { dialog } from "./tools/dialog.js";
 import { initMemoryTool } from "./tools/memoryTool.js";
 import { initMindmapTool } from "./tools/mindmapTool.js";
 import { initTrackerTool } from "./tools/trackerTool.js";
+import { initScraperTool } from "./tools/scraperTool.js";
 import { performMigration } from "./migrations.js";
 import { upgradeDataset, upgradeStoredData, SCHEMA_VERSION } from "./schemaUpgrade.js";
 import { initCanvas } from "./canvas.js";
@@ -135,6 +136,13 @@ const tools = {
       getSubjects,
       escapeHtml
     }, context)
+  },
+  scraper: {
+    name: "Scraper",
+    file: "scraper.html",
+    init: (context) => initScraperTool({
+      escapeHtml
+    }, context)
   }
 };
 
@@ -142,7 +150,8 @@ const toolDefinitions = {
   analysis: { name: "Analysis", file: "analysis.html", icon: "fa-solid fa-pen-clip", desc: "Create source-linked analysis nodes and analyse a source text" },
   memory: { name: "Memory", file: "memory.html", icon: "fa-solid fa-brain", desc: "Flashcard study across subjects to memorise nodes you analyse" },
   mindmap: { name: "Mindmap", file: "mindmap.html", icon: "fa-solid fa-diagram-project", desc: "Visual database overview for establishing connections" },
-  tracker: { name: "Tracker", file: "tracker.html", icon: "fa-solid fa-chart-column", desc: "Track study progress with past paper data" }
+  tracker: { name: "Tracker", file: "tracker.html", icon: "fa-solid fa-chart-column", desc: "Track study progress with past paper data" },
+  scraper: { name: "Scraper", file: "scraper.html", icon: "fa-solid fa-download", desc: "Fetch grade boundaries from exam board spreadsheets" }
 };
 
 // ========== AUTH & API ==========

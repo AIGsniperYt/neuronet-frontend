@@ -1,0 +1,98 @@
+<div id="scraperTool">
+  <style>
+    #scraperTool {
+      width: 100%; height: 100%; display: flex; flex-direction: column;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, sans-serif;
+      color: var(--text-main); overflow: hidden;
+    }
+    #scraperHeader {
+      padding: 16px; background: var(--glass-surface);
+      backdrop-filter: blur(var(--glass-blur));
+      border-bottom: 1px solid var(--glass-border);
+      display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+    }
+    #scraperHeader h1 { font-size: 1.5rem; font-weight: 600; color: var(--accent); margin: 0; }
+    #scraperHeader .sub { color: var(--text-muted); font-size: 0.85rem; }
+    #scraperVersion { color: var(--text-muted); font-size: 0.75rem; }
+    #scraperContent { flex: 1; display: flex; flex-direction: column; overflow: hidden; padding: 24px; gap: 16px; }
+    #scraperContent > * { min-height: 0; }
+
+    .scraper-card {
+      background: linear-gradient(135deg, var(--panel-strong), var(--panel-bg));
+      border: 1px solid var(--glass-border); border-radius: 16px; padding: 16px;
+    }
+
+    .scraper-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .scraper-btn {
+      padding: 10px 16px; background: linear-gradient(130deg, rgba(44,255,179,0.24), rgba(44,255,179,0.11));
+      border: 1px solid rgba(44,255,179,0.45); color: #e6fff5; border-radius: 999px; cursor: pointer;
+      font: inherit; font-size: 0.85rem; font-weight: 500; transition: all 0.2s ease;
+    }
+    .scraper-btn:hover:not(:disabled) { transform: translateY(-1px); background: linear-gradient(130deg, rgba(44,255,179,0.32), rgba(44,255,179,0.18)); }
+    .scraper-btn:disabled { cursor: not-allowed; opacity: 0.6; }
+
+    .scraper-status { font-size: 0.85rem; color: var(--text-muted); }
+    .scraper-status.busy { color: var(--accent); }
+    .scraper-status.ok { color: var(--accent); }
+    .scraper-status.err { color: #ff8c8c; }
+
+    .scraper-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; flex: 1; }
+    .scraper-panel { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+    .scraper-panel h3 { margin: 0; font-size: 0.9rem; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; }
+
+    #scraperLog {
+      flex: 1; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.72rem; line-height: 1.5; color: var(--text-muted);
+      background: rgba(0,0,0,0.25); border: 1px solid var(--glass-border); border-radius: 12px; padding: 12px;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .scraper-line { margin-bottom: 2px; }
+
+    #scraperResult { flex: 1; overflow: auto; }
+    .card-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+    .card-code { font-weight: 700; color: var(--accent); background: rgba(44,255,179,0.1); border: 1px solid rgba(44,255,179,0.25); border-radius: 999px; padding: 3px 10px; font-size: 0.85rem; }
+    .card-title { font-weight: 600; font-size: 1.05rem; }
+    .card-max { color: var(--text-muted); font-size: 0.8rem; margin-left: auto; }
+    .card-grades { display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 10px; }
+    .scraper-grade {
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      padding: 12px; border-radius: 12px; background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .scraper-grade .grade-num { font-weight: 700; color: var(--accent); font-size: 1.1rem; }
+    .scraper-grade .grade-mark { font-size: 1rem; }
+    .scraper-empty { color: var(--text-muted); font-size: 0.9rem; }
+
+    @media (max-width: 700px), (pointer: coarse) and (hover: none) {
+      #scraperContent { padding: 14px 12px; }
+      .scraper-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+
+  <div id="scraperHeader">
+    <h1>Grade Boundary Scraper</h1>
+    <div style="text-align:right;">
+      <div id="scraperVersion" class="sub"></div>
+    </div>
+  </div>
+
+  <div id="scraperContent">
+    <div class="scraper-card scraper-controls">
+      <button id="scraperFetchBtn" class="scraper-btn">Fetch AQA GCSE English Language 2024</button>
+      <div id="scraperStatus" class="scraper-status"></div>
+    </div>
+
+    <div class="scraper-grid">
+      <div class="scraper-panel">
+        <h3>Fetch log</h3>
+        <div id="scraperLog"></div>
+      </div>
+      <div class="scraper-panel">
+        <h3>Result</h3>
+        <div id="scraperResult">
+          <div class="scraper-empty">Nothing fetched yet.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
