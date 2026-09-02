@@ -8,6 +8,7 @@ export function initScraperTool(deps, context = {}) {
     status: $("scraperStatus"),
     log: $("scraperLog"),
     fetchBtn: $("scraperFetchBtn"),
+    scanBtn: $("scraperScanBtn"),
     result: $("scraperResult"),
     version: $("scraperVersion"),
     qualSelect: $("scraperQual"),
@@ -26,7 +27,7 @@ export function initScraperTool(deps, context = {}) {
     gcse: {
       id: "gcse",
       name: "GCSE",
-      sheets: ["GCSE", "GCSE subject"],
+      sheets: ["GCSE", "GCSE subject", "GCSE Subject"],
       grades: [9, 8, 7, 6, 5, 4, 3, 2, 1],
       filePrefix: "AQA-GCSE-GDE-BDY"
     },
@@ -46,8 +47,15 @@ export function initScraperTool(deps, context = {}) {
     }
   };
 
-  // Verified AQA series using the legacy filestore URL pattern. (Nov 2024+
-  // moved to a hashed URL scheme that needs the archive page scraper.)
+  // AQA grade-boundary files live in two places:
+  //  - Legacy filestore URL pattern (verified for JUN 2022 through JUN 2024,
+  //    plus the November resit series) -> predictable stat_pdf path.
+  //  - Hashed attachment URLs behind www.aqa.org.uk/files/... (Nov 2024+).
+  //    Hashes cannot be predicted, so we discover them by scraping the public
+  //    grade-boundaries pages, which embed a Sanity JSON payload where every
+  //    file has "title":"<Qual> - Grade boundaries <Month> <Year>" and a direct
+  //    "url". The legacy list below is only a fallback baseline; the series
+  //    picker is populated from whatever live pages we can reach.
   const AQA_SERIES = [
     { month: "JUN", year: 2022, label: "June 2022" },
     { month: "JUN", year: 2023, label: "June 2023" },
@@ -55,9 +63,111 @@ export function initScraperTool(deps, context = {}) {
     { month: "JUN", year: 2024, label: "June 2024" }
   ];
   const AQA_FILE_BASE = "https://filestore.aqa.org.uk/over/stat_pdf";
+  const AQA_PAGE_BASE = "https://www.aqa.org.uk/exams-administration/results-days/grade-boundaries";
+  const AQA_PAGE_ARCHIVE = `${AQA_PAGE_BASE}/archive`;
+  const AQA_MONTHS = [
+    ["January", "JAN"], ["February", "FEB"], ["March", "MAR"], ["April", "APR"],
+    ["May", "MAY"], ["June", "JUN"], ["July", "JUL"], ["August", "AUG"],
+    ["September", "SEP"], ["October", "OCT"], ["November", "NOV"], ["December", "DEC"]
+  ];
+
+  // Discovered hashed files: key `${seriesKey}:${qualId}` -> full xlsx url.
+  // Series keys use "JUN-2026" style. Discovered files win over the legacy
+  // filestore pattern because they are always the live, current artifact.
+  const discoveredFiles = new Map();
+
+  function seriesKey(series) {
+    return `${series.month}-${series.year}`;
+  }
+
+  function legacyAqaSeriesUrl(qual, series) {
+    return `${AQA_FILE_BASE}/${qual.filePrefix}-${series.month}-${series.year}.XLSX`;
+  }
 
   function aqaSeriesUrl(qual, series) {
-    return `${AQA_FILE_BASE}/${qual.filePrefix}-${series.month}-${series.year}.XLSX`;
+    const discovered = discoveredFiles.get(`${seriesKey(series)}:${qual.id}`);
+    return discovered || legacyAqaSeriesUrl(qual, series);
+  }
+
+  // Build the series list for the picker: discovered series (newest first)
+  // merged with the legacy baseline, deduped by series key.
+  function buildSeriesList() {
+    const byKey = new Map();
+    for (const s of AQA_SERIES) byKey.set(seriesKey(s), { ...s });
+    for (const key of discoveredFiles.keys()) {
+      const seriesKeyStr = key.split(":")[0];
+      const [mAbbrev, yearStr] = seriesKeyStr.split("-");
+      const year = Number(yearStr);
+      if (!byKey.has(seriesKeyStr)) {
+        const match = AQA_MONTHS.find(([, abb]) => abb === mAbbrev);
+        const label = match ? `${match[0]} ${year}` : seriesKeyStr;
+        byKey.set(seriesKeyStr, { month: mAbbrev, year, label });
+      }
+    }
+    return [...byKey.values()].sort((a, b) =>
+      b.year - a.year ||
+      AQA_MONTHS.findIndex(([, mb]) => mb === b.month) - AQA_MONTHS.findIndex(([, mb]) => mb === a.month)
+    );
+  }
+
+  // Scrape the AQA grade-boundaries pages (current + archive) for every hashed
+  // xlsx file, reading the Sanity JSON embedded in the page: each file carries
+  // a "title" of "<Qual> - Grade boundaries <Month> <Year>" plus a "url".
+  // Also grabs any legacy-named stat_pdf path, which doubles as a fallback that
+  // survives JSON layout changes.
+  async function discoverAqaSeries() {
+    const found = [];
+    const pages = [proxyUrl(AQA_PAGE_ARCHIVE), proxyUrl(AQA_PAGE_BASE)];
+    for (const page of pages) {
+      let text;
+      try {
+        const res = await fetch(page);
+        if (!res.ok) continue;
+        text = await res.text();
+      } catch {
+        continue; // A page being unreachable shouldn't block discovery.
+      }
+      const pairs = extractGradeBoundaryPairs(text);
+      found.push(...pairs);
+    }
+
+    for (const { url, title } of found) {
+      const parsed = parseBoundaryTitle(title);
+      if (!parsed) continue;
+      const { qualId, series } = parsed;
+      const key = `${seriesKey(series)}:${qualId}`;
+      if (url) discoveredFiles.set(key, url);
+    }
+    return found.length;
+  }
+
+  // Pull (title, url) pairs out of the embedded Sanity JSON. The payload is
+  // double-escaped inside a script tag, so we match both escaped and plain
+  // variants. Each pair corresponds to one attached file (pdf or xlsx).
+  function extractGradeBoundaryPairs(html) {
+    const escaped = /\\"url\\":\\"(https:\/\/cdn\.sanity\.io\/files\/[^\\"]+?\.xlsx)\\"[\s\S]*?\\"title\\":\\"([^\\"]+?)\\"/g;
+    const plain = /"url":"(https:\/\/cdn\.sanity\.io\/files\/[^"]+?\.xlsx)"[\s\S]*?"title":"([^"]+?)"/g;
+    const out = [];
+    const push = (re) => {
+      let m;
+      while ((m = re.exec(html)) !== null) out.push({ url: m[1], title: m[2] });
+    };
+    push(escaped);
+    if (out.length === 0) push(plain);
+    return out;
+  }
+
+  // "GCSE - Grade boundaries June 2026" | "GCSE Grade boundaries - November 2024"
+  function parseBoundaryTitle(title) {
+    const m = title.match(/(January|February|March|April|May|June|July|August|September|October|November|December) (\d{4})/);
+    if (!m) return null;
+    const month = AQA_MONTHS.find(([full]) => full === m[1]);
+    const series = { month: month[1], year: Number(m[2]), label: `${m[1]} ${m[2]}` };
+    let qualId = null;
+    if (/\bGCSE\b/.test(title)) qualId = "gcse";
+    else if (/A-level/.test(title)) qualId = "aLevel";
+    else if (/\bAS\b/.test(title)) qualId = "as";
+    return qualId ? { qualId, series } : null;
   }
 
   function setStatus(msg, kind = "") {
@@ -271,7 +381,7 @@ export function initScraperTool(deps, context = {}) {
   function populateSeriesPicker() {
     if (!el.seriesSelect) return;
     el.seriesSelect.innerHTML = "";
-    AQA_SERIES.forEach((s) => {
+    buildSeriesList().forEach((s) => {
       const opt = document.createElement("option");
       opt.value = `${s.month}-${s.year}`;
       opt.textContent = s.label;
@@ -285,8 +395,9 @@ export function initScraperTool(deps, context = {}) {
   }
 
   function currentSeries() {
-    const val = el.seriesSelect ? el.seriesSelect.value : "JUN-2024";
-    return AQA_SERIES.find((s) => `${s.month}-${s.year}` === val) || AQA_SERIES[AQA_SERIES.length - 1];
+    const val = el.seriesSelect ? el.seriesSelect.value : null;
+    const list = buildSeriesList();
+    return list.find((s) => `${s.month}-${s.year}` === val) || list[0];
   }
 
   async function fetchAqaBoundaries() {
@@ -316,6 +427,30 @@ export function initScraperTool(deps, context = {}) {
   }
 
   function bindEvents() {
+    if (el.scanBtn) {
+      el.scanBtn.addEventListener("click", async () => {
+        el.scanBtn.disabled = true;
+        el.scanBtn.textContent = "Scanning...";
+        clearLog();
+        try {
+          setStatus("Scanning AQA grade-boundaries pages for available series...", "busy");
+          appendLog("Scanning AQA grade-boundaries pages for hashed xlsx files...");
+          const count = await discoverAqaSeries();
+          const list = buildSeriesList();
+          appendLog(`Discovered ${count} hashed file entries; ${discoveredFiles.size} series/qual files kept.`);
+          appendLog(`Series now available: ${list.map((s) => s.label).join(", ")}`);
+          populateSeriesPicker();
+          appendLog("Series picker updated.");
+          setStatus(`Found ${discoveredFiles.size} hashed grade-boundary files across ${list.length} series.`, "ok");
+        } catch (e) {
+          setStatus(e.message || String(e), "err");
+          appendLog("ERROR: " + (e.message || String(e)));
+        } finally {
+          el.scanBtn.disabled = false;
+          el.scanBtn.textContent = "Scan AQA site";
+        }
+      });
+    }
     if (el.fetchBtn) {
       el.fetchBtn.addEventListener("click", async () => {
         el.fetchBtn.disabled = true;
@@ -390,4 +525,24 @@ export function initScraperTool(deps, context = {}) {
   populateSeriesPicker();
   bindEvents();
   setStatus("Ready. Pick a qualification and series, then fetch AQA boundaries.", "");
+
+  // Best-effort auto-discovery so recent series (2025/2026, hashed URLs) show
+  // up without a manual scan; failures keep the legacy baseline.
+  if (el && el.scanBtn) {
+    // auto-run discovery once, silently (status already shows legacy ready)
+    discoverAqaSeries().then((count) => {
+      if (count > 0) {
+        const before = buildSeriesList().length;
+        populateSeriesPicker();
+        appendLog(`Auto-discovered ${count} hashed grade-boundary files; series updated (${before} total).`);
+        setStatus("Ready. Series list refreshed with the latest AQA series.", "ok");
+      } else {
+        appendLog("Auto-scan found no new AQA files; keeping legacy filestore series.");
+        setStatus("Ready. Using verified legacy series (auto-scan found nothing new).", "");
+      }
+    }).catch(() => {
+      appendLog("Auto-scan failed; keeping legacy filestore series.");
+      setStatus("Ready. Using verified legacy series (auto-scan unavailable).", "");
+    });
+  }
 }
