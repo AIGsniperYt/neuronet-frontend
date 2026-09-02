@@ -9,8 +9,13 @@ export function initScraperTool(deps, context = {}) {
     log: $("scraperLog"),
     fetchBtn: $("scraperFetchBtn"),
     result: $("scraperResult"),
-    version: $("scraperVersion")
+    version: $("scraperVersion"),
+    subjectInput: $("scraperSubjectInput"),
+    suggestions: $("scraperSuggestions")
   };
+
+  let subjects = [];
+  let activeSuggestionIndex = -1;
 
   function setStatus(msg, kind = "") {
     if (el.status) {
@@ -47,7 +52,9 @@ export function initScraperTool(deps, context = {}) {
       const code = r[0];
       const title = r[1];
       if (code == null || String(code).trim() === "") continue;
-      if (typeof code === "string" && !/^\d{4,6}$/.test(String(code).trim())) continue;
+      // AQA subject codes are 4-6 digits, optionally followed by a tier/
+      // option suffix of uppercase letters (e.g. 8700, 8461F, 8525A, 8145AA).
+      if (typeof code === "string" && !/^\d{4,6}[A-Z]*$/.test(String(code).trim())) continue;
       const maxMark = Number(r[2]);
       if (!Number.isFinite(maxMark)) continue;
 
@@ -77,6 +84,68 @@ export function initScraperTool(deps, context = {}) {
     const code = normalize(subject.code);
     const title = normalize(subject.title);
     return code === "8700" || /^ENGLISH LANGUAGE\b/.test(title);
+  }
+
+  function subjectMatches(subject, query) {
+    if (!query) return true;
+    return (
+      normalize(subject.code).includes(query) ||
+      normalize(subject.title).includes(query)
+    );
+  }
+
+  function renderSuggestions(filter) {
+    if (!el.suggestions) return;
+    const matches = subjects.filter((s) => subjectMatches(s, filter));
+    el.suggestions.innerHTML = "";
+    if (matches.length === 0) {
+      const div = document.createElement("div");
+      div.className = "scraper-suggestion";
+      div.innerHTML = `<span class="s-no-match">No subjects match "${escapeHtml(filter)}"</span>`;
+      el.suggestions.appendChild(div);
+    } else {
+      matches.slice(0, 50).forEach((s) => {
+        const div = document.createElement("div");
+        div.className = "scraper-suggestion";
+        div.textContent = `${s.code} — ${s.title} (max ${s.maxMark})`;
+        div.dataset.code = s.code;
+        div.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          selectSubject(s);
+        });
+        el.suggestions.appendChild(div);
+      });
+    }
+    activeSuggestionIndex = -1;
+    el.suggestions.hidden = false;
+  }
+
+  function selectSubject(subject) {
+    if (!subject) return;
+    activeSuggestionIndex = -1;
+    if (el.subjectInput) {
+      el.subjectInput.value = `${subject.code} — ${subject.title}`;
+    }
+    if (el.suggestions) el.suggestions.hidden = true;
+    renderSubject(subject);
+  }
+
+  function moveActiveSuggestion(delta) {
+    const items = el.suggestions ? el.suggestions.querySelectorAll(".scraper-suggestion") : [];
+    if (items.length === 0) return;
+    activeSuggestionIndex = (activeSuggestionIndex + delta + items.length) % items.length;
+    items.forEach((n, i) => n.classList.toggle("active", i === activeSuggestionIndex));
+  }
+
+  function renderSubjectPicker(subjectList) {
+    if (!el.subjectInput) return;
+    el.subjectInput.disabled = false;
+    el.subjectInput.value = "";
+    el.subjectInput.placeholder = `Search ${subjectList.length} subjects...`;
+
+    // Pre-select English Language in the hardcoded AQA spreadsheet.
+    const preferred = subjectList.find(englishLanguageMatches) || subjectList[0];
+    if (preferred) selectSubject(preferred);
   }
 
   // ---------- fetch flow ----------
@@ -134,16 +203,12 @@ export function initScraperTool(deps, context = {}) {
     const wb = XLSX.read(buf, { type: "array" });
     appendLog(`Sheets: ${wb.SheetNames.join(", ")}`);
 
-    const subjects = parseAqaXlsx(wb.Sheets["GCSE"]);
+    subjects = parseAqaXlsx(wb.Sheets["GCSE"]);
     appendLog(`Parsed ${subjects.length} GCSE subject rows.`);
 
-    const match = subjects.find(englishLanguageMatches);
-    if (!match) {
-      throw new Error("Could not find English Language (8700) in the spreadsheet.");
-    }
-    appendLog(`Found: ${match.code} ${match.title} (max ${match.maxMark}).`);
-    setStatus("Success", "ok");
-    renderSubject(match);
+    renderSubjectPicker(subjects);
+    appendLog("Choose a subject from the picker to view its grade boundaries.");
+    setStatus("Select a subject", "ok");
   }
 
   function bindEvents() {
@@ -158,10 +223,48 @@ export function initScraperTool(deps, context = {}) {
           appendLog("ERROR: " + (e.message || String(e)));
         } finally {
           el.fetchBtn.disabled = false;
-          el.fetchBtn.textContent = "Fetch AQA GCSE English Language 2024";
+          el.fetchBtn.textContent = "Fetch AQA GCSE boundaries";
         }
       });
     }
+    if (el.subjectInput) {
+      el.subjectInput.addEventListener("input", () => {
+        const query = normalize(el.subjectInput.value);
+        renderSuggestions(query);
+      });
+      el.subjectInput.addEventListener("focus", () => {
+        renderSuggestions(normalize(el.subjectInput.value));
+      });
+      el.subjectInput.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          moveActiveSuggestion(1);
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          moveActiveSuggestion(-1);
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          const items = el.suggestions.querySelectorAll(".scraper-suggestion");
+          const target = items[activeSuggestionIndex];
+          if (target && target.dataset.code) {
+            selectSubject(subjects.find((s) => s.code === target.dataset.code));
+          }
+        } else if (e.key === "Escape") {
+          if (el.suggestions) el.suggestions.hidden = true;
+        }
+      });
+    }
+
+    document.addEventListener("mousedown", (e) => {
+      if (
+        el.suggestions &&
+        !el.suggestions.contains(e.target) &&
+        el.subjectInput &&
+        !el.subjectInput.contains(e.target)
+      ) {
+        el.suggestions.hidden = true;
+      }
+    });
   }
 
   if (el.version && XLSX && XLSX.version) {

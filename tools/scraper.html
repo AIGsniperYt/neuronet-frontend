@@ -36,6 +36,31 @@
     .scraper-status.ok { color: var(--accent); }
     .scraper-status.err { color: #ff8c8c; }
 
+    .scraper-pick { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-muted); position: relative; }
+    .scraper-combo { position: relative; min-width: 260px; }
+    .scraper-combo input {
+      font: inherit; font-size: 0.85rem; color: var(--text-main);
+      background: rgba(0,0,0,0.25); border: 1px solid var(--glass-border); border-radius: 10px;
+      padding: 8px 10px; width: 100%; box-sizing: border-box; outline: none;
+    }
+    .scraper-combo input:focus { border-color: rgba(44,255,179,0.5); }
+    .scraper-combo input:disabled { opacity: 0.6; cursor: not-allowed; }
+    .scraper-combo input::placeholder { color: var(--text-muted); }
+
+    .scraper-suggestions {
+      position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20;
+      max-height: 240px; overflow: auto; border-radius: 12px;
+      background: var(--panel-strong); border: 1px solid var(--glass-border);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.4); padding: 4px;
+    }
+    .scraper-suggestion {
+      padding: 8px 10px; border-radius: 8px; cursor: pointer; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis; font-size: 0.82rem;
+    }
+    .scraper-suggestion:hover, .scraper-suggestion.active { background: rgba(44,255,179,0.12); }
+    .scraper-suggestion .s-code { color: var(--accent); font-weight: 700; margin-right: 8px; }
+    .scraper-suggestion .s-no-match { color: var(--text-muted); font-style: italic; }
+
     .scraper-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; flex: 1; }
     .scraper-panel { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
     .scraper-panel h3 { margin: 0; font-size: 0.9rem; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; }
@@ -78,7 +103,14 @@
 
   <div id="scraperContent">
     <div class="scraper-card scraper-controls">
-      <button id="scraperFetchBtn" class="scraper-btn">Fetch AQA GCSE English Language 2024</button>
+      <button id="scraperFetchBtn" class="scraper-btn">Fetch AQA GCSE boundaries</button>
+      <div class="scraper-pick">
+        <span>Subject</span>
+        <div class="scraper-combo">
+          <input id="scraperSubjectInput" type="text" placeholder="Search subject or code..." disabled autocomplete="off" />
+          <div id="scraperSuggestions" class="scraper-suggestions" hidden></div>
+        </div>
+      </div>
       <div id="scraperStatus" class="scraper-status"></div>
     </div>
 
