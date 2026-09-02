@@ -1004,7 +1004,7 @@ async function renderRecentActivity() {
       : "";
     rows.push(`
       <div class="dash-activity-row">
-        <span class="dash-activity-icon"><i class="fa-solid fa-file-circle-check"></i></span>
+        <span class="dash-activity-icon past-paper-icon"><i class="fa-solid fa-file-circle-check"></i></span>
         <div class="dash-activity-info">
           <div class="dash-activity-title">${escapeHtml(label || "Past Paper")}</div>
           <div class="dash-activity-meta">${(p.results || []).length} paper${(p.results || []).length !== 1 ? "s" : ""}</div>
