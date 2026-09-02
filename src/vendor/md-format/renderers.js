@@ -63,22 +63,22 @@ function flattenText(children) {
  * renderHtml(tree) — the default, prettier output. Produces real html for the
  * browser preview, GitHub-style.
  * ========================================================================== */
-function renderHtml(tree) {
+function renderHtml(tree, opts = {}) {
     if (tree.type === "document") {
-        return tree.children.map(renderHtml).join("\n");
+        return tree.children.map(c => renderHtml(c, opts)).join("\n");
     }
     switch (tree.type) {
 
         case "heading": {
-            return `<h${tree.level}>${renderHtmlInline(tree.children)}</h${tree.level}>`;
+            return `<h${tree.level}>${renderHtmlInline(tree.children, opts)}</h${tree.level}>`;
         }
 
         case "paragraph": {
-            return `<p>${renderHtmlInline(tree.children)}</p>`;
+            return `<p>${renderHtmlInline(tree.children, opts)}</p>`;
         }
 
         case "blockquote": {
-            return `<blockquote>\n${tree.children.map(renderHtml).join("\n")}\n</blockquote>`;
+            return `<blockquote>\n${tree.children.map(c => renderHtml(c, opts)).join("\n")}\n</blockquote>`;
         }
 
         case "list": {
@@ -87,7 +87,7 @@ function renderHtml(tree) {
             const startAttr = tree.ordered && tree.start && tree.start !== 1
                 ? ` start="${tree.start}"`
                 : "";
-            return `<${tag}${startAttr}>\n${tree.items.map(renderHtml).join("")}</${tag}>`;
+            return `<${tag}${startAttr}>\n${tree.items.map(i => renderHtml(i, opts)).join("")}</${tag}>`;
         }
 
         case "listitem": {
@@ -102,9 +102,9 @@ function renderHtml(tree) {
             const tight = paraCount <= 1;
             const inner = tight
                 ? tree.children.map(b =>
-                      b.type === "paragraph" ? renderHtmlInline(b.children)
-                                             : renderHtml(b)).join("")
-                : tree.children.map(renderHtml).join("\n");
+                      b.type === "paragraph" ? renderHtmlInline(b.children, opts)
+                                             : renderHtml(b, opts)).join("")
+                : tree.children.map(c => renderHtml(c, opts)).join("\n");
             return `<li>${checkbox}${inner}</li>\n`;
         }
 
@@ -132,11 +132,11 @@ function renderHtml(tree) {
             // alignment marker per column; absent alignment emits no attribute.
             const al = a => a ? ` align="${a}"` : "";
             const head = tree.headers.length
-                ? `<thead>\n<tr>${tree.headers.map((c, j) => `<th${al(tree.align[j])}>${renderHtmlInline(c)}</th>`).join("")}</tr>\n</thead>`
+                ? `<thead>\n<tr>${tree.headers.map((c, j) => `<th${al(tree.align[j])}>${renderHtmlInline(c, opts)}</th>`).join("")}</tr>\n</thead>`
                 : "";
             const body = tree.rows.length
                 ? `<tbody>\n${tree.rows.map(row =>
-                    `<tr>${row.map((c, j) => `<td${al(tree.align[j])}>${renderHtmlInline(c)}</td>`).join("")}</tr>`
+                    `<tr>${row.map((c, j) => `<td${al(tree.align[j])}>${renderHtmlInline(c, opts)}</td>`).join("")}</tr>`
                   ).join("\n")}\n</tbody>`
                 : "";
             return `<table>\n${head}${body}</table>`;
@@ -148,20 +148,23 @@ function renderHtml(tree) {
     }
 }
 
-/* renderHtmlInline(children) — walk a list of INLINE nodes. */
-function renderHtmlInline(children) {
+/* renderHtmlInline(children, opts) — walk a list of INLINE nodes.
+ * opts.softBreaks promotes a single newline (softbreak) to a visible line
+ * break. The library is markdown-first: OFF by default, hosts that want a
+ * "regular editor" feel (like neuronet) opt in explicitly. */
+function renderHtmlInline(children, opts = {}) {
     let out = "";
     for (const node of children || []) {
         switch (node.type) {
             case "text":        out += escapeHtml(node.value); break;
-            case "strong":      out += `<strong>${renderHtmlInline(node.children)}</strong>`; break;
-            case "emphasis":    out += `<em>${renderHtmlInline(node.children)}</em>`; break;
-            case "strikethrough": out += `<del>${renderHtmlInline(node.children)}</del>`; break;
+            case "strong":      out += `<strong>${renderHtmlInline(node.children, opts)}</strong>`; break;
+            case "emphasis":    out += `<em>${renderHtmlInline(node.children, opts)}</em>`; break;
+            case "strikethrough": out += `<del>${renderHtmlInline(node.children, opts)}</del>`; break;
             case "code":        out += `<code>${escapeHtml(node.text)}</code>`; break;
             case "link": {
                 const title = node.title ? ` title="${escapeHtml(node.title)}"` : "";
                 const inner = node.children && node.children.length
-                    ? renderHtmlInline(node.children)
+                    ? renderHtmlInline(node.children, opts)
                     : escapeHtml(node.url);            // empty text → show the URL
                 out += `<a href="${escapeHtml(node.url)}"${title}>${inner}</a>`;
                 break;
@@ -169,7 +172,8 @@ function renderHtmlInline(children) {
             case "image":
                 out += `<img src="${escapeHtml(node.url)}" alt="${escapeHtml(node.alt)}"${node.title ? ` title="${escapeHtml(node.title)}"` : ""}>`;
                 break;
-            case "softbreak":   out += "\n"; break;
+            case "softbreak":
+                out += opts.softBreaks ? "<br>\n" : "\n"; break;
             case "hardbreak":   out += "<br>\n"; break;
             case "html":        out += node.value; break;   // raw html passthrough
             case "math": {
@@ -484,18 +488,20 @@ const renderers = {
     markdown: renderMarkdown,
 };
 
-/** render(ast, type) — turn an already-parsed tree into output. */
-export function render(ast, type = "html") {
+/** render(ast, type, opts) — turn an already-parsed tree into output.
+ * `opts.softBreaks` (default false) makes "html" output promote single
+ * newlines to visible line breaks without changing the markdown semantics. */
+export function render(ast, type = "html", opts = {}) {
     const fn = renderers[type];
     if (!fn) {
         throw new Error(`render: unknown output type "${type}" — know: ${Object.keys(renderers).join(", ")}`);
     }
-    return fn(ast);
+    return fn(ast, opts);
 }
 
-/** format(markdownText, type) — THE one-liner: "give me this formatted nicely." */
-export function format(text, type = "html") {
+/** format(markdownText, type, opts) — THE one-liner: "give me this formatted nicely." */
+export function format(text, type = "html", opts = {}) {
     // one stop: parse the source into a tree, then hand the tree to `render`.
     // (the explicit two-step `parse()` + `render()` is identical under the hood)
-    return render(parse(text), type);
+    return render(parse(text), type, opts);
 }

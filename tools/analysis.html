@@ -1,6 +1,7 @@
 <style>
 .analysis-shell {
   display: grid;
+  grid-template-rows: minmax(0, 1fr);
   gap: 8px;
   height: 100%;
   width: 100%;
@@ -242,6 +243,7 @@ html, body, * {
 .study-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  grid-template-rows: minmax(0, 1fr);
   gap: 12px;
   position: relative;
   min-height: 0;
@@ -312,6 +314,26 @@ html, body, * {
   align-items: center;
   gap: 4px;
   margin-bottom: 10px;
+}
+
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.editor-toolbar .view-seg {
+  margin-bottom: 0;
+}
+.editor-toolbar #softBreakSeg button {
+  font-size: 0.7rem;
+  padding: 3px 10px;
+  opacity: 0.85;
+}
+.editor-toolbar #softBreakSeg button.active {
+  opacity: 1;
 }
 
 .view-seg button {
@@ -694,6 +716,45 @@ html, body, * {
   min-height: 0;
 }
 
+.source-fields {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 10px;
+}
+
+.source-field-main,
+.source-field,
+.source-path {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.source-field-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(230, 255, 245, 0.5);
+}
+
+.source-path-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.source-path-row .inline-input {
+  flex: 1;
+}
+
+.source-path-sep {
+  color: rgba(230, 255, 245, 0.3);
+  padding: 0 2px;
+  font-size: 0.85rem;
+}
+
 .form-error {
   color: #ff7a7a;
   font-size: 0.78rem;
@@ -1007,21 +1068,40 @@ button.analysis-quote-jump.active-quote,
             </div>
 
             <div id="editorWrapper" class="source-view hidden">
-              <div id="editorViewSeg" class="view-seg">
-                <button type="button" class="active" data-view="preview" title="Edit as a live preview">Write</button>
-                <button type="button" data-view="split" title="Markdown and preview side by side">Split</button>
-                <button type="button" data-view="md" title="Raw markdown source">Source</button>
+              <div class="editor-toolbar">
+                <div id="editorViewSeg" class="view-seg">
+                  <button type="button" class="active" data-view="preview" title="Edit as a live preview">Write</button>
+                  <button type="button" data-view="split" title="Markdown and preview side by side">Split</button>
+                  <button type="button" data-view="md" title="Raw markdown source">Source</button>
+                </div>
+                <div id="softBreakSeg" class="view-seg" title="Line breaks in this document. 'Word-style' treats a single Enter as a new line (like a normal editor); 'Markdown' follows strict markdown rules (a single newline continues the same line, use a blank line to break). Your choice is saved per document and also becomes the default for new documents.">
+                  <button type="button" data-soft-break="1">Word-style line breaks</button>
+                  <button type="button" data-soft-break="0">Markdown</button>
+                </div>
               </div>
               <form id="sourceForm" class="form-grid">
                 <input type="hidden" id="sourceId" />
-                <div class="form-row">
-                  <input id="sourceSubject" class="inline-input source-subject-input" type="text" list="sourceSubjectList" placeholder="Subject (optional — save unlinked)" maxlength="80" />
-                  <datalist id="sourceSubjectList"></datalist>
+                <div class="source-fields">
+                  <label class="source-field-main">
+                    <span class="source-field-label">Title</span>
+                    <input id="sourceTitle" class="inline-input" type="text" placeholder="Source title" maxlength="120" required />
+                  </label>
+                  <label class="source-field">
+                    <span class="source-field-label">Subject</span>
+                    <input id="sourceSubject" class="inline-input source-subject-input" type="text" list="sourceSubjectList" placeholder="Subject (optional — save unlinked)" maxlength="80" />
+                    <datalist id="sourceSubjectList"></datalist>
+                  </label>
                 </div>
-                <input id="sourceTitle" class="inline-input" type="text" placeholder="Source title" maxlength="120" required />
-                <input id="sourceLevel1" class="inline-input" type="text" placeholder="Layer 1 (optional)" maxlength="80" />
-                <input id="sourceLevel2" class="inline-input" type="text" placeholder="Layer 2 (optional)" maxlength="80" />
-                <input id="sourceLevel3" class="inline-input" type="text" placeholder="Layer 3 (optional)" maxlength="80" />
+                <label class="source-path">
+                  <span class="source-field-label">Hierarchy</span>
+                  <span class="source-path-row">
+                    <input id="sourceLevel1" class="inline-input" type="text" placeholder="Layer 1 (optional)" maxlength="80" />
+                    <span class="source-path-sep" aria-hidden="true">/</span>
+                    <input id="sourceLevel2" class="inline-input" type="text" placeholder="Layer 2 (optional)" maxlength="80" />
+                    <span class="source-path-sep" aria-hidden="true">/</span>
+                    <input id="sourceLevel3" class="inline-input" type="text" placeholder="Layer 3 (optional)" maxlength="80" />
+                  </span>
+                </label>
                 <div id="sourceEditor" class="source-editor"></div>
               </form>
             </div>

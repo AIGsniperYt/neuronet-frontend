@@ -158,6 +158,10 @@ export function createEditor(container, opts = {}) {
     if (!VIEWS.includes(currentView)) currentView = "split";
     let currentOutput = opts.output || "html";
     if (!OUTPUTS.includes(currentOutput)) currentOutput = "html";
+    /* markdown-first: soft breaks are OFF by default. A host that wants a
+     * "regular editor" feel (enter = new line, like a word processor) opts in
+     * with softBreaks: true. Toggleable at runtime via ed.setSoftBreaks(). */
+    let softBreaks = !!opts.softBreaks;
 
     /* persistence: pass `storage: false` to opt out, or a custom prefix.
      * The view mode, split ratio and theme are remembered under it. */
@@ -278,7 +282,7 @@ export function createEditor(container, opts = {}) {
             const ast = parse(src);
             switch (currentOutput) {
                 case "html": {
-                    const html = render(ast, "html");
+                    const html = render(ast, "html", { softBreaks });
                     preview.innerHTML = `<div class="md">${html}</div>`;
                     preview.removeAttribute("data-raw");
                     preview.classList.remove("raw");
@@ -896,6 +900,12 @@ export function createEditor(container, opts = {}) {
         return ed;
     };
     ed.setSyncScroll = (on) => { ed.syncEnabled = !!on; return ed; };
+    ed.setSoftBreaks = (on) => {
+        softBreaks = !!on;
+        refresh();
+        return ed;
+    };
+    ed.getSoftBreaks = () => softBreaks;
     ed.command = (tool) => { applyTool(tool); return ed; };
     ed.onChange = (cb) => { onChangeCbs.push(cb); return () => onChangeCbs.splice(onChangeCbs.indexOf(cb), 1); };
     ed.onRender = (cb) => { onRenderCbs.push(cb); return () => onRenderCbs.splice(onRenderCbs.indexOf(cb), 1); };

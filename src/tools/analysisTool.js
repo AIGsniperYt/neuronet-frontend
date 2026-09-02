@@ -66,7 +66,40 @@ export async function initAnalysisToolV2(deps, context = {}) {
   const sourceLevel3Input = document.getElementById("sourceLevel3");
   const sourceEditor = document.getElementById("sourceEditor");
   const editorViewSeg = document.getElementById("editorViewSeg");
-  const mdEditor = createEditor(sourceEditor, { view: "preview", storage: false });
+  const softBreakSeg = document.getElementById("softBreakSeg");
+
+  // Soft line breaks: the library is markdown-first (softBreaks OFF by
+  // default). Neuronet opts IN by default so the editor behaves like a regular
+  // word processor (single Enter = new line). The choice is remembered both
+  // account-wide (default for new documents) and per document (meta).
+  const SOFT_BREAKS_KEY = "nn-analysis-soft-breaks";
+  function getSoftBreaksDefault() {
+    try { return localStorage.getItem(SOFT_BREAKS_KEY) !== "0"; } catch { return true; }
+  }
+  function setSoftBreaksDefault(on) {
+    try { localStorage.setItem(SOFT_BREAKS_KEY, on ? "1" : "0"); } catch { /* private mode */ }
+  }
+  function sourceSoftBreaks(source) {
+    if (source && typeof source.meta?.softBreaks === "boolean") return source.meta.softBreaks;
+    return getSoftBreaksDefault();
+  }
+  function syncSoftBreakUI(on) {
+    if (!softBreakSeg) return;
+    softBreakSeg.querySelectorAll("button").forEach((b) => {
+      b.classList.toggle("active", (b.dataset.softBreak === "1") === on);
+    });
+  }
+  function applySoftBreaks(on, { persistDefault = true } = {}) {
+    if (typeof mdEditor.setSoftBreaks === "function") mdEditor.setSoftBreaks(on);
+    if (persistDefault) setSoftBreaksDefault(on);
+    syncSoftBreakUI(on);
+  }
+
+  const mdEditor = createEditor(sourceEditor, {
+    view: "preview",
+    storage: false,
+    softBreaks: getSoftBreaksDefault()
+  });
   const newSourceBtn = document.getElementById("newSourceBtn");
   const studyGrid = document.querySelector(".study-grid");
   const analysisReader = document.getElementById("analysisReader");
@@ -1862,6 +1895,8 @@ function htmlToPlainText(html) {
     sourceLevel1Input.value = path[1] || "";
     sourceLevel2Input.value = path[2] || "";
     sourceLevel3Input.value = path[3] || "";
+    // per-document line-break preference (falls back to the account default)
+    applySoftBreaks(sourceSoftBreaks(source), { persistDefault: false });
     mdEditor.setMarkdown(sourceMarkdown(source));
   }
 
@@ -1869,6 +1904,7 @@ function htmlToPlainText(html) {
     sourceForm.reset();
     sourceIdInput.value = "";
     sourceSubjectInput.value = state.selectedSubject;
+    applySoftBreaks(getSoftBreaksDefault(), { persistDefault: false });
     mdEditor.setMarkdown("");
   }
 
@@ -2363,6 +2399,10 @@ function htmlToPlainText(html) {
         state.selectedSubject = card.dataset.subject || "";
         state.view = "study";
         state.selectedSourceId = "";
+        // Entering from launchpad must not restore a stale editor session:
+        // an empty subject opens a fresh blank editor, otherwise show the reader.
+        const sourcesInSubject = state.sources.filter((s) => String(s.subject || "") === state.selectedSubject);
+        state.viewMode = sourcesInSubject.length ? "reader" : "editor";
         resetSourceForm();
         resetAnalysisForm();
         renderState();
@@ -2560,7 +2600,7 @@ const updateLayerSelection = () => {
       currentHierarchy.textContent = rest ? `${bucket} · ${rest}` : bucket;
     }
     const contentMd = sourceMarkdown(source);
-    analysisReader.innerHTML = (contentMd.trim() ? render(parse(contentMd), "html") : "") || (normalized.contentHtml || "<p><br></p>");
+    analysisReader.innerHTML = (contentMd.trim() ? render(parse(contentMd), "html", { softBreaks: sourceSoftBreaks(source) }) : "") || (normalized.contentHtml || "<p><br></p>");
     renderMathWithKatex(analysisReader);   // typesets $…$ maths when KaTeX is loaded (no-op otherwise)
     analysisReader.style.userSelect = "text";
     analysisReader.style.webkitUserSelect = "text";
@@ -2997,7 +3037,9 @@ const updateLayerSelection = () => {
           return domToMarkdown(root) || "";
         })();
       const contentAst = parse(contentMarkdown);
-      const contentHtml = render(contentAst, "html") || "<p><br></p>";
+      // render with the same soft-break mode the user chose, so the saved
+      // html and the reader match the editor.
+      const contentHtml = render(contentAst, "html", { softBreaks: mdEditor.getSoftBreaks() }) || "<p><br></p>";
       // Plain text must match the READER's text (analysisReader.textContent of the
       // rendered html) so quote offsets, resolveQuoteInSource and saved contentText
       // all live in one coordinate space. render(ast, "text") adds blockquote
@@ -3024,6 +3066,7 @@ const updateLayerSelection = () => {
         meta: {
           ...(existing?.meta || {}),
           kind: "source",
+          softBreaks: mdEditor.getSoftBreaks(),
           hierarchyPath: path,
           formatVersion: 2
         },
@@ -3080,6 +3123,7 @@ if (saveSourceBtn) {
 
   if (newSourceBtn) {
     newSourceBtn.addEventListener("click", () => {
+      state.selectedSourceId = "";
       resetSourceForm();
       setSourceViewMode("editor");
     });
@@ -3114,6 +3158,15 @@ if (saveSourceBtn) {
         if (!v) return;
         mdEditor.setView(v);
         editorViewSeg.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+      });
+    });
+  }
+
+  if (softBreakSeg) {
+    softBreakSeg.querySelectorAll("button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const on = btn.dataset.softBreak === "1";
+        applySoftBreaks(on, { persistDefault: true });
       });
     });
   }
