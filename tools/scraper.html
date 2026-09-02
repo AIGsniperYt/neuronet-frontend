@@ -37,6 +37,13 @@
     .scraper-status.err { color: #ff8c8c; }
 
     .scraper-pick { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-muted); position: relative; }
+    .scraper-pick select {
+      font: inherit; font-size: 0.85rem; color: var(--text-main);
+      background: rgba(0,0,0,0.25); border: 1px solid var(--glass-border); border-radius: 10px;
+      padding: 8px 10px; cursor: pointer; outline: none;
+    }
+    .scraper-pick select:focus { border-color: rgba(44,255,179,0.5); }
+    .scraper-pick select option { background: var(--panel-bg); }
     .scraper-combo { position: relative; min-width: 260px; }
     .scraper-combo input {
       font: inherit; font-size: 0.85rem; color: var(--text-main);
@@ -103,8 +110,16 @@
 
   <div id="scraperContent">
     <div class="scraper-card scraper-controls">
-      <button id="scraperFetchBtn" class="scraper-btn">Fetch AQA GCSE boundaries</button>
       <div class="scraper-pick">
+        <span>Qualification</span>
+        <select id="scraperQual"></select>
+      </div>
+      <div class="scraper-pick">
+        <span>Series</span>
+        <select id="scraperSeries"></select>
+      </div>
+      <button id="scraperFetchBtn" class="scraper-btn">Fetch AQA boundaries</button>
+      <div class="scraper-pick scraper-subject-pick">
         <span>Subject</span>
         <div class="scraper-combo">
           <input id="scraperSubjectInput" type="text" placeholder="Search subject or code..." disabled autocomplete="off" />

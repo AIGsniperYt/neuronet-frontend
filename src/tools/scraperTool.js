@@ -10,12 +10,55 @@ export function initScraperTool(deps, context = {}) {
     fetchBtn: $("scraperFetchBtn"),
     result: $("scraperResult"),
     version: $("scraperVersion"),
+    qualSelect: $("scraperQual"),
+    seriesSelect: $("scraperSeries"),
     subjectInput: $("scraperSubjectInput"),
     suggestions: $("scraperSuggestions")
   };
 
   let subjects = [];
   let activeSuggestionIndex = -1;
+
+  // ---------- AQA qualification registry ----------
+  // Grade labels appear in the workbook header (row index 10); the parser reads
+  // them there too, but we keep a default per qualification for fallback display.
+  const AQA_QUALIFICATIONS = {
+    gcse: {
+      id: "gcse",
+      name: "GCSE",
+      sheets: ["GCSE", "GCSE subject"],
+      grades: [9, 8, 7, 6, 5, 4, 3, 2, 1],
+      filePrefix: "AQA-GCSE-GDE-BDY"
+    },
+    aLevel: {
+      id: "aLevel",
+      name: "A-level",
+      sheets: ["A level subject"],
+      grades: ["A*", "A", "B", "C", "D", "E"],
+      filePrefix: "AQA-A-LEVEL-GDE-BDY"
+    },
+    as: {
+      id: "as",
+      name: "AS",
+      sheets: ["AS subject"],
+      grades: ["A", "B", "C", "D", "E"],
+      filePrefix: "AQA-AS-GDE-BDY"
+    }
+  };
+
+  // Verified AQA series using the legacy filestore URL pattern. (Nov 2024+
+  // moved to a hashed URL scheme that needs the archive page scraper.)
+  const AQA_SERIES = [
+    { month: "JUN", year: 2022, label: "June 2022" },
+    { month: "JUN", year: 2023, label: "June 2023" },
+    { month: "NOV", year: 2023, label: "November 2023" },
+    { month: "JUN", year: 2024, label: "June 2024" }
+  ];
+  const AQA_FILE_BASE = "https://filestore.aqa.org.uk/over/stat_pdf";
+
+  function aqaSeriesUrl(qual, series) {
+    return `${AQA_FILE_BASE}/${qual.filePrefix}-${series.month}-${series.year}.XLSX`;
+  }
 
   function setStatus(msg, kind = "") {
     if (el.status) {
@@ -38,29 +81,56 @@ export function initScraperTool(deps, context = {}) {
   }
 
   // ---------- AQA parsing ----------
-  // The AQA 'GCSE' sheet layout (June 2024 observed):
-  //   Row 10 = header: SubjectCode, SubjectTitle, MaximumMark, GradeBoundaries, <blank>, 9,8,7,6,5,4,3,2,1
-  //   Rows 11+ = data: [code, title, maxMark, b9, b8, b7, b6, b5, b4, b3, b2, b1]
-  // English Language (8700) example row:
+  // AQA workbooks share a common header layout, but the sheet name and header
+  // row offset vary by series (e.g. sheet is 'GCSE' in Jun 2024 but 'GCSE
+  // subject' in 2022/23; the two header rows sit at 7/8 in 2022 but 9/10 in
+  // 2023/24). So we locate the sheet by candidate names and find the grade
+  // header row by scanning for the 'Subject Code' label instead of hardcoding
+  // a row index.
+  //
+  //   FakeHeader  = SubjectCode, SubjectTitle, MaximumMark, GradeBoundaries, <blank>, <labels...>
+  //   GradeHeader = <blank>,9,8,7,6,5,4,3,2,1  (or A*,A,B,C,D,E / A,B,C,D,E)
+  //   Data rows   = [code, title, maxMark, bGrade1, bGrade2, ...]
+  // English Language (8700) GCSE example row:
   //   ["8700","ENGLISH LANGUAGE",160,121,111,102,92,82,73,54,35,16]
-  function parseAqaXlsx(sheet) {
-    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+  function parseAqaXlsx(wb, qual, fallbackGrades) {
+    let sheet = null;
+    for (const name of qual.sheets) {
+      if (wb.Sheets[name]) { sheet = wb.Sheets[name]; break; }
+    }
+    const rows = sheet ? XLSX.utils.sheet_to_json(sheet, { header: 1 }) : [];
     const subjects = [];
+
+    // Find the 'Subject Code' header row, then read grade labels from the
+    // next row (the grade header directly above the data).
+    let gradeLabels = [];
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i] || [];
+      if (String(r[0] || "").trim() === "Subject Code") {
+        const gradeRow = rows[i + 1] || [];
+        for (let g = 0; g < 9; g++) {
+          const label = gradeRow[3 + g];
+          if (label === undefined || label === null || String(label).trim() === "") break;
+          gradeLabels.push(String(label).trim());
+        }
+        break;
+      }
+    }
+    if (gradeLabels.length === 0) gradeLabels = fallbackGrades;
 
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i] || [];
       const code = r[0];
       const title = r[1];
       if (code == null || String(code).trim() === "") continue;
-      // AQA subject codes are 4-6 digits, optionally followed by a tier/
-      // option suffix of uppercase letters (e.g. 8700, 8461F, 8525A, 8145AA).
-      if (typeof code === "string" && !/^\d{4,6}[A-Z]*$/.test(String(code).trim())) continue;
+      // AQA subject codes like 8700, 8461F, 8525A, 8145AA, and 2022-era 814A01
+      // (3-6 leading digits, then an optional letters/digits suffix).
+      if (typeof code === "string" && !/^\d{3,6}[A-Z0-9]*$/.test(String(code).trim())) continue;
       const maxMark = Number(r[2]);
       if (!Number.isFinite(maxMark)) continue;
 
-      // grades at indices 3..11 (9 -> 1)
+      // Grade boundaries at column offsets 3..(3 + gradeCount - 1)
       const grades = {};
-      const gradeLabels = [9, 8, 7, 6, 5, 4, 3, 2, 1];
       for (let g = 0; g < gradeLabels.length; g++) {
         const v = Number(r[3 + g]);
         if (Number.isFinite(v)) grades[gradeLabels[g]] = v;
@@ -70,7 +140,8 @@ export function initScraperTool(deps, context = {}) {
         code: String(code).trim(),
         title: String(title || "").trim(),
         maxMark,
-        grades
+        grades,
+        gradesInOrder: gradeLabels
       });
     }
     return subjects;
@@ -149,9 +220,6 @@ export function initScraperTool(deps, context = {}) {
   }
 
   // ---------- fetch flow ----------
-  const AQA_GCSE_JUN2024_XLSX =
-    "https://filestore.aqa.org.uk/over/stat_pdf/AQA-GCSE-GDE-BDY-JUN-2024.XLSX";
-
   // Exam board file stores block browser cross-origin fetches via CORS, so we
   // route the request through a server-side proxy that adds permissive CORS.
   // The proxy base is configurable (defaults to the deployed backend) so it can
@@ -167,11 +235,12 @@ export function initScraperTool(deps, context = {}) {
 
   function renderSubject(subject) {
     if (!el.result) return;
-    const gradeKeys = [9, 8, 7, 6, 5, 4, 3, 2, 1]
+    const gradeLabels = subject.gradesInOrder || [];
+    const gradeKeys = gradeLabels
       .map((g) => {
         const v = subject.grades[g];
         return v !== undefined
-          ? `<div class="scraper-grade"><span class="grade-num">${g}</span><span class="grade-mark">${v}</span></div>`
+          ? `<div class="scraper-grade"><span class="grade-num">${escapeHtml(String(g))}</span><span class="grade-mark">${v}</span></div>`
           : "";
       })
       .join("");
@@ -187,14 +256,49 @@ export function initScraperTool(deps, context = {}) {
       </div>`;
   }
 
-  async function fetchAqaGcseEnglishLang() {
-    clearLog();
-    setStatus("Fetching AQA GCSE grade boundary spreadsheet...", "busy");
-    const requestUrl = proxyUrl(AQA_GCSE_JUN2024_XLSX);
-    appendLog(`URL: ${AQA_GCSE_JUN2024_XLSX}`);
-    appendLog(`proxy: ${requestUrl}`);
+  // ---------- qualification / series pickers ----------
+  function populateQualificationPicker() {
+    if (!el.qualSelect) return;
+    el.qualSelect.innerHTML = "";
+    Object.values(AQA_QUALIFICATIONS).forEach((q) => {
+      const opt = document.createElement("option");
+      opt.value = q.id;
+      opt.textContent = q.name;
+      el.qualSelect.appendChild(opt);
+    });
+  }
 
-    const res = await fetch(requestUrl);
+  function populateSeriesPicker() {
+    if (!el.seriesSelect) return;
+    el.seriesSelect.innerHTML = "";
+    AQA_SERIES.forEach((s) => {
+      const opt = document.createElement("option");
+      opt.value = `${s.month}-${s.year}`;
+      opt.textContent = s.label;
+      el.seriesSelect.appendChild(opt);
+    });
+  }
+
+  function currentQualification() {
+    const id = el.qualSelect ? el.qualSelect.value : "gcse";
+    return AQA_QUALIFICATIONS[id] || AQA_QUALIFICATIONS.gcse;
+  }
+
+  function currentSeries() {
+    const val = el.seriesSelect ? el.seriesSelect.value : "JUN-2024";
+    return AQA_SERIES.find((s) => `${s.month}-${s.year}` === val) || AQA_SERIES[AQA_SERIES.length - 1];
+  }
+
+  async function fetchAqaBoundaries() {
+    clearLog();
+    const qual = currentQualification();
+    const series = currentSeries();
+    const url = aqaSeriesUrl(qual, series);
+    setStatus(`Fetching AQA ${qual.name} ${series.label}...`, "busy");
+    appendLog(`URL: ${url}`);
+    appendLog(`proxy: ${proxyUrl(url)}`);
+
+    const res = await fetch(proxyUrl(url));
     if (!res.ok) throw new Error(`HTTP ${res.status} fetching spreadsheet`);
     setStatus("Downloaded spreadsheet. Parsing...", "busy");
     appendLog(`Downloaded (${(res.headers.get("content-length") || "?").replace(/\D/g, "")} bytes).`);
@@ -203,12 +307,12 @@ export function initScraperTool(deps, context = {}) {
     const wb = XLSX.read(buf, { type: "array" });
     appendLog(`Sheets: ${wb.SheetNames.join(", ")}`);
 
-    subjects = parseAqaXlsx(wb.Sheets["GCSE"]);
-    appendLog(`Parsed ${subjects.length} GCSE subject rows.`);
+    subjects = parseAqaXlsx(wb, qual, qual.grades);
+    appendLog(`Parsed ${subjects.length} ${qual.name} subject rows.`);
 
     renderSubjectPicker(subjects);
     appendLog("Choose a subject from the picker to view its grade boundaries.");
-    setStatus("Select a subject", "ok");
+    setStatus(`${qual.name} ${series.label} loaded`, "ok");
   }
 
   function bindEvents() {
@@ -217,14 +321,25 @@ export function initScraperTool(deps, context = {}) {
         el.fetchBtn.disabled = true;
         el.fetchBtn.textContent = "Fetching...";
         try {
-          await fetchAqaGcseEnglishLang();
+          await fetchAqaBoundaries();
         } catch (e) {
           setStatus(e.message || String(e), "err");
           appendLog("ERROR: " + (e.message || String(e)));
         } finally {
           el.fetchBtn.disabled = false;
-          el.fetchBtn.textContent = "Fetch AQA GCSE boundaries";
+          el.fetchBtn.textContent = "Fetch AQA boundaries";
         }
+      });
+    }
+    // Changing qualification/series only takes effect on the next fetch.
+    if (el.qualSelect) {
+      el.qualSelect.addEventListener("change", () => {
+        setStatus("Change takes effect on next fetch.", "");
+      });
+    }
+    if (el.seriesSelect) {
+      el.seriesSelect.addEventListener("change", () => {
+        setStatus("Change takes effect on next fetch.", "");
       });
     }
     if (el.subjectInput) {
@@ -271,6 +386,8 @@ export function initScraperTool(deps, context = {}) {
     el.version.textContent = `SheetJS v${XLSX.version}`;
   }
 
+  populateQualificationPicker();
+  populateSeriesPicker();
   bindEvents();
-  setStatus("Ready. This fetches AQA GCSE English Language grade boundaries for June 2024.", "");
+  setStatus("Ready. Pick a qualification and series, then fetch AQA boundaries.", "");
 }
