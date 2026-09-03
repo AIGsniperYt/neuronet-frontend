@@ -111,6 +111,14 @@
   <div id="scraperContent">
     <div class="scraper-card scraper-controls">
       <div class="scraper-pick">
+        <span>Board</span>
+        <select id="scraperBoard">
+          <option value="aqa">AQA</option>
+          <option value="ocr">OCR</option>
+          <option value="pearson">Pearson (Edexcel)</option>
+        </select>
+      </div>
+      <div class="scraper-pick">
         <span>Qualification</span>
         <select id="scraperQual"></select>
       </div>
@@ -118,8 +126,8 @@
         <span>Series</span>
         <select id="scraperSeries"></select>
       </div>
-      <button id="scraperScanBtn" class="scraper-btn" title="Scrape AQA grade-boundaries pages for the latest series">Scan AQA site</button>
-      <button id="scraperFetchBtn" class="scraper-btn">Fetch AQA boundaries</button>
+      <button id="scraperScanBtn" class="scraper-btn" title="Scrape the exam board pages for available series">Scan site</button>
+      <button id="scraperFetchBtn" class="scraper-btn">Fetch boundaries</button>
       <div class="scraper-pick scraper-subject-pick">
         <span>Subject</span>
         <div class="scraper-combo">

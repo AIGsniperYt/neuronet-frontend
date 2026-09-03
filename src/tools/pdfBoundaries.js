@@ -1,0 +1,329 @@
+// PDF grade-boundary extraction for OCR and Pearson (Edexcel).
+// Uses vendored pdf.js to extract text with layout-preserving line
+// reconstruction, then board-specific row parsers to identify subject rows.
+//
+// Line model: each layout line is { page, y, items: [{x, str}] } with items
+// sorted by x. Board files are text-based (not scans), so text extraction is
+// reliable; column alignment is not needed beyond token order.
+
+let pdfjs = null;
+
+async function ensurePdfJs() {
+  if (pdfjs) return pdfjs;
+  pdfjs = await import("../vendor/pdfjs/index.js");
+  pdfjs.GlobalWorkerOptions.workerSrc =
+    new URL("../vendor/pdfjs/pdf.worker.min.mjs", import.meta.url).href;
+  return pdfjs;
+}
+
+// ---------- layout line reconstruction ----------
+
+// Cluster text items into lines by y-coordinate (within tolerance),
+// items sorted by x within each line, reading top-to-bottom.
+function buildLayoutLines(pageResults) {
+  const all = [];
+  for (const { page, items } of pageResults) {
+    for (const it of items) {
+      const str = it.str?.trim();
+      if (!str || str.length === 0) continue;
+      all.push({ page, x: it.transform[4], y: it.transform[5], str });
+    }
+  }
+  all.sort((a, b) => a.page - b.page || b.y - a.y || a.x - b.x);
+
+  const lines = [];
+  let cur = [];
+  let curY = null;
+  let curPage = -1;
+  const TOL = 3;
+
+  for (const it of all) {
+    if (it.page === curPage && curY !== null && Math.abs(it.y - curY) < TOL) {
+      cur.push(it);
+      curY = (curY + it.y) / 2;
+    } else {
+      if (cur.length) lines.push({ page: curPage, y: Math.round(curY), items: cur });
+      cur = [it];
+      curY = it.y;
+      curPage = it.page;
+    }
+  }
+  if (cur.length) lines.push({ page: curPage, y: Math.round(curY), items: cur });
+
+  return lines.map((l) => {
+    l.items.sort((a, b) => a.x - b.x);
+    return l;
+  });
+}
+
+// ---------- PDF fetch + extract ----------
+
+// `proxyFn(url)` maps a target URL through the CORS proxy; returns the
+// proxied absolute URL. We fetch through it so the browser can read the file.
+export async function extractPdfLayoutLines(url, proxyFn) {
+  const lib = await ensurePdfJs();
+  const res = await fetch(proxyFn(url));
+  if (!res.ok) throw new Error(`HTTP ${res.status} fetching PDF`);
+  const buf = await res.arrayBuffer();
+  const doc = await lib.getDocument({ data: new Uint8Array(buf) }).promise;
+
+  const pageResults = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p);
+    const tc = await page.getTextContent();
+    pageResults.push({ page: p, items: tc.items });
+  }
+  return buildLayoutLines(pageResults);
+}
+
+// ---------- shared row utilities ----------
+
+// Subject/qual code shapes:
+//   OCR: J198 (GCSE), H407 (A-level), J111, H460...
+//   Pearson: 1BI0/1AA0 (GCSE), 8BN0 (AS), 9AA0 (A-level), 2AS0, 2BI0...
+// Both are 4-5 alphanumeric chars beginning with a letter or digit and
+// containing at least one digit; pure words like "Option"/"Overall"/"Subject"
+// are excluded by requiring any digit and no vowels-only shape.
+const CODE_RE = /^[A-Z0-9]{4,6}$/;
+
+function isCode(tok) {
+  return CODE_RE.test(tok) && /\d/.test(tok) && !/^(Option|Overall|Subject|Raw|Paper)/.test(tok);
+}
+
+function isNumber(tok) {
+  return /^-?\d+$/.test(tok);
+}
+
+function lineTokens(line) {
+  return line.items.map((it) => it.str.trim()).filter((s) => s.length > 0);
+}
+
+// Map OCR lowercase grade labels to display labels.
+const LABEL_RE = /^(9|8|7|6|5|4|3|2|1|u|A\*|a\*|A|B|C|D|E)$/i;
+
+function normalizeLabel(tok) {
+  if (tok === "u") return "U";
+  if (tok.toLowerCase() === "a*") return "A*";
+  if (/^[a-e]$/i.test(tok)) return tok.toUpperCase();
+  if (/^[1-9]$/.test(tok)) return tok;
+  return tok;
+}
+
+// Detect the grade-label header from a line containing "Mark", e.g.
+//   Max Mark  9  8  7  6  5  4  3  2  1  u
+//   Max Mark  a*  a  b  c  d  e  u
+//   Max Mark  a*   a   b   c   d   e   u
+// Returns array of normalized label strings, or null.
+function detectGradeLabels(tokens) {
+  let i = tokens.indexOf("Mark");
+  if (i < 0) return null;
+  const after = tokens.slice(i + 1).filter((t) => t.length > 0);
+  const out = [];
+  for (const t of after) {
+    if (!LABEL_RE.test(t)) break;
+    out.push(normalizeLabel(t));
+  }
+  return out.length >= 3 ? out : null;
+}
+
+// ---------- board: OCR ----------
+
+// OCR grade-boundary files are per-qualification blocks headed by a subject
+// title (e.g. "GCSE English Language"). Each block contains component rows:
+//   J351  01  Communicating information and ideas   Raw    80   66  61 ...
+// and qualification ("Overall") rows, which for A-level carry NO code:
+//   Option A: 11+21   Overall  196  168  144 ...
+// GCSE Overall rows DO carry the code:  J351   Overall  160  132 ...
+// We therefore only accept Overall rows, falling back to the most recent code
+// seen in a Raw row within the current subject block.
+const OCR_GCSE_LABELS = ["9", "8", "7", "6", "5", "4", "3", "2", "1", "U"];
+const OCR_ALEVEL_LABELS = ["A*", "A", "B", "C", "D", "E", "U"];
+
+// Track blocks for OCR: a new subject block starts when a line like
+//   "A Level Ancient History"  /  "GCSE English Language"
+// appears (title only, no code/mark). We capture the title to label data rows
+// that have no code of their own (A-level Overall rows).
+function parseOcr(lines, qual) {
+  const subjects = [];
+  const gradeLabels = qual === "gcse" ? OCR_GCSE_LABELS : OCR_ALEVEL_LABELS;
+  let blockTitle = null;
+  let blockCode = null;
+  let currentGrades = gradeLabels;
+
+  for (const line of lines) {
+    const toks = lineTokens(line);
+    if (toks.length === 0) continue;
+
+    // Detect block header: a short line with no "Mark", no code, no numbers
+    // that names a subject/qualification block.
+    if (
+      toks.length <= 8 &&
+      !toks.some(isNumber) &&
+      !isCode(toks[0]) &&
+      !toks.includes("Mark") &&
+      /(GCSE|Level|GCE|with|and|Modern|Ancient|The|Option|Raw|Overall|Mathematics|English|for)/i.test(toks.join(" "))
+    ) {
+      blockTitle = toks.join(" ");
+      blockCode = null;
+      continue;
+    }
+
+    // Filter blocks by qualification: the "AS and A level" PDF mixes both.
+    if (blockTitle && (qual === "gcse" || qual === "as" || qual === "aLevel")) {
+      const isAsBlock = /^AS\b|^AS GCE/.test(blockTitle);
+      const isALevelBlock = /^A Level\b|^A2\b/.test(blockTitle);
+      const isGcseBlock = /^GCSE\b/.test(blockTitle);
+      if (qual === "as" && !isAsBlock) continue;
+      if ((qual === "aLevel" || qual === "gcse") && isAsBlock) continue;
+      if (qual === "aLevel" && isGcseBlock) continue;
+      if (qual === "gcse" && isALevelBlock) continue;
+    }
+
+    // Detect grade header to override defaults.
+    const detected = detectGradeLabels(toks);
+    if (detected) {
+      currentGrades = detected;
+      // Reset per-new-header only if header appears (some PDFs stamp it every page)
+      continue;
+    }
+
+    const first = toks[0];
+    // Component (Raw) rows carry the code; use them to anchor the block code.
+    if (isCode(first) && toks.includes("Raw")) {
+      blockCode = first;
+      continue;
+    }
+
+    // Overall rows: accept either <code> Overall ... or <...> Overall ...
+    const overIdx = toks.indexOf("Overall");
+    if (overIdx < 0) continue;
+    const rest = toks.slice(overIdx + 1);
+    if (rest.length < 2) continue;
+    const maxMark = parseInt(rest[0], 10);
+    if (!isFinite(maxMark) || maxMark <= 0) continue;
+
+    const code = isCode(toks[0]) ? toks[0] : blockCode;
+    if (!code) continue;
+
+    const title = blockTitle || code;
+    const grades = {};
+    for (let g = 0; g < currentGrades.length && g + 1 < rest.length; g++) {
+      const v = parseInt(rest[g + 1], 10);
+      if (isFinite(v)) grades[currentGrades[g]] = v;
+    }
+
+    subjects.push({
+      board: "ocr",
+      qual,
+      code,
+      title,
+      maxMark,
+      grades,
+      gradesInOrder: currentGrades
+    });
+  }
+  return subjects;
+}
+
+// ---------- board: Pearson / Edexcel ----------
+
+// Pearson files are split by section:
+//   AS overall grade boundaries     (qual = as)
+//   A level overall grade boundaries (qual = aLevel)
+// GCSE file has no AS/A-level sections.
+// Data rows:
+//   1BI0  Biology (Higher)   Subject  200  167 155 144 124 104 84 74  0
+//   8BN0  AS Biology A ...   Subject  160  117 103 89  75  62  0
+//   9BN0  A Level Biology ... Subject  300  220 196 170 144 119 94  0
+// Codes are 5 chars; the FIRST digit encodes level: 8 = AS, 9 = A-level,
+// 1 = GCSE. We rely on the section header AND the code prefix.
+const PEARSON_GCSE_LABELS = ["9", "8", "7", "6", "5", "4", "3", "2", "1", "U"];
+const PEARSON_ALEVEL_LABELS = ["A*", "A", "B", "C", "D", "E", "U"];
+const PEARSON_AS_LABELS = ["A", "B", "C", "D", "E", "U"];
+
+function parsePearsonSections(lines, qual) {
+  const subjects = [];
+  let section = null; // "AS" | "A level" | null
+  let inSection = false;
+  const gradeLabels =
+    qual === "gcse" ? PEARSON_GCSE_LABELS
+    : qual === "as" ? PEARSON_AS_LABELS
+    : PEARSON_ALEVEL_LABELS;
+
+  for (const line of lines) {
+    const toks = lineTokens(line);
+    if (toks.length === 0) continue;
+
+    // Track section headers. Matched on the leading phrase regardless of the
+    // header's total token count (it also carries the grade labels).
+    const joined = toks.join(" ");
+    if (/^AS\s+overall grade boundaries/i.test(joined)) {
+      section = "AS";
+      inSection = qual === "as";
+      continue;
+    }
+    if (/^A level\s+overall grade boundaries/i.test(joined)) {
+      section = "A level";
+      inSection = qual === "aLevel";
+      continue;
+    }
+    if (/^GCSE overall grade boundaries/i.test(joined) || !section && /^Overall grade boundaries/i.test(joined)) {
+      section = "GCSE";
+      inSection = qual === "gcse";
+      continue;
+    }
+
+    const first = toks[0];
+    if (!isCode(first)) continue;
+    if (!toks.includes("Subject")) continue;
+    if (toks.includes("Paper(s)")) continue;
+    if (!inSection && (qual === "as" || qual === "aLevel")) continue;
+
+    const subjIdx = toks.indexOf("Subject");
+    const title = toks.slice(1, subjIdx).join(" ");
+    const rest = toks.slice(subjIdx + 1);
+    if (rest.length < 2) continue;
+    const maxMark = parseInt(rest[0], 10);
+    if (!isFinite(maxMark) || maxMark <= 0) continue;
+
+    // Section-header primary; code prefix secondary (8=AS, 9=A-level).
+    if (section === "AS" && qual !== "as") continue;
+    if (section === "A level" && qual !== "aLevel") continue;
+
+    const grades = {};
+    for (let g = 0; g < gradeLabels.length && g + 1 < rest.length; g++) {
+      const v = parseInt(rest[g + 1], 10);
+      if (isFinite(v)) grades[gradeLabels[g]] = v;
+    }
+
+    subjects.push({
+      board: "pearson",
+      qual,
+      code: first,
+      title,
+      maxMark,
+      grades,
+      gradesInOrder: gradeLabels
+    });
+  }
+  return subjects;
+}
+
+// ---------- entry point ----------
+
+export function parsePdfBoundaries(layoutLines, board, qual) {
+  let subjects;
+  if (board === "ocr") subjects = parseOcr(layoutLines, qual);
+  else if (board === "pearson") subjects = parsePearsonSections(layoutLines, qual);
+  else return [];
+
+  // Dedupe by (code, title): PDFs reprint identical rows for alternative
+  // paper variants (e.g. Pearson "Higher" printed for both 1H2H and 1HT2HT).
+  const seen = new Set();
+  return subjects.filter((s) => {
+    const key = `${s.code}|${s.title}|${s.maxMark}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}

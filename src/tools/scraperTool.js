@@ -1,4 +1,5 @@
 import * as XLSX from "../vendor/xlsx/index.js";
+import { extractPdfLayoutLines, parsePdfBoundaries } from "./pdfBoundaries.js";
 
 export function initScraperTool(deps, context = {}) {
   const { escapeHtml } = deps;
@@ -11,6 +12,7 @@ export function initScraperTool(deps, context = {}) {
     scanBtn: $("scraperScanBtn"),
     result: $("scraperResult"),
     version: $("scraperVersion"),
+    boardSelect: $("scraperBoard"),
     qualSelect: $("scraperQual"),
     seriesSelect: $("scraperSeries"),
     subjectInput: $("scraperSubjectInput"),
@@ -20,42 +22,38 @@ export function initScraperTool(deps, context = {}) {
   let subjects = [];
   let activeSuggestionIndex = -1;
 
-  // ---------- AQA qualification registry ----------
-  // Grade labels appear in the workbook header (row index 10); the parser reads
-  // them there too, but we keep a default per qualification for fallback display.
+  // ---------- qualification registry (shared across boards) ----------
+  const QR = {
+    gcse: { id: "gcse", name: "GCSE" },
+    aLevel: { id: "aLevel", name: "A-level" },
+    as: { id: "as", name: "AS" }
+  };
+
+  // ---------- AQA qualification / series registry ----------
+  // AQA publishes xlsx workbooks. Legacy filestore URL pattern is predictable;
+  // Nov 2024+ files moved behind hashed URLs that must be discovered from the
+  // public grade-boundaries pages (Sanity JSON with title+url per file).
   const AQA_QUALIFICATIONS = {
     gcse: {
-      id: "gcse",
-      name: "GCSE",
+      id: "gcse", name: "GCSE",
       sheets: ["GCSE", "GCSE subject", "GCSE Subject"],
       grades: [9, 8, 7, 6, 5, 4, 3, 2, 1],
       filePrefix: "AQA-GCSE-GDE-BDY"
     },
     aLevel: {
-      id: "aLevel",
-      name: "A-level",
+      id: "aLevel", name: "A-level",
       sheets: ["A level subject"],
       grades: ["A*", "A", "B", "C", "D", "E"],
       filePrefix: "AQA-A-LEVEL-GDE-BDY"
     },
     as: {
-      id: "as",
-      name: "AS",
+      id: "as", name: "AS",
       sheets: ["AS subject"],
       grades: ["A", "B", "C", "D", "E"],
       filePrefix: "AQA-AS-GDE-BDY"
     }
   };
 
-  // AQA grade-boundary files live in two places:
-  //  - Legacy filestore URL pattern (verified for JUN 2022 through JUN 2024,
-  //    plus the November resit series) -> predictable stat_pdf path.
-  //  - Hashed attachment URLs behind www.aqa.org.uk/files/... (Nov 2024+).
-  //    Hashes cannot be predicted, so we discover them by scraping the public
-  //    grade-boundaries pages, which embed a Sanity JSON payload where every
-  //    file has "title":"<Qual> - Grade boundaries <Month> <Year>" and a direct
-  //    "url". The legacy list below is only a fallback baseline; the series
-  //    picker is populated from whatever live pages we can reach.
   const AQA_SERIES = [
     { month: "JUN", year: 2022, label: "June 2022" },
     { month: "JUN", year: 2023, label: "June 2023" },
@@ -71,37 +69,74 @@ export function initScraperTool(deps, context = {}) {
     ["September", "SEP"], ["October", "OCT"], ["November", "NOV"], ["December", "DEC"]
   ];
 
-  // Discovered hashed files: key `${seriesKey}:${qualId}` -> full xlsx url.
-  // Series keys use "JUN-2026" style. Discovered files win over the legacy
-  // filestore pattern because they are always the live, current artifact.
-  const discoveredFiles = new Map();
+  // Per-board discovered files: key `${seriesKey}:${qualId}` -> full file url.
+  const discoveredAqa = new Map();
+
+  // ---------- OCR registry ----------
+  // OCR publishes one PDF per qualification family per series (e.g.
+  // "gcse-grade-boundaries-june-2026.pdf", "as-and-a-level-..."). Filenames
+  // carry unpredictable numeric ids (/Images/<id>-...pdf) so the series list is
+  // built by scraping the index + archive pages, which contain every series.
+  const OCR_PAGE_BASE = "https://www.ocr.org.uk/administration/grade-boundaries/index.aspx";
+  const OCR_PAGE_ARCHIVE = "https://www.ocr.org.uk/administration/grade-boundaries/grade-boundaries-archive/grade-boundaries-archive.aspx";
+  const OCR_QUAL_PATTERNS = {
+    gcse: /gcse-grade-boundaries-/,
+    aLevel: /as-and-a-level-grade-boundaries-|a-level-grade-boundaries-/,
+    as: /as-and-a-level-grade-boundaries-|a-level-grade-boundaries-/
+  };
+  const discoveredOcr = new Map();
+
+  // ---------- Pearson / Edexcel registry ----------
+  // Pearson publishes PDFs under predictable DAM paths plus a current-series
+  // page (grade-boundaries.html) that embeds a hidden-asset list. Older series
+  // follow a stable filename pattern (like AQA's legacy filestore): the same
+  // path with a different month/year. We combine both: current from the page,
+  // historical from the verified pattern.
+  const PEARSON_PAGE = "https://qualifications.pearson.com/en/support/support-topics/results-certification/grade-boundaries.html";
+  const PEARSON_DAM = "https://qualifications.pearson.com/content/dam/pdf/Support/Grade-boundaries";
+  const PEARSON_BASELINE = [
+    { month: "JUN", year: 2023, label: "June 2023" },
+    { month: "JUN", year: 2024, label: "June 2024" },
+    { month: "NOV", year: 2024, label: "November 2024" },
+    { month: "JUN", year: 2025, label: "June 2025" },
+    { month: "NOV", year: 2025, label: "November 2025" }
+  ];
+  const discoveredPearson = new Map();
 
   function seriesKey(series) {
     return `${series.month}-${series.year}`;
   }
 
-  function legacyAqaSeriesUrl(qual, series) {
-    return `${AQA_FILE_BASE}/${qual.filePrefix}-${series.month}-${series.year}.XLSX`;
+  function monthAbbrevToFull(abbrev) {
+    const m = AQA_MONTHS.find(([, abb]) => abb === abbrev);
+    return m ? m[0] : abbrev;
   }
 
-  function aqaSeriesUrl(qual, series) {
-    const discovered = discoveredFiles.get(`${seriesKey(series)}:${qual.id}`);
-    return discovered || legacyAqaSeriesUrl(qual, series);
+  function monthAbbrevToSlug(abbrev) {
+    return monthAbbrevToFull(abbrev).toLowerCase();
   }
 
-  // Build the series list for the picker: discovered series (newest first)
-  // merged with the legacy baseline, deduped by series key.
-  function buildSeriesList() {
+  // ---------- proxy ----------
+  // Exam board file stores block browser cross-origin fetches via CORS, so we
+  // route requests through a server-side proxy that adds permissive CORS.
+  function proxyUrl(real) {
+    const base = (typeof window !== "undefined" && window.__NEURONET_PROXY_BASE) ||
+      document.querySelector('meta[name="neuronet-proxy"]')?.getAttribute("content") ||
+      "https://neuronet-backend.onrender.com";
+    const sep = base.endsWith("/") ? "" : "/";
+    return `${base}${sep}api/proxy?url=${encodeURIComponent(real)}`;
+  }
+
+  // ---------- series list building ----------
+  function buildSeriesListFor(board, baseline, discovered) {
     const byKey = new Map();
-    for (const s of AQA_SERIES) byKey.set(seriesKey(s), { ...s });
-    for (const key of discoveredFiles.keys()) {
-      const seriesKeyStr = key.split(":")[0];
-      const [mAbbrev, yearStr] = seriesKeyStr.split("-");
+    for (const s of baseline) byKey.set(seriesKey(s), { ...s });
+    for (const key of discovered.keys()) {
+      const sk = key.split(":")[0];
+      const [mAbbrev, yearStr] = sk.split("-");
       const year = Number(yearStr);
-      if (!byKey.has(seriesKeyStr)) {
-        const match = AQA_MONTHS.find(([, abb]) => abb === mAbbrev);
-        const label = match ? `${match[0]} ${year}` : seriesKeyStr;
-        byKey.set(seriesKeyStr, { month: mAbbrev, year, label });
+      if (!byKey.has(sk)) {
+        byKey.set(sk, { month: mAbbrev, year, label: `${monthAbbrevToFull(mAbbrev)} ${year}` });
       }
     }
     return [...byKey.values()].sort((a, b) =>
@@ -110,11 +145,9 @@ export function initScraperTool(deps, context = {}) {
     );
   }
 
-  // Scrape the AQA grade-boundaries pages (current + archive) for every hashed
-  // xlsx file, reading the Sanity JSON embedded in the page: each file carries
-  // a "title" of "<Qual> - Grade boundaries <Month> <Year>" plus a "url".
-  // Also grabs any legacy-named stat_pdf path, which doubles as a fallback that
-  // survives JSON layout changes.
+  // ---------- AQA discovery ----------
+  // Scrape the current + archive pages for the Sanity JSON: each hashed xlsx
+  // carries "title":"<Qual> - Grade boundaries <Month> <Year>" + a "url".
   async function discoverAqaSeries() {
     const found = [];
     const pages = [proxyUrl(AQA_PAGE_ARCHIVE), proxyUrl(AQA_PAGE_BASE)];
@@ -125,39 +158,30 @@ export function initScraperTool(deps, context = {}) {
         if (!res.ok) continue;
         text = await res.text();
       } catch {
-        continue; // A page being unreachable shouldn't block discovery.
+        continue;
       }
-      const pairs = extractGradeBoundaryPairs(text);
-      found.push(...pairs);
+      found.push(...extractGradeBoundaryPairs(text));
     }
-
     for (const { url, title } of found) {
       const parsed = parseBoundaryTitle(title);
       if (!parsed) continue;
-      const { qualId, series } = parsed;
-      const key = `${seriesKey(series)}:${qualId}`;
-      if (url) discoveredFiles.set(key, url);
+      discoveredAqa.set(`${seriesKey(parsed.series)}:${parsed.qualId}`, url);
     }
     return found.length;
   }
 
-  // Pull (title, url) pairs out of the embedded Sanity JSON. The payload is
-  // double-escaped inside a script tag, so we match both escaped and plain
-  // variants. Each pair corresponds to one attached file (pdf or xlsx).
   function extractGradeBoundaryPairs(html) {
     const escaped = /\\"url\\":\\"(https:\/\/cdn\.sanity\.io\/files\/[^\\"]+?\.xlsx)\\"[\s\S]*?\\"title\\":\\"([^\\"]+?)\\"/g;
     const plain = /"url":"(https:\/\/cdn\.sanity\.io\/files\/[^"]+?\.xlsx)"[\s\S]*?"title":"([^"]+?)"/g;
     const out = [];
-    const push = (re) => {
+    for (const re of [escaped, plain]) {
       let m;
       while ((m = re.exec(html)) !== null) out.push({ url: m[1], title: m[2] });
-    };
-    push(escaped);
-    if (out.length === 0) push(plain);
+      if (out.length > 0) break;
+    }
     return out;
   }
 
-  // "GCSE - Grade boundaries June 2026" | "GCSE Grade boundaries - November 2024"
   function parseBoundaryTitle(title) {
     const m = title.match(/(January|February|March|April|May|June|July|August|September|October|November|December) (\d{4})/);
     if (!m) return null;
@@ -170,6 +194,113 @@ export function initScraperTool(deps, context = {}) {
     return qualId ? { qualId, series } : null;
   }
 
+  function legacyAqaSeriesUrl(qual, series) {
+    return `${AQA_FILE_BASE}/${qual.filePrefix}-${series.month}-${series.year}.XLSX`;
+  }
+
+  function aqaSeriesUrl(qual, series) {
+    return discoveredAqa.get(`${seriesKey(series)}:${qual.id}`) || legacyAqaSeriesUrl(qual, series);
+  }
+
+  // ---------- OCR discovery ----------
+  // OCR index + archive pages list every series' PDFs as
+  //   <a href="/Images/<id>-gcse-grade-boundaries-june-2026.pdf">...
+  async function discoverOcrSeries() {
+    const found = [];
+    for (const page of [proxyUrl(OCR_PAGE_BASE), proxyUrl(OCR_PAGE_ARCHIVE)]) {
+      let text;
+      try {
+        const res = await fetch(page);
+        if (!res.ok) continue;
+        text = await res.text();
+      } catch {
+        continue;
+      }
+      found.push(...extractOcrPdfLinks(text));
+    }
+    let kept = 0;
+    for (const { url, fileName } of found) {
+      const fullMatch = fileName.match(/-(january|february|march|april|may|june|july|august|september|october|november|december)-(\d{4})\b/i);
+      if (!fullMatch) continue;
+      const full = fullMatch[1][0].toUpperCase() + fullMatch[1].slice(1).toLowerCase();
+      const month = AQA_MONTHS.find(([f]) => f === full);
+      const seriesObj = { month: month[1], year: Number(fullMatch[2]), label: `${full} ${fullMatch[2]}` };
+      for (const [qualId, pattern] of Object.entries(OCR_QUAL_PATTERNS)) {
+        if (!pattern.test(fileName)) continue;
+        const key = `${seriesKey(seriesObj)}:${qualId}`;
+        if (!discoveredOcr.has(key)) kept++;
+        discoveredOcr.set(key, url);
+      }
+    }
+    return { found: found.length, kept };
+  }
+
+  function extractOcrPdfLinks(html) {
+    const re = /<a\s+[^>]*href="(\/Images\/[^"]*?grade-boundaries[^"]*?\.pdf)"/gi;
+    const out = [];
+    let m;
+    while ((m = re.exec(html)) !== null) {
+      const fileName = m[1].split("/").pop();
+      out.push({ url: `https://www.ocr.org.uk${m[1]}`, fileName });
+    }
+    return out;
+  }
+
+  // ---------- Pearson discovery ----------
+  // Current series comes from the hidden-asset list on grade-boundaries.html:
+  //   <span class= "hiddenAssetTitle">Grade Boundaries - June 2026 - GCE</span>
+  //   <span class= "hiddenAssetUrl">/content/dam/pdf/.../grade-boundaries-june-2026-gce.pdf</span>
+  async function discoverPearsonSeries() {
+    let text;
+    try {
+      const res = await fetch(proxyUrl(PEARSON_PAGE));
+      if (!res.ok) return { found: 0, kept: 0 };
+      text = await res.text();
+    } catch {
+      return { found: 0, kept: 0 };
+    }
+    const titles = [...text.matchAll(/class= *"hiddenAssetTitle">\s*([^<]+?)\s*<\/span>/g)].map((m) => m[1]);
+    const urls = [...text.matchAll(/class= *"hiddenAssetUrl">\s*([^<]+?)\s*<\/span>/g)].map((m) => m[1]);
+    let kept = 0;
+    for (let i = 0; i < Math.min(titles.length, urls.length); i++) {
+      const title = titles[i];
+      const urlPath = urls[i].trim();
+      if (!urlPath.endsWith(".pdf")) continue;
+      const url = `https://qualifications.pearson.com${urlPath.startsWith("/") ? "" : "/"}${urlPath}`;
+      const m = title.match(/(January|February|March|April|May|June|July|August|September|October|November|December) (\d{4})/i);
+      if (!m) continue;
+      const month = AQA_MONTHS.find(([f]) => f.toLowerCase() === m[1].toLowerCase());
+      const series = { month: month[1], year: Number(m[2]), label: `${m[1][0].toUpperCase()}${m[1].slice(1).toLowerCase()} ${m[2]}` };
+
+      const norm = title.toLowerCase();
+      if (/gcse \(9-1\)/.test(norm) && /notional/.test(norm)) continue;
+      let quals = [];
+      if (/gcse \(9-1\)/.test(norm) && !/international|\bproject\b|award|maths|\bmath\b|bt|level 3/i.test(norm)) quals.push("gcse");
+      if (/ - gce\b/.test(norm) && !/international|\bproject\b|award|mathematics in context|level 3/i.test(norm)) {
+        quals.push("aLevel", "as");
+      }
+      for (const q of quals) {
+        const key = `${seriesKey(series)}:${q}`;
+        if (!discoveredPearson.has(key)) kept++;
+        discoveredPearson.set(key, url);
+      }
+    }
+    return { found: titles.length, kept };
+  }
+
+  // Pearson DAM pattern for older series (predictable, verified for 2023-2025).
+  function pearsonSeriesUrl(qual, series) {
+    const discovered = discoveredPearson.get(`${seriesKey(series)}:${qual.id}`);
+    if (discovered) return discovered;
+    const slug = monthAbbrevToSlug(series.month);
+    if (qual.id === "gcse") {
+      return `${PEARSON_DAM}/GCSE/grade-boundaries-${slug}-${series.year}-gcse.pdf`;
+    }
+    // AS + A-level share the "GCE" file.
+    return `${PEARSON_DAM}/A-level/grade-boundaries-${slug}-${series.year}-gce.pdf`;
+  }
+
+  // ---------- status / log helpers ----------
   function setStatus(msg, kind = "") {
     if (el.status) {
       el.status.textContent = msg;
@@ -190,19 +321,7 @@ export function initScraperTool(deps, context = {}) {
     if (el.log) el.log.innerHTML = "";
   }
 
-  // ---------- AQA parsing ----------
-  // AQA workbooks share a common header layout, but the sheet name and header
-  // row offset vary by series (e.g. sheet is 'GCSE' in Jun 2024 but 'GCSE
-  // subject' in 2022/23; the two header rows sit at 7/8 in 2022 but 9/10 in
-  // 2023/24). So we locate the sheet by candidate names and find the grade
-  // header row by scanning for the 'Subject Code' label instead of hardcoding
-  // a row index.
-  //
-  //   FakeHeader  = SubjectCode, SubjectTitle, MaximumMark, GradeBoundaries, <blank>, <labels...>
-  //   GradeHeader = <blank>,9,8,7,6,5,4,3,2,1  (or A*,A,B,C,D,E / A,B,C,D,E)
-  //   Data rows   = [code, title, maxMark, bGrade1, bGrade2, ...]
-  // English Language (8700) GCSE example row:
-  //   ["8700","ENGLISH LANGUAGE",160,121,111,102,92,82,73,54,35,16]
+  // ---------- AQA xlsx parsing ----------
   function parseAqaXlsx(wb, qual, fallbackGrades) {
     let sheet = null;
     for (const name of qual.sheets) {
@@ -211,8 +330,6 @@ export function initScraperTool(deps, context = {}) {
     const rows = sheet ? XLSX.utils.sheet_to_json(sheet, { header: 1 }) : [];
     const subjects = [];
 
-    // Find the 'Subject Code' header row, then read grade labels from the
-    // next row (the grade header directly above the data).
     let gradeLabels = [];
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i] || [];
@@ -233,13 +350,10 @@ export function initScraperTool(deps, context = {}) {
       const code = r[0];
       const title = r[1];
       if (code == null || String(code).trim() === "") continue;
-      // AQA subject codes like 8700, 8461F, 8525A, 8145AA, and 2022-era 814A01
-      // (3-6 leading digits, then an optional letters/digits suffix).
       if (typeof code === "string" && !/^\d{3,6}[A-Z0-9]*$/.test(String(code).trim())) continue;
       const maxMark = Number(r[2]);
       if (!Number.isFinite(maxMark)) continue;
 
-      // Grade boundaries at column offsets 3..(3 + gradeCount - 1)
       const grades = {};
       for (let g = 0; g < gradeLabels.length; g++) {
         const v = Number(r[3 + g]);
@@ -257,6 +371,7 @@ export function initScraperTool(deps, context = {}) {
     return subjects;
   }
 
+  // ---------- subject picker ----------
   function normalize(s) {
     return String(s || "").toUpperCase().replace(/\s+/g, " ").trim();
   }
@@ -324,23 +439,8 @@ export function initScraperTool(deps, context = {}) {
     el.subjectInput.value = "";
     el.subjectInput.placeholder = `Search ${subjectList.length} subjects...`;
 
-    // Pre-select English Language in the hardcoded AQA spreadsheet.
     const preferred = subjectList.find(englishLanguageMatches) || subjectList[0];
     if (preferred) selectSubject(preferred);
-  }
-
-  // ---------- fetch flow ----------
-  // Exam board file stores block browser cross-origin fetches via CORS, so we
-  // route the request through a server-side proxy that adds permissive CORS.
-  // The proxy base is configurable (defaults to the deployed backend) so it can
-  // be pointed at a local server during development (e.g. via a global, or by
-  // editing the constant).
-  function proxyUrl(real) {
-    const base = (typeof window !== "undefined" && window.__NEURONET_PROXY_BASE) ||
-      document.querySelector('meta[name="neuronet-proxy"]')?.getAttribute("content") ||
-      "https://neuronet-backend.onrender.com";
-    const sep = base.endsWith("/") ? "" : "/";
-    return `${base}${sep}api/proxy?url=${encodeURIComponent(real)}`;
   }
 
   function renderSubject(subject) {
@@ -366,11 +466,39 @@ export function initScraperTool(deps, context = {}) {
       </div>`;
   }
 
-  // ---------- qualification / series pickers ----------
+  // ---------- pickers ----------
+  function currentBoardId() {
+    return el.boardSelect ? el.boardSelect.value : "aqa";
+  }
+
+  function populateBoardPicker() {
+    if (!el.boardSelect) return;
+    if (!el.boardSelect.options.length) {
+      [["aqa", "AQA"], ["ocr", "OCR"], ["pearson", "Pearson (Edexcel)"]].forEach(([v, t]) => {
+        const opt = document.createElement("option");
+        opt.value = v;
+        opt.textContent = t;
+        el.boardSelect.appendChild(opt);
+      });
+    }
+  }
+
+  const boardSeriesBuilders = {
+    aqa: () => buildSeriesListFor("aqa", AQA_SERIES, discoveredAqa),
+    ocr: () => buildSeriesListFor("ocr", [], discoveredOcr),
+    pearson: () => buildSeriesListFor("pearson", PEARSON_BASELINE, discoveredPearson)
+  };
+  const boardQuals = {
+    aqa: AQA_QUALIFICATIONS,
+    ocr: QR,
+    pearson: QR
+  };
+
   function populateQualificationPicker() {
     if (!el.qualSelect) return;
     el.qualSelect.innerHTML = "";
-    Object.values(AQA_QUALIFICATIONS).forEach((q) => {
+    const quals = boardQuals[currentBoardId()] || QR;
+    Object.values(quals).forEach((q) => {
       const opt = document.createElement("option");
       opt.value = q.id;
       opt.textContent = q.name;
@@ -381,7 +509,7 @@ export function initScraperTool(deps, context = {}) {
   function populateSeriesPicker() {
     if (!el.seriesSelect) return;
     el.seriesSelect.innerHTML = "";
-    buildSeriesList().forEach((s) => {
+    (boardSeriesBuilders[currentBoardId()]?.() || []).forEach((s) => {
       const opt = document.createElement("option");
       opt.value = `${s.month}-${s.year}`;
       opt.textContent = s.label;
@@ -391,82 +519,163 @@ export function initScraperTool(deps, context = {}) {
 
   function currentQualification() {
     const id = el.qualSelect ? el.qualSelect.value : "gcse";
-    return AQA_QUALIFICATIONS[id] || AQA_QUALIFICATIONS.gcse;
+    return boardQuals[currentBoardId()]?.[id] || AQA_QUALIFICATIONS.gcse;
   }
 
   function currentSeries() {
     const val = el.seriesSelect ? el.seriesSelect.value : null;
-    const list = buildSeriesList();
+    const builder = boardSeriesBuilders[currentBoardId()];
+    const list = builder?.() || [];
     return list.find((s) => `${s.month}-${s.year}` === val) || list[0];
   }
 
-  async function fetchAqaBoundaries() {
+  // ---------- fetch + parse dispatch ----------
+  async function fetchBoundaries() {
     clearLog();
+    const board = currentBoardId();
     const qual = currentQualification();
     const series = currentSeries();
-    const url = aqaSeriesUrl(qual, series);
-    setStatus(`Fetching AQA ${qual.name} ${series.label}...`, "busy");
+    if (!series) {
+      setStatus("No series available yet — scan the site first.", "err");
+      return;
+    }
+
+    let url;
+    let fileType;
+    if (board === "aqa") {
+      url = aqaSeriesUrl(qual, series);
+      fileType = "xlsx";
+    } else if (board === "ocr") {
+      url = discoveredOcr.get(`${seriesKey(series)}:${qual.id}`);
+      fileType = "pdf";
+      if (!url) {
+        setStatus(`No OCR log found for ${qual.name} ${series.label} — scan the site first.`, "err");
+        return;
+      }
+    } else if (board === "pearson") {
+      url = pearsonSeriesUrl(qual, series);
+      fileType = "pdf";
+    }
+
+    const boardName = board === "aqa" ? "AQA" : board === "ocr" ? "OCR" : "Pearson";
+    setStatus(`Fetching ${boardName} ${qual.name} ${series.label}...`, "busy");
+    appendLog(`Board: ${boardName}`);
     appendLog(`URL: ${url}`);
     appendLog(`proxy: ${proxyUrl(url)}`);
 
+    if (fileType === "xlsx") {
+      await fetchAqaXlsx(url, qual, series);
+    } else {
+      await fetchBoardPdf(url, board, qual, series);
+    }
+  }
+
+  async function fetchAqaXlsx(url, qual, series) {
     const res = await fetch(proxyUrl(url));
     if (!res.ok) throw new Error(`HTTP ${res.status} fetching spreadsheet`);
     setStatus("Downloaded spreadsheet. Parsing...", "busy");
-    appendLog(`Downloaded (${(res.headers.get("content-length") || "?").replace(/\D/g, "")} bytes).`);
-
     const buf = await res.arrayBuffer();
     const wb = XLSX.read(buf, { type: "array" });
     appendLog(`Sheets: ${wb.SheetNames.join(", ")}`);
 
     subjects = parseAqaXlsx(wb, qual, qual.grades);
     appendLog(`Parsed ${subjects.length} ${qual.name} subject rows.`);
+    finishFetch(qual, series);
+  }
 
+  async function fetchBoardPdf(url, board, qual, series) {
+    appendLog("Extracting PDF text (pdf.js)...");
+    const lines = await extractPdfLayoutLines(url, proxyUrl);
+    appendLog(`Extracted ${lines.length} layout lines across ${new Set(lines.map((l) => l.page)).size} pages.`);
+
+    subjects = parsePdfBoundaries(lines, board, qual.id).map((s) => ({
+      ...s,
+      board,
+      qual: qual.id
+    }));
+    appendLog(`Parsed ${subjects.length} ${qual.name} subject rows.`);
+    if (subjects.length === 0) {
+      appendLog("Note: PDF layout parsing is best-effort; check the fetch log for anomalies.");
+    }
+    finishFetch(qual, series);
+  }
+
+  function finishFetch(qual, series) {
     renderSubjectPicker(subjects);
     appendLog("Choose a subject from the picker to view its grade boundaries.");
-    setStatus(`${qual.name} ${series.label} loaded`, "ok");
+    const boardName = currentBoardId() === "aqa" ? "AQA" : currentBoardId() === "ocr" ? "OCR" : "Pearson";
+    setStatus(`${boardName} ${qual.name} ${series.label} loaded`, "ok");
+  }
+
+  // ---------- events ----------
+  function refreshPickers() {
+    populateQualificationPicker();
+    populateSeriesPicker();
   }
 
   function bindEvents() {
+    if (el.boardSelect) {
+      el.boardSelect.addEventListener("change", () => {
+        refreshPickers();
+        setStatus("Board changed — series takes effect on next fetch.", "");
+      });
+    }
+
     if (el.scanBtn) {
       el.scanBtn.addEventListener("click", async () => {
+        const board = currentBoardId();
         el.scanBtn.disabled = true;
         el.scanBtn.textContent = "Scanning...";
         clearLog();
         try {
-          setStatus("Scanning AQA grade-boundaries pages for available series...", "busy");
-          appendLog("Scanning AQA grade-boundaries pages for hashed xlsx files...");
-          const count = await discoverAqaSeries();
-          const list = buildSeriesList();
-          appendLog(`Discovered ${count} hashed file entries; ${discoveredFiles.size} series/qual files kept.`);
-          appendLog(`Series now available: ${list.map((s) => s.label).join(", ")}`);
+          let result;
+          if (board === "aqa") {
+            setStatus("Scanning AQA grade-boundaries pages for available series...", "busy");
+            appendLog("Scanning AQA grade-boundaries pages for hashed xlsx files...");
+            const count = await discoverAqaSeries();
+            result = { found: count, kept: discoveredAqa.size, boardName: "AQA" };
+          } else if (board === "ocr") {
+            setStatus("Scanning OCR grade-boundaries pages for available series...", "busy");
+            appendLog("Scanning OCR index + archive pages for PDF links...");
+            result = await discoverOcrSeries();
+            result.boardName = "OCR";
+          } else {
+            setStatus("Scanning Pearson grade-boundaries page...", "busy");
+            appendLog("Scanning Pearson grade-boundaries page hidden assets...");
+            result = await discoverPearsonSeries();
+            result.boardName = "Pearson";
+          }
           populateSeriesPicker();
-          appendLog("Series picker updated.");
-          setStatus(`Found ${discoveredFiles.size} hashed grade-boundary files across ${list.length} series.`, "ok");
+          const list = boardSeriesBuilders[board]?.() || [];
+          appendLog(`Discovered ${result.found} file entries; kept ${result.kept} series/qual files.`);
+          appendLog(`Series now available: ${list.map((s) => s.label).join(", ") || "(none)"}`);
+          setStatus(`Found ${list.length} series for ${result.boardName}.`, "ok");
         } catch (e) {
           setStatus(e.message || String(e), "err");
           appendLog("ERROR: " + (e.message || String(e)));
         } finally {
           el.scanBtn.disabled = false;
-          el.scanBtn.textContent = "Scan AQA site";
+          el.scanBtn.textContent = "Scan site";
         }
       });
     }
+
     if (el.fetchBtn) {
       el.fetchBtn.addEventListener("click", async () => {
         el.fetchBtn.disabled = true;
         el.fetchBtn.textContent = "Fetching...";
         try {
-          await fetchAqaBoundaries();
+          await fetchBoundaries();
         } catch (e) {
           setStatus(e.message || String(e), "err");
           appendLog("ERROR: " + (e.message || String(e)));
         } finally {
           el.fetchBtn.disabled = false;
-          el.fetchBtn.textContent = "Fetch AQA boundaries";
+          el.fetchBtn.textContent = "Fetch boundaries";
         }
       });
     }
-    // Changing qualification/series only takes effect on the next fetch.
+
     if (el.qualSelect) {
       el.qualSelect.addEventListener("change", () => {
         setStatus("Change takes effect on next fetch.", "");
@@ -477,10 +686,10 @@ export function initScraperTool(deps, context = {}) {
         setStatus("Change takes effect on next fetch.", "");
       });
     }
+
     if (el.subjectInput) {
       el.subjectInput.addEventListener("input", () => {
-        const query = normalize(el.subjectInput.value);
-        renderSuggestions(query);
+        renderSuggestions(normalize(el.subjectInput.value));
       });
       el.subjectInput.addEventListener("focus", () => {
         renderSuggestions(normalize(el.subjectInput.value));
@@ -517,32 +726,34 @@ export function initScraperTool(deps, context = {}) {
     });
   }
 
-  if (el.version && XLSX && XLSX.version) {
-    el.version.textContent = `SheetJS v${XLSX.version}`;
+  if (el.version) {
+    Promise.allSettled([Promise.resolve(XLSX.version), import("./pdfBoundaries.js")]).then(([v]) => {
+      if (el.version) el.version.textContent = `SheetJS v${v.value || "?"} + pdf.js`;
+    });
   }
 
+  populateBoardPicker();
   populateQualificationPicker();
   populateSeriesPicker();
   bindEvents();
-  setStatus("Ready. Pick a qualification and series, then fetch AQA boundaries.", "");
+  setStatus("Ready. Pick a board, qualification and series, then fetch boundaries.", "");
 
-  // Best-effort auto-discovery so recent series (2025/2026, hashed URLs) show
-  // up without a manual scan; failures keep the legacy baseline.
-  if (el && el.scanBtn) {
-    // auto-run discovery once, silently (status already shows legacy ready)
-    discoverAqaSeries().then((count) => {
-      if (count > 0) {
-        const before = buildSeriesList().length;
-        populateSeriesPicker();
-        appendLog(`Auto-discovered ${count} hashed grade-boundary files; series updated (${before} total).`);
-        setStatus("Ready. Series list refreshed with the latest AQA series.", "ok");
-      } else {
-        appendLog("Auto-scan found no new AQA files; keeping legacy filestore series.");
-        setStatus("Ready. Using verified legacy series (auto-scan found nothing new).", "");
-      }
-    }).catch(() => {
-      appendLog("Auto-scan failed; keeping legacy filestore series.");
-      setStatus("Ready. Using verified legacy series (auto-scan unavailable).", "");
-    });
-  }
+  // Best-effort auto-discovery of the latest series per board.
+  const autoDiscover = async () => {
+    const results = await Promise.allSettled([
+      discoverAqaSeries(),
+      discoverOcrSeries(),
+      discoverPearsonSeries()
+    ]);
+    refreshPickers();
+    const ok = results.filter((r) => r.status === "fulfilled" && r.value && (r.value.kept || r.value.found));
+    if (ok.length > 0) {
+      appendLog(`Auto-discovered series for ${ok.length} board(s); series pickers updated.`);
+      setStatus("Ready. Series lists refreshed from the exam board sites.", "ok");
+    } else {
+      appendLog("Auto-scan found nothing new; keeping baseline series.");
+      setStatus("Ready. Using baseline series (auto-scan unavailable).", "");
+    }
+  };
+  autoDiscover();
 }
