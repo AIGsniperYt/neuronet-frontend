@@ -115,7 +115,14 @@ function normalizeLabel(tok) {
 //   Max Mark  a*   a   b   c   d   e   u
 // Returns array of normalized label strings, or null.
 function detectGradeLabels(tokens) {
+  // OCR may merge "Max Mark" into a single token after layout extraction.
   let i = tokens.indexOf("Mark");
+  if (i < 0) i = tokens.indexOf("Max Mark");
+  if (i < 0) {
+    // "Max Mark 9 8 7 ..." also appears as a single leading token in some files.
+    const lead = tokens[0];
+    if (typeof lead === "string" && /^Max\s*Mark$/i.test(lead)) i = 0;
+  }
   if (i < 0) return null;
   const after = tokens.slice(i + 1).filter((t) => t.length > 0);
   const out = [];
@@ -257,6 +264,7 @@ function parseOcr(lines, qual) {
       !toks.some(isNumber) &&
       !isCode(toks[0]) &&
       !toks.includes("Mark") &&
+      !/\bMark\b/i.test(toks.join(" ")) &&
       /(GCSE|Level|GCE|with|and|Modern|Ancient|The|Option|Raw|Overall|Mathematics|English|for)/i.test(toks.join(" "))
     ) {
       blockTitle = toks.join(" ");
