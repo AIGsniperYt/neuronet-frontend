@@ -55,9 +55,10 @@
     .scraper-combo input::placeholder { color: var(--text-muted); }
     .scraper-shimmer-field { animation: none; position: relative; overflow: hidden; }
     .scraper-shimmer-field::after {
-      content: ""; position: absolute; inset: 0;
-      background: linear-gradient(100deg, transparent 20%, rgba(44,255,179,0.2) 50%, transparent 80%);
-      animation: scraper-shimmer-sweep 1.6s linear infinite; pointer-events: none;
+      content: ""; position: absolute; inset: 0; border-radius: 10px; pointer-events: none;
+      background-image: linear-gradient(100deg, transparent 35%, rgba(44,255,179,0.18) 50%, transparent 65%);
+      background-size: 200% 100%;
+      animation: scraper-shimmer-sweep 2.6s linear infinite;
     }
 
     .scraper-suggestions {
@@ -86,22 +87,34 @@
       display: flex; flex-direction: column; justify-content: center;
     }
     .scraper-line {
-      position: relative; overflow: hidden; padding: 6px 10px; border-radius: 8px;
-      background: rgba(0,0,0,0.18); border: 1px solid rgba(255,255,255,0.05);
+      position: relative; padding: 4px 2px; border-radius: 8px;
     }
-    .scraper-line.idle { background: transparent; border-color: transparent; padding: 0; }
-    .scraper-line .shimmer-text { position: relative; }
+    .scraper-line.idle { padding: 0; }
+    .scraper-line .scraper-log-text { position: relative; color: rgba(230,255,245,0.65); }
+
+    /* Text-only single steady gradient sweep (AI-style loading). One clean
+       pass over the text, no box background, no double shimmer. Literal colors
+       keep it self-contained (won't go invisible if a CSS var is undefined),
+       and it's scoped to .scraper-log-text so index.html's global
+       .shimmer-text can't hijack it. */
+    .scraper-shimmer .scraper-log-text {
+      background-image: linear-gradient(
+        100deg,
+        rgba(230,255,245,0.65) 35%,
+        #2cffb3 50%,
+        rgba(230,255,245,0.65) 65%
+      );
+      background-size: 200% 100%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      color: transparent;
+      animation: scraper-shimmer-sweep 2.6s linear infinite;
+    }
     @keyframes scraper-shimmer-sweep {
-      0% { transform: translateX(-100%); }
-      100% { transform: translateX(100%); }
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
     }
-    .scraper-shimmer::before {
-      content: ""; position: absolute; inset: 0;
-      background: linear-gradient(100deg, transparent 20%, rgba(44,255,179,0.22) 50%, transparent 80%);
-      animation: scraper-shimmer-sweep 1.6s linear infinite;
-      pointer-events: none;
-    }
-    .scraper-log-idle-hint { color: var(--text-muted); font-style: italic; opacity: 0.7; }
 
     #scraperResult { flex: 1; overflow: auto; }
     .card-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }

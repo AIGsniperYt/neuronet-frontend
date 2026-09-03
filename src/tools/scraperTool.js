@@ -516,16 +516,40 @@ export function initScraperTool(deps, context = {}) {
     if (el.subjectInput) el.subjectInput.classList.toggle("scraper-shimmer-field", !!busy);
   }
 
+  // Task-complete hook: fire a radial ripple on the app's background canvas so
+  // a finished fetch / background cache warm reads as a satisfying, responsive
+  // beat rather than just a static scratch line. Best-effort; no-op if the
+  // canvas isn't mounted (e.g. in an isolated harness).
+  function pulseTaskComplete() {
+    const nc = window.__neuronetCanvas;
+    if (!nc) return;
+    try {
+      if (typeof nc.triggerRandomNodes === "function") nc.triggerRandomNodes(4, 0.9);
+      if (typeof nc.triggerRadialPulse === "function") {
+        const nodes = typeof nc.getNodes === "function" ? nc.getNodes() : null;
+        if (nodes && nodes.length) {
+          const n = nodes[(Math.random() * nodes.length) | 0];
+          nc.triggerRadialPulse(n.x, n.y, 1.4);
+        } else {
+          const c = nc.getCanvas && nc.getCanvas();
+          if (c) nc.triggerRadialPulse(c.width / 2, c.height / 2, 1.4);
+        }
+      }
+    } catch {
+      /* canvas unavailable — ignore */
+    }
+  }
+
   function scratch(message, shimmer = busyScratch) {
     if (!el.log) return;
     if (!scratchLine) {
       scratchLine = document.createElement("div");
       scratchLine.className = "scraper-line idle";
-      scratchLine.innerHTML = `<span class="shimmer-text"></span>`;
+      scratchLine.innerHTML = `<span class="scraper-log-text"></span>`;
       el.log.appendChild(scratchLine);
     }
-    const shimmerText = scratchLine.querySelector(".shimmer-text");
-    if (shimmerText) shimmerText.textContent = message;
+    const logText = scratchLine.querySelector(".scraper-log-text");
+    if (logText) logText.textContent = message;
     scratchLine.classList.remove("idle");
     scratchLine.classList.toggle("scraper-shimmer", !!shimmer && busyScratch);
   }
@@ -910,6 +934,7 @@ export function initScraperTool(deps, context = {}) {
     appendLog("Choose a subject from the picker to view its grade boundaries.");
     setScratchBusy(false);
     setFieldShimmer(false);
+    pulseTaskComplete();
     const boardName = currentBoardId() === "aqa" ? "AQA" : currentBoardId() === "ocr" ? "OCR" : "Pearson";
     setStatus(`${boardName} ${qual.name} ${series.label} loaded${fromCache ? " (cached)" : ""}`, "ok");
   }
@@ -959,6 +984,7 @@ export function initScraperTool(deps, context = {}) {
           appendLog(`Discovered ${result.found} file entries; kept ${result.kept} series/qual files.`);
           appendLog(`Series now available: ${list.map((s) => s.label).join(", ") || "(none)"}`);
           setStatus(`Found ${list.length} series for ${result.boardName}.`, "ok");
+          pulseTaskComplete();
         } catch (e) {
           setStatus(e.message || String(e), "err");
           appendLog("ERROR: " + (e.message || String(e)));
@@ -1116,6 +1142,7 @@ export function initScraperTool(deps, context = {}) {
       }
     }
     appendLog("Background caching complete.");
+    pulseTaskComplete();
   }
 
   // Like fetchBoundaries, but targeted at an explicit board/qual/series and
