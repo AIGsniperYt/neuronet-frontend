@@ -55,10 +55,24 @@ export function initScraperTool(deps, context = {}) {
   };
 
   const AQA_SERIES = [
-    { month: "JUN", year: 2022, label: "June 2022" },
-    { month: "JUN", year: 2023, label: "June 2023" },
-    { month: "NOV", year: 2023, label: "November 2023" },
-    { month: "JUN", year: 2024, label: "June 2024" }
+    // Older series (pre-2022) were published as PDFs, not xlsx. Summer 2020 had
+    // no exams (COVID) and 2021 was teacher-assessed, so only resit series exist
+    // for those two years. 2018+ only, as we target current-gen 9-1 students.
+    { month: "JUN", year: 2018, label: "June 2018", format: "pdf" },
+    { month: "NOV", year: 2018, label: "November 2018", format: "pdf" },
+    { month: "JUN", year: 2019, label: "June 2019", format: "pdf" },
+    { month: "NOV", year: 2019, label: "November 2019", format: "pdf" },
+    { month: "NOV", year: 2020, label: "November 2020", format: "pdf" },
+    { month: "NOV", year: 2021, label: "November 2021", format: "pdf" },
+    { month: "JUN", year: 2022, label: "June 2022", format: "xlsx" },
+    { month: "NOV", year: 2022, label: "November 2022", format: "xlsx" },
+    { month: "JUN", year: 2023, label: "June 2023", format: "xlsx" },
+    { month: "NOV", year: 2023, label: "November 2023", format: "xlsx" },
+    { month: "JUN", year: 2024, label: "June 2024", format: "xlsx" },
+    { month: "NOV", year: 2024, label: "November 2024", format: "xlsx" },
+    { month: "JUN", year: 2025, label: "June 2025", format: "xlsx" },
+    { month: "NOV", year: 2025, label: "November 2025", format: "xlsx" },
+    { month: "JUN", year: 2026, label: "June 2026", format: "xlsx" }
   ];
   const AQA_FILE_BASE = "https://filestore.aqa.org.uk/over/stat_pdf";
   const AQA_PAGE_BASE = "https://www.aqa.org.uk/exams-administration/results-days/grade-boundaries";
@@ -71,6 +85,19 @@ export function initScraperTool(deps, context = {}) {
 
   // Per-board discovered files: key `${seriesKey}:${qualId}` -> full file url.
   const discoveredAqa = new Map();
+
+  // Legacy AQA series have different file naming conventions per qual + format.
+  // Map seriesKey -> per-qual { qualPrefix, format }. Older PDFs use qual-specific
+  // prefixes (GCSE-RF for reformed 9-1, A-LEVEL-RL / AS-RL for reformed linear),
+  // while 2022+ use the unified GDE-BDY XLSX pattern.
+  const AQA_LEGACY_PREFIX = {
+    "JUN-2018": { gcse: "AQA-GCSE-RF-GDE-BDY", aLevel: "AQA-A-LEVEL-RL-GDE-BDY", as: "AQA-AS-RL-GDE-BDY" },
+    "NOV-2018": { gcse: "AQA-GCSE-GDE-BDY", aLevel: "AQA-A-LEVEL-GDE-BDY", as: "AQA-AS-GDE-BDY" },
+    "JUN-2019": { gcse: "AQA-GCSE-GDE-BDY", aLevel: "AQA-A-LEVEL-RL-GDE-BDY", as: "AQA-AS-RL-GDE-BDY" },
+    "NOV-2019": { gcse: "AQA-GCSE-GDE-BDY", aLevel: "AQA-A-LEVEL-GDE-BDY", as: "AQA-AS-GDE-BDY" },
+    "NOV-2020": { gcse: "AQA-GCSE-GDE-BDY", aLevel: "AQA-A-LEVEL-RL-GDE-BDY", as: "AQA-AS-RL-GDE-BDY" },
+    "NOV-2021": { gcse: "AQA-GCSE-2-GDE-BDY", aLevel: "AQA-A-LEVEL-GDE-BDY", as: "AQA-AS-GDE-BDY" }
+  };
 
   // ---------- OCR registry ----------
   // OCR publishes one PDF per qualification family per series (e.g.
@@ -102,6 +129,58 @@ export function initScraperTool(deps, context = {}) {
     { month: "NOV", year: 2025, label: "November 2025" }
   ];
   const discoveredPearson = new Map();
+
+  // ---------- isolated boundary cache ----------
+  // Grade boundaries are a self-contained reference lookup and MUST NEVER enter
+  // the user's mindmap graph or JSON export. They live only here under their
+  // own localStorage key. Exam data changes on results days (roughly Jan/Aug),
+  // so we refresh only when a new series appears or the cache is older than the
+  // results-day window (60 days) — never on a daily cadence.
+  const CACHE_KEY = "neuronet:gradeBoundaries";
+  const RESULTS_WINDOW_MS = 60 * 24 * 60 * 60 * 1000; // ~60 days
+  let boundaryCache = loadBoundaryCache();
+
+  function loadBoundaryCache() {
+    try {
+      const raw = localStorage.getItem(CACHE_KEY);
+      if (!raw) return { version: 1, entries: {} };
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : { version: 1, entries: {} };
+    } catch {
+      return { version: 1, entries: {} };
+    }
+  }
+
+  function saveBoundaryCache() {
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(boundaryCache));
+    } catch {
+      /* storage full/unavailable — degrade to no-cache */
+    }
+  }
+
+  function cacheKeyFor(board, series, qual) {
+    return `${board}:${seriesKey(series)}:${qual.id}`;
+  }
+
+  function getCachedSubjects(board, series, qual) {
+    const entry = boundaryCache.entries[cacheKeyFor(board, series, qual)];
+    if (!entry) return null;
+    // Stale if fetched too long ago (results-day window elapsed since).
+    if (Date.now() - (entry.fetchedAt || 0) > RESULTS_WINDOW_MS) return null;
+    return entry.subjects;
+  }
+
+  function setCachedSubjects(board, series, qual, subjects) {
+    boundaryCache.entries[cacheKeyFor(board, series, qual)] = {
+      series: { month: series.month, year: series.year, label: series.label },
+      qual: qual.id,
+      board,
+      fetchedAt: Date.now(),
+      subjects
+    };
+    saveBoundaryCache();
+  }
 
   function seriesKey(series) {
     return `${series.month}-${series.year}`;
@@ -161,13 +240,78 @@ export function initScraperTool(deps, context = {}) {
         continue;
       }
       found.push(...extractGradeBoundaryPairs(text));
+      // The archive page also lists legacy (2018-2021) PDF files in <li> anchors.
+      parseAqaArchiveAnchors(text);
     }
     for (const { url, title } of found) {
       const parsed = parseBoundaryTitle(title);
       if (!parsed) continue;
-      discoveredAqa.set(`${seriesKey(parsed.series)}:${parsed.qualId}`, url);
+      discoveredAqa.set(`${seriesKey(parsed.series)}:${parsed.qualId}`, { url, format: "xlsx" });
     }
     return found.length;
+  }
+
+  // Reads the archive page's <li> anchor list for the real (non-hashed) legacy
+  // file URLs and their format (.PDF / .XLS / .XLSX). This fills in the older
+  // series (2018-2021) that are published as PDFs and don't appear in the
+  // Sanity JSON of the current pages. Returns { anchors, kept }.
+  function parseAqaArchiveAnchors(html) {
+    const liRe = /<li[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<\/li>/gi;
+    let m;
+    // Extract both the label text and the href; then map by filename prefix.
+    const anchors = [];
+    while ((m = liRe.exec(html)) !== null) {
+      anchors.push({ href: m[1], label: m[2].replace(/<[^>]+>/g, "").trim() });
+    }
+    let kept = 0;
+    for (const { href, label } of anchors) {
+      const fileName = href.split("/").pop();
+      const extMatch = fileName.match(/\.(PDF|XLSX|XLS)$/i);
+      if (!extMatch) continue;
+      const format = extMatch[1].toLowerCase() === "pdf" ? "pdf" : "xlsx";
+      const series = parseAqaSeriesFromFilename(fileName);
+      if (!series) continue;
+      // We target current-gen (9-1) students; ignore pre-2018 legacy specs.
+      if (series.year < 2018) continue;
+      const qualId = qualFromAqaFile(fileName) || qualFromAqaLabel(label);
+      if (!qualId) continue;
+      const key = `${seriesKey(series)}:${qualId}`;
+      if (!discoveredAqa.has(key)) kept++;
+      discoveredAqa.set(key, { url: href, format });
+    }
+    return { anchors: anchors.length, kept };
+  }
+
+  // Extracts { month, year, label } from a legacy AQA filename like
+  // "AQA-GCSE-GDE-BDY-NOV-2019.PDF" or "AQA-A-LEVEL-RL-GDE-BDY-JUN-2018.PDF".
+  function parseAqaSeriesFromFilename(fileName) {
+    const m = fileName.match(/-((?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(?:UARY|E|Y|EMBER)?)-(20\d\d)\./i);
+    if (!m) return null;
+    const raw = m[1].toUpperCase();
+    const map = {
+      JANUARY: "JAN", FEBRUARY: "FEB", MARCH: "MAR", APRIL: "APR", MAY: "MAY",
+      JUNE: "JUN", JULY: "JUL", AUGUST: "AUG", SEPTEMBER: "SEP",
+      OCTOBER: "OCT", NOVEMBER: "NOV", DECEMBER: "DEC"
+    };
+    const month = map[raw] || raw.slice(0, 3);
+    if (!["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"].includes(month)) return null;
+    const year = Number(m[2]);
+    const fullMonth = { JAN: "January", FEB: "February", MAR: "March", APR: "April", MAY: "May", JUN: "June", JUL: "July", AUG: "August", SEP: "September", OCT: "October", NOV: "November", DEC: "December" }[month];
+    return { month, year, label: `${fullMonth} ${year}`, format: "pdf" };
+  }
+
+  function qualFromAqaFile(fileName) {
+    if (/GCSE/.test(fileName)) return "gcse";
+    if (/A-LEVEL/.test(fileName) || /A-LEVEL-UM/.test(fileName)) return "aLevel";
+    if (/\bAS\b/.test(fileName)) return "as";
+    return null;
+  }
+
+  function qualFromAqaLabel(label) {
+    if (/^GCSE\b/.test(label)) return "gcse";
+    if (/^A-level/.test(label)) return "aLevel";
+    if (/^AS\b/.test(label)) return "as";
+    return null;
   }
 
   function extractGradeBoundaryPairs(html) {
@@ -195,11 +339,21 @@ export function initScraperTool(deps, context = {}) {
   }
 
   function legacyAqaSeriesUrl(qual, series) {
-    return `${AQA_FILE_BASE}/${qual.filePrefix}-${series.month}-${series.year}.XLSX`;
+    // Pre-2022 series used qual-specific PDF prefixes; 2022+ use XLSX.
+    const legacy = AQA_LEGACY_PREFIX[seriesKey(series)];
+    if (legacy && legacy[qual.id]) {
+      return `${AQA_FILE_BASE}/${legacy[qual.id]}-${series.month}-${series.year}.PDF`;
+    }
+    const ext = series.format === "pdf" ? ".XLS" : ".XLSX";
+    return `${AQA_FILE_BASE}/${qual.filePrefix}-${series.month}-${series.year}${ext}`;
+  }
+
+  function aqaSeriesFormat(qual, series) {
+    return (discoveredAqa.get(`${seriesKey(series)}:${qual.id}`)?.format) || series.format || "xlsx";
   }
 
   function aqaSeriesUrl(qual, series) {
-    return discoveredAqa.get(`${seriesKey(series)}:${qual.id}`) || legacyAqaSeriesUrl(qual, series);
+    return discoveredAqa.get(`${seriesKey(series)}:${qual.id}`)?.url || legacyAqaSeriesUrl(qual, series);
   }
 
   // ---------- OCR discovery ----------
@@ -540,11 +694,20 @@ export function initScraperTool(deps, context = {}) {
       return;
     }
 
+    // Serve from cache first (isolated boundary store; never user graph data).
+    const cached = getCachedSubjects(board, series, qual);
+    if (cached && cached.length) {
+      subjects = cached;
+      appendLog(`Loaded ${cached.length} ${qual.name} subjects from cache (${boundaryCache.entries[cacheKeyFor(board, series, qual)].fetchedAt ? new Date(boundaryCache.entries[cacheKeyFor(board, series, qual)].fetchedAt).toLocaleDateString() : "?"}).`);
+      finishFetch(qual, series, true);
+      return;
+    }
+
     let url;
     let fileType;
     if (board === "aqa") {
       url = aqaSeriesUrl(qual, series);
-      fileType = "xlsx";
+      fileType = aqaSeriesFormat(qual, series);
     } else if (board === "ocr") {
       url = discoveredOcr.get(`${seriesKey(series)}:${qual.id}`);
       fileType = "pdf";
@@ -564,13 +727,13 @@ export function initScraperTool(deps, context = {}) {
     appendLog(`proxy: ${proxyUrl(url)}`);
 
     if (fileType === "xlsx") {
-      await fetchAqaXlsx(url, qual, series);
+      await fetchAqaXlsx(url, board, qual, series);
     } else {
       await fetchBoardPdf(url, board, qual, series);
     }
   }
 
-  async function fetchAqaXlsx(url, qual, series) {
+  async function fetchAqaXlsx(url, board, qual, series) {
     const res = await fetch(proxyUrl(url));
     if (!res.ok) throw new Error(`HTTP ${res.status} fetching spreadsheet`);
     setStatus("Downloaded spreadsheet. Parsing...", "busy");
@@ -578,7 +741,7 @@ export function initScraperTool(deps, context = {}) {
     const wb = XLSX.read(buf, { type: "array" });
     appendLog(`Sheets: ${wb.SheetNames.join(", ")}`);
 
-    subjects = parseAqaXlsx(wb, qual, qual.grades);
+    subjects = parseAqaXlsx(wb, qual, qual.grades).map((s) => ({ ...s, board, qual: qual.id }));
     appendLog(`Parsed ${subjects.length} ${qual.name} subject rows.`);
     finishFetch(qual, series);
   }
@@ -600,11 +763,14 @@ export function initScraperTool(deps, context = {}) {
     finishFetch(qual, series);
   }
 
-  function finishFetch(qual, series) {
+  function finishFetch(qual, series, fromCache = false) {
+    if (!fromCache && subjects && subjects.length) {
+      setCachedSubjects(currentBoardId(), series, qual, subjects);
+    }
     renderSubjectPicker(subjects);
     appendLog("Choose a subject from the picker to view its grade boundaries.");
     const boardName = currentBoardId() === "aqa" ? "AQA" : currentBoardId() === "ocr" ? "OCR" : "Pearson";
-    setStatus(`${boardName} ${qual.name} ${series.label} loaded`, "ok");
+    setStatus(`${boardName} ${qual.name} ${series.label} loaded${fromCache ? " (cached)" : ""}`, "ok");
   }
 
   // ---------- events ----------
@@ -738,7 +904,10 @@ export function initScraperTool(deps, context = {}) {
   bindEvents();
   setStatus("Ready. Pick a board, qualification and series, then fetch boundaries.", "");
 
-  // Best-effort auto-discovery of the latest series per board.
+  // Best-effort auto-discovery of the latest series per board, then background
+  // fetch of the newest series per qual to warm the isolated cache. This makes
+  // the tool feel live on first load (fetch animation) while repeat visits hit
+  // the cache instantly.
   const autoDiscover = async () => {
     const results = await Promise.allSettled([
       discoverAqaSeries(),
@@ -754,6 +923,71 @@ export function initScraperTool(deps, context = {}) {
       appendLog("Auto-scan found nothing new; keeping baseline series.");
       setStatus("Ready. Using baseline series (auto-scan unavailable).", "");
     }
+    await autoFetchLatest();
   };
   autoDiscover();
+
+  // Fetch the newest available series for each board×qual into the cache, but
+  // only when the cache is missing or stale for that combination. Runs in the
+  // background so the UI isn't blocked.
+  async function autoFetchLatest() {
+    const boards = ["aqa", "ocr", "pearson"];
+    const qualIds = ["gcse", "aLevel", "as"];
+    const jobs = [];
+    for (const board of boards) {
+      const list = boardSeriesBuilders[board]?.() || [];
+      if (list.length === 0) continue;
+      const newest = list[0]; // builders sort newest-first
+      const quals = boardQuals[board] || QR;
+      for (const qid of qualIds) {
+        const qual = quals[qid];
+        if (!qual) continue;
+        if (getCachedSubjects(board, newest, qual)) continue; // fresh already
+        jobs.push({ board, qual, series: newest });
+      }
+    }
+    if (jobs.length === 0) return;
+    appendLog(`Background: caching latest series for ${jobs.length} board×qual combo(s)...`);
+    for (const { board, qual, series } of jobs) {
+      if (document.hidden) break;
+      try {
+        await fetchBoundariesFor(board, qual, series);
+      } catch {
+        /* best-effort; a failure here just means that combo stays uncached */
+      }
+    }
+    appendLog("Background caching complete.");
+  }
+
+  // Like fetchBoundaries, but targeted at an explicit board/qual/series and
+  // silent (no UI churn beyond log lines + cache write).
+  async function fetchBoundariesFor(board, qual, series) {
+    let url;
+    let fileType;
+    if (board === "aqa") {
+      url = aqaSeriesUrl(qual, series);
+      fileType = aqaSeriesFormat(qual, series);
+    } else if (board === "ocr") {
+      url = discoveredOcr.get(`${seriesKey(series)}:${qual.id}`);
+      fileType = "pdf";
+      if (!url) return;
+    } else if (board === "pearson") {
+      url = pearsonSeriesUrl(qual, series);
+      fileType = "pdf";
+    }
+    if (!url) return;
+
+    if (fileType === "xlsx") {
+      const res = await fetch(proxyUrl(url));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const wb = XLSX.read(await res.arrayBuffer(), { type: "array" });
+      const parsed = parseAqaXlsx(wb, qual, qual.grades).map((s) => ({ ...s, board, qual: qual.id }));
+      if (parsed.length) setCachedSubjects(board, series, qual, parsed);
+    } else {
+      const lines = await extractPdfLayoutLines(url, proxyUrl);
+      const parsed = parsePdfBoundaries(lines, board, qual.id).map((s) => ({ ...s, board, qual: qual.id }));
+      if (parsed.length) setCachedSubjects(board, series, qual, parsed);
+    }
+    appendLog(`Cached ${qual.name} ${series.label} (${board}).`);
+  }
 }

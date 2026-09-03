@@ -126,8 +126,104 @@ function detectGradeLabels(tokens) {
   return out.length >= 3 ? out : null;
 }
 
-// ---------- board: OCR ----------
+// ---------- board: AQA (legacy PDF, pre-2022) ----------
 
+// AQA pre-2022 files are layout-based PDFs with a repeating header every ~45
+// rows:
+//   Subject                                             Maximum    Grade Boundaries
+//    Code     Subject Title                               Mark      9  8  7  6  5  4  3  2  1
+//   8201     ART & DESIGN (ART CRAFT & DESIGN)            480      403 371 340 306 273 240 175 110 45
+// GCSE rows may carry a tier suffix (F/H) and use "-" for marks not applicable
+// to that tier. A-level rows use A*..E; AS uses A..E. Values may be grouped
+// across wrapped lines, so we merge continuation rows that start with a weight
+// column (e.g. "2357 4701 ..." component rows) — but for subject grade
+// boundaries we only want the subject-level rows, which start with a code.
+const AQA_GCSE_LABELS = ["9", "8", "7", "6", "5", "4", "3", "2", "1", "U"];
+const AQA_ALEVEL_LABELS = ["A*", "A", "B", "C", "D", "E", "U"];
+const AQA_AS_LABELS = ["A", "B", "C", "D", "E", "U"];
+
+// Merge a run of layout lines into a single string per line (space-joined),
+// so wrapped subject rows are easy to re-assemble.
+function aqaLinesToText(lines) {
+  return lines.map((l) => lineTokens(l).join(" "));
+}
+
+function parseAqaPdf(lines, qual) {
+  const subjects = [];
+  const gradeLabels =
+    qual === "gcse" ? AQA_GCSE_LABELS
+    : qual === "as" ? AQA_AS_LABELS
+    : AQA_ALEVEL_LABELS;
+
+  // Detect the current grade-labels from the most recent "Mark" header.
+  let currentGrades = gradeLabels;
+  const textLines = aqaLinesToText(lines);
+
+  for (let i = 0; i < textLines.length; i++) {
+    const line = textLines[i];
+    const toks = line.trim().split(/\s+/).filter(Boolean);
+    if (toks.length === 0) continue;
+
+    // Header line carries "Mark" + the numeric/letter labels -> set current.
+    const markIdx = toks.indexOf("Mark");
+    if (markIdx >= 0) {
+      const detected = detectGradeLabels(toks);
+      if (detected) currentGrades = detected;
+      continue;
+    }
+
+    // Subject rows begin with a code (4-6 alnum, contains a digit).
+    if (!isCode(toks[0])) continue;
+
+    // Find the maximum-mark token: it's the first 1-3 digit integer that is
+    // immediately followed by the grade labels. If already found, skip NULL.
+    // Scan forward: max mark is a positive integer appearing before the grades.
+    let maxMark = -1;
+    let gradesStart = -1;
+    for (let t = 1; t < toks.length; t++) {
+      if (isNumber(toks[t]) && Number(toks[t]) > 2) {
+        // Candidate max mark; grades follow after it.
+        maxMark = Number(toks[t]);
+        gradesStart = t + 1;
+        break;
+      }
+    }
+    if (maxMark <= 0 || gradesStart < 0) continue;
+
+    // Title = tokens between the code and the max mark.
+    const title = toks.slice(1, toks.indexOf(String(maxMark))).join(" ").trim();
+    if (!title) continue;
+
+    const grades = {};
+    for (let g = 0; g < currentGrades.length && gradesStart + g < toks.length; g++) {
+      const raw = toks[gradesStart + g];
+      if (raw === "-") continue;
+      const v = Number(raw);
+      if (isFinite(v)) grades[currentGrades[g]] = v;
+    }
+
+    subjects.push({
+      board: "aqa",
+      qual,
+      code: toks[0],
+      title,
+      maxMark,
+      grades,
+      gradesInOrder: currentGrades
+    });
+
+    // Skip the continuation row (component sub-rows) if present.
+    while (i + 1 < textLines.length) {
+      const next = textLines[i + 1].trim().split(/\s+/).filter(Boolean);
+      if (next.length > 0 && !isCode(next[0]) && !/[A-Za-z]/.test(next[0][0]) && Number.isFinite(Number(next[0]))) {
+        i++;
+      } else break;
+    }
+  }
+  return subjects;
+}
+
+// ---------- board: OCR ----------
 // OCR grade-boundary files are per-qualification blocks headed by a subject
 // title (e.g. "GCSE English Language"). Each block contains component rows:
 //   J351  01  Communicating information and ideas   Raw    80   66  61 ...
@@ -313,7 +409,8 @@ function parsePearsonSections(lines, qual) {
 
 export function parsePdfBoundaries(layoutLines, board, qual) {
   let subjects;
-  if (board === "ocr") subjects = parseOcr(layoutLines, qual);
+  if (board === "aqa") subjects = parseAqaPdf(layoutLines, qual);
+  else if (board === "ocr") subjects = parseOcr(layoutLines, qual);
   else if (board === "pearson") subjects = parsePearsonSections(layoutLines, qual);
   else return [];
 
