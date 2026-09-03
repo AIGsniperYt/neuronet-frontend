@@ -195,6 +195,41 @@ export function initScraperTool(deps, context = {}) {
     return monthAbbrevToFull(abbrev).toLowerCase();
   }
 
+  // ---------- persisted selection ----------
+  // Remember the last board/qual/series the user picked so the tool opens the
+  // way they left it. Kept in its own small key, separate from user graph data.
+  const PREFS_KEY = "neuronet:scraperPrefs";
+  const statePrefs = (() => {
+    try {
+      const raw = localStorage.getItem(PREFS_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  })();
+
+  function savePrefs(patch) {
+    Object.assign(statePrefs, patch);
+    try {
+      localStorage.setItem(PREFS_KEY, JSON.stringify(statePrefs));
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  function restorePrefs() {
+    if (el.boardSelect && statePrefs.board && [...el.boardSelect.options].some((o) => o.value === statePrefs.board)) {
+      el.boardSelect.value = statePrefs.board;
+    }
+    refreshPickers();
+    if (el.qualSelect && statePrefs.qual && [...el.qualSelect.options].some((o) => o.value === statePrefs.qual)) {
+      el.qualSelect.value = statePrefs.qual;
+    }
+    if (el.seriesSelect && statePrefs.series && [...el.seriesSelect.options].some((o) => o.value === statePrefs.series)) {
+      el.seriesSelect.value = statePrefs.series;
+    }
+  }
+
   // ---------- proxy ----------
   // Exam board file stores block browser cross-origin fetches via CORS, so we
   // route requests through a server-side proxy that adds permissive CORS.
@@ -454,7 +489,14 @@ export function initScraperTool(deps, context = {}) {
     return `${PEARSON_DAM}/A-level/grade-boundaries-${slug}-${series.year}-gce.pdf`;
   }
 
-  // ---------- status / log helpers ----------
+  // ---------- status / scratch-buffer log helpers ----------
+  // The fetch log is a single overwriting "scratch buffer" line with a gradient
+  // shimmer sweep while work is in progress. It never accumulates history — the
+  // release is for end users, and debugging happens in dev sessions. The most
+  // recent message replaces the previous one.
+  let scratchLine = null;
+  let busyScratch = false;
+
   function setStatus(msg, kind = "") {
     if (el.status) {
       el.status.textContent = msg;
@@ -462,17 +504,43 @@ export function initScraperTool(deps, context = {}) {
     }
   }
 
-  function appendLog(line) {
+  function setScratchBusy(busy) {
+    busyScratch = !!busy;
+    if (!scratchLine) return;
+    scratchLine.classList.toggle("scraper-shimmer", busyScratch);
+  }
+
+  // Shimmer the subject search field while a fetch is in progress, so the
+  // placeholder reads as "loading" rather than "empty". Harmless & subtle.
+  function setFieldShimmer(busy) {
+    if (el.subjectInput) el.subjectInput.classList.toggle("scraper-shimmer-field", !!busy);
+  }
+
+  function scratch(message, shimmer = busyScratch) {
     if (!el.log) return;
-    const row = document.createElement("div");
-    row.className = "scraper-line";
-    row.textContent = line;
-    el.log.appendChild(row);
-    el.log.scrollTop = el.log.scrollHeight;
+    if (!scratchLine) {
+      scratchLine = document.createElement("div");
+      scratchLine.className = "scraper-line idle";
+      scratchLine.innerHTML = `<span class="shimmer-text"></span>`;
+      el.log.appendChild(scratchLine);
+    }
+    const shimmerText = scratchLine.querySelector(".shimmer-text");
+    if (shimmerText) shimmerText.textContent = message;
+    scratchLine.classList.remove("idle");
+    scratchLine.classList.toggle("scraper-shimmer", !!shimmer && busyScratch);
+  }
+
+  // Append a transient note that does not persist (kept for parity with the old
+  // call sites; it just refreshes the scratch buffer).
+  function appendLog(message) {
+    scratch(message);
   }
 
   function clearLog() {
-    if (el.log) el.log.innerHTML = "";
+    if (!el.log) return;
+    el.log.innerHTML = "";
+    scratchLine = null;
+    scratch("Waiting for an action...", false);
   }
 
   // ---------- AQA xlsx parsing ----------
@@ -609,15 +677,70 @@ export function initScraperTool(deps, context = {}) {
       })
       .join("");
 
+    const boardName = currentBoardId() === "aqa" ? "AQA" : currentBoardId() === "ocr" ? "OCR" : "Pearson";
+    const qualName = currentQualification().name;
+
     el.result.innerHTML = `
       <div class="scraper-card">
         <div class="card-head">
           <span class="card-code">${escapeHtml(subject.code)}</span>
           <span class="card-title">${escapeHtml(subject.title)}</span>
           <span class="card-max">Max ${subject.maxMark}</span>
+          <button class="card-copy" type="button" title="Copy grade boundaries">Copy</button>
         </div>
         <div class="card-grades">${gradeKeys}</div>
       </div>`;
+
+    const copyBtn = el.result.querySelector(".card-copy");
+    if (copyBtn) copyBtn.addEventListener("click", () => copySubject(subject, boardName, qualName, copyBtn));
+  }
+
+  function copySubject(subject, boardName, qualName, btn) {
+    const parts = gradeLinesForSubject(subject);
+    const text =
+      `${boardName} ${qualName} — ${subject.code} ${subject.title} (max ${subject.maxMark})\n` +
+      parts.map(([g, m]) => `  ${g}: ${m}`).join("\n");
+    const done = () => {
+      if (!btn) return;
+      const original = btn.textContent;
+      btn.textContent = "Copied ✓";
+      btn.classList.add("done");
+      clearTimeout(btn._timer);
+      btn._timer = setTimeout(() => {
+        btn.textContent = original;
+        btn.classList.remove("done");
+      }, 1600);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, btn, done));
+    } else {
+      fallbackCopy(text, btn, done);
+    }
+  }
+
+  function fallbackCopy(text, btn, done) {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      done();
+    } catch {
+      /* clipboard unavailable; leave button unchanged */
+    }
+  }
+
+  function gradeLinesForSubject(subject) {
+    return (subject.gradesInOrder || [])
+      .map((g) => {
+        const v = subject.grades[g];
+        return v !== undefined ? [g, v] : null;
+      })
+      .filter(Boolean);
   }
 
   // ---------- pickers ----------
@@ -650,6 +773,7 @@ export function initScraperTool(deps, context = {}) {
 
   function populateQualificationPicker() {
     if (!el.qualSelect) return;
+    const keep = el.qualSelect.value;
     el.qualSelect.innerHTML = "";
     const quals = boardQuals[currentBoardId()] || QR;
     Object.values(quals).forEach((q) => {
@@ -658,10 +782,12 @@ export function initScraperTool(deps, context = {}) {
       opt.textContent = q.name;
       el.qualSelect.appendChild(opt);
     });
+    if (keep && [...el.qualSelect.options].some((o) => o.value === keep)) el.qualSelect.value = keep;
   }
 
   function populateSeriesPicker() {
     if (!el.seriesSelect) return;
+    const keep = el.seriesSelect.value;
     el.seriesSelect.innerHTML = "";
     (boardSeriesBuilders[currentBoardId()]?.() || []).forEach((s) => {
       const opt = document.createElement("option");
@@ -669,6 +795,7 @@ export function initScraperTool(deps, context = {}) {
       opt.textContent = s.label;
       el.seriesSelect.appendChild(opt);
     });
+    if (keep && [...el.seriesSelect.options].some((o) => o.value === keep)) el.seriesSelect.value = keep;
   }
 
   function currentQualification() {
@@ -725,12 +852,24 @@ export function initScraperTool(deps, context = {}) {
     appendLog(`Board: ${boardName}`);
     appendLog(`URL: ${url}`);
     appendLog(`proxy: ${proxyUrl(url)}`);
+    setScratchBusy(true);
+    setFieldShimmer(true);
 
-    if (fileType === "xlsx") {
-      await fetchAqaXlsx(url, board, qual, series);
-    } else {
-      await fetchBoardPdf(url, board, qual, series);
+    try {
+      if (fileType === "xlsx") {
+        await fetchAqaXlsx(url, board, qual, series);
+      } else {
+        await fetchBoardPdf(url, board, qual, series);
+      }
+    } catch (e) {
+      setScratchBusy(false);
+      setFieldShimmer(false);
+      setStatus(e.message || String(e), "err");
+      scratch("ERROR: " + (e.message || String(e)), false);
+      return;
     }
+    setScratchBusy(false);
+    setFieldShimmer(false);
   }
 
   async function fetchAqaXlsx(url, board, qual, series) {
@@ -769,6 +908,8 @@ export function initScraperTool(deps, context = {}) {
     }
     renderSubjectPicker(subjects);
     appendLog("Choose a subject from the picker to view its grade boundaries.");
+    setScratchBusy(false);
+    setFieldShimmer(false);
     const boardName = currentBoardId() === "aqa" ? "AQA" : currentBoardId() === "ocr" ? "OCR" : "Pearson";
     setStatus(`${boardName} ${qual.name} ${series.label} loaded${fromCache ? " (cached)" : ""}`, "ok");
   }
@@ -783,6 +924,7 @@ export function initScraperTool(deps, context = {}) {
     if (el.boardSelect) {
       el.boardSelect.addEventListener("change", () => {
         refreshPickers();
+        savePrefs({ board: el.boardSelect.value, qual: currentQualification().id, series: el.seriesSelect ? el.seriesSelect.value : undefined });
         setStatus("Board changed — series takes effect on next fetch.", "");
       });
     }
@@ -794,6 +936,7 @@ export function initScraperTool(deps, context = {}) {
         el.scanBtn.textContent = "Scanning...";
         clearLog();
         try {
+          setScratchBusy(true);
           let result;
           if (board === "aqa") {
             setStatus("Scanning AQA grade-boundaries pages for available series...", "busy");
@@ -820,6 +963,7 @@ export function initScraperTool(deps, context = {}) {
           setStatus(e.message || String(e), "err");
           appendLog("ERROR: " + (e.message || String(e)));
         } finally {
+          setScratchBusy(false);
           el.scanBtn.disabled = false;
           el.scanBtn.textContent = "Scan site";
         }
@@ -844,11 +988,13 @@ export function initScraperTool(deps, context = {}) {
 
     if (el.qualSelect) {
       el.qualSelect.addEventListener("change", () => {
+        savePrefs({ board: currentBoardId(), qual: el.qualSelect.value, series: el.seriesSelect ? el.seriesSelect.value : undefined });
         setStatus("Change takes effect on next fetch.", "");
       });
     }
     if (el.seriesSelect) {
       el.seriesSelect.addEventListener("change", () => {
+        savePrefs({ board: currentBoardId(), qual: currentQualification().id, series: el.seriesSelect.value });
         setStatus("Change takes effect on next fetch.", "");
       });
     }
@@ -858,6 +1004,8 @@ export function initScraperTool(deps, context = {}) {
         renderSuggestions(normalize(el.subjectInput.value));
       });
       el.subjectInput.addEventListener("focus", () => {
+        // Pre-filled (auto-selected) value should be replaced by typing; select it.
+        if (el.subjectInput.value) el.subjectInput.select();
         renderSuggestions(normalize(el.subjectInput.value));
       });
       el.subjectInput.addEventListener("keydown", (e) => {
@@ -867,11 +1015,16 @@ export function initScraperTool(deps, context = {}) {
         } else if (e.key === "ArrowUp") {
           e.preventDefault();
           moveActiveSuggestion(-1);
-        } else if (e.key === "Enter") {
-          e.preventDefault();
-          const items = el.suggestions.querySelectorAll(".scraper-suggestion");
-          const target = items[activeSuggestionIndex];
+        } else if (e.key === "Enter" || e.key === "Tab") {
+          const items = el.suggestions ? el.suggestions.querySelectorAll(".scraper-suggestion") : [];
+          if (items.length === 0) return;
+          // Pick the active one, else the first real suggestion (skip no-match).
+          let target = items[activeSuggestionIndex] && items[activeSuggestionIndex].dataset.code
+            ? items[activeSuggestionIndex]
+            : null;
+          if (!target) target = [...items].find((n) => n.dataset.code) || null;
           if (target && target.dataset.code) {
+            e.preventDefault();
             selectSubject(subjects.find((s) => s.code === target.dataset.code));
           }
         } else if (e.key === "Escape") {
@@ -901,6 +1054,7 @@ export function initScraperTool(deps, context = {}) {
   populateBoardPicker();
   populateQualificationPicker();
   populateSeriesPicker();
+  restorePrefs();
   bindEvents();
   setStatus("Ready. Pick a board, qualification and series, then fetch boundaries.", "");
 
@@ -915,6 +1069,11 @@ export function initScraperTool(deps, context = {}) {
       discoverPearsonSeries()
     ]);
     refreshPickers();
+    // Re-apply the saved series now that discovery may have revealed a
+    // discovered-only series (e.g. newest JUN series not in the baseline list).
+    if (el.seriesSelect && statePrefs.series && [...el.seriesSelect.options].some((o) => o.value === statePrefs.series) && el.seriesSelect.value !== statePrefs.series) {
+      el.seriesSelect.value = statePrefs.series;
+    }
     const ok = results.filter((r) => r.status === "fulfilled" && r.value && (r.value.kept || r.value.found));
     if (ok.length > 0) {
       appendLog(`Auto-discovered series for ${ok.length} board(s); series pickers updated.`);

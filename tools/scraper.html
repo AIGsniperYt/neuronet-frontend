@@ -53,6 +53,12 @@
     .scraper-combo input:focus { border-color: rgba(44,255,179,0.5); }
     .scraper-combo input:disabled { opacity: 0.6; cursor: not-allowed; }
     .scraper-combo input::placeholder { color: var(--text-muted); }
+    .scraper-shimmer-field { animation: none; position: relative; overflow: hidden; }
+    .scraper-shimmer-field::after {
+      content: ""; position: absolute; inset: 0;
+      background: linear-gradient(100deg, transparent 20%, rgba(44,255,179,0.2) 50%, transparent 80%);
+      animation: scraper-shimmer-sweep 1.6s linear infinite; pointer-events: none;
+    }
 
     .scraper-suggestions {
       position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20;
@@ -73,18 +79,42 @@
     .scraper-panel h3 { margin: 0; font-size: 0.9rem; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; }
 
     #scraperLog {
-      flex: 1; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      flex: 1; overflow: hidden; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 0.72rem; line-height: 1.5; color: var(--text-muted);
       background: rgba(0,0,0,0.25); border: 1px solid var(--glass-border); border-radius: 12px; padding: 12px;
       white-space: pre-wrap; word-break: break-word;
+      display: flex; flex-direction: column; justify-content: center;
     }
-    .scraper-line { margin-bottom: 2px; }
+    .scraper-line {
+      position: relative; overflow: hidden; padding: 6px 10px; border-radius: 8px;
+      background: rgba(0,0,0,0.18); border: 1px solid rgba(255,255,255,0.05);
+    }
+    .scraper-line.idle { background: transparent; border-color: transparent; padding: 0; }
+    .scraper-line .shimmer-text { position: relative; }
+    @keyframes scraper-shimmer-sweep {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(100%); }
+    }
+    .scraper-shimmer::before {
+      content: ""; position: absolute; inset: 0;
+      background: linear-gradient(100deg, transparent 20%, rgba(44,255,179,0.22) 50%, transparent 80%);
+      animation: scraper-shimmer-sweep 1.6s linear infinite;
+      pointer-events: none;
+    }
+    .scraper-log-idle-hint { color: var(--text-muted); font-style: italic; opacity: 0.7; }
 
     #scraperResult { flex: 1; overflow: auto; }
     .card-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
     .card-code { font-weight: 700; color: var(--accent); background: rgba(44,255,179,0.1); border: 1px solid rgba(44,255,179,0.25); border-radius: 999px; padding: 3px 10px; font-size: 0.85rem; }
     .card-title { font-weight: 600; font-size: 1.05rem; }
     .card-max { color: var(--text-muted); font-size: 0.8rem; margin-left: auto; }
+    .card-copy {
+      padding: 6px 12px; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border);
+      color: var(--text-main); border-radius: 999px; cursor: pointer; font: inherit; font-size: 0.75rem;
+      transition: all 0.2s ease; white-space: nowrap;
+    }
+    .card-copy:hover { background: rgba(44,255,179,0.14); border-color: rgba(44,255,179,0.4); transform: translateY(-1px); }
+    .card-copy.done { background: rgba(44,255,179,0.2); border-color: rgba(44,255,179,0.6); color: #e6fff5; }
     .card-grades { display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 10px; }
     .scraper-grade {
       display: flex; flex-direction: column; align-items: center; gap: 4px;
