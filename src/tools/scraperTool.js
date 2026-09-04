@@ -496,6 +496,7 @@ export function initScraperTool(deps, context = {}) {
   // recent message replaces the previous one.
   let scratchLine = null;
   let busyScratch = false;
+  let completionTimer = null;
 
   function setStatus(msg, kind = "") {
     if (el.status) {
@@ -524,20 +525,48 @@ export function initScraperTool(deps, context = {}) {
     const nc = window.__neuronetCanvas;
     if (!nc) return;
     try {
-      if (typeof nc.triggerRandomNodes === "function") nc.triggerRandomNodes(4, 0.9);
+      if (typeof nc.triggerRandomNodes === "function") nc.triggerRandomNodes(10, 1.2);
       if (typeof nc.triggerRadialPulse === "function") {
         const nodes = typeof nc.getNodes === "function" ? nc.getNodes() : null;
         if (nodes && nodes.length) {
           const n = nodes[(Math.random() * nodes.length) | 0];
-          nc.triggerRadialPulse(n.x, n.y, 1.4);
+          nc.triggerRadialPulse(n.x, n.y, 2.5);
         } else {
           const c = nc.getCanvas && nc.getCanvas();
-          if (c) nc.triggerRadialPulse(c.width / 2, c.height / 2, 1.4);
+          if (c) nc.triggerRadialPulse(c.width / 2, c.height / 2, 2.5);
         }
       }
+      // Second, softer beat — the "oh, did that just happen?" micro-pulse that
+      // catches the eye just enough to register consciously without nagging.
+      setTimeout(() => {
+        try {
+          if (typeof nc.triggerRandomNodes === "function") nc.triggerRandomNodes(3, 0.5);
+          if (typeof nc.triggerRadialPulse === "function") {
+            const nodes2 = typeof nc.getNodes === "function" ? nc.getNodes() : null;
+            if (nodes2 && nodes2.length) {
+              const n2 = nodes2[(Math.random() * nodes2.length) | 0];
+              nc.triggerRadialPulse(n2.x, n2.y, 1.2);
+            }
+          }
+        } catch { /* ignore */ }
+      }, 850);
     } catch {
       /* canvas unavailable — ignore */
     }
+  }
+
+  // Completion sequence: fill, then keep the descriptive log line gently alive.
+  function sweepComplete() {
+    if (!scratchLine) scratch("Results indexed — ready to explore.", false);
+    if (!scratchLine) return;
+    if (completionTimer) clearTimeout(completionTimer);
+    scratchLine.classList.remove("scraper-shimmer", "scraper-done", "scraper-glow", "scraper-idle", "idle");
+    scratchLine.classList.add("scraper-done");
+    completionTimer = setTimeout(() => {
+      scratchLine.classList.remove("scraper-done");
+      scratchLine.classList.add("scraper-glow");
+      completionTimer = null;
+    }, 2000);
   }
 
   function scratch(message, shimmer = busyScratch) {
@@ -550,7 +579,9 @@ export function initScraperTool(deps, context = {}) {
     }
     const logText = scratchLine.querySelector(".scraper-log-text");
     if (logText) logText.textContent = message;
-    scratchLine.classList.remove("idle");
+    if (completionTimer) clearTimeout(completionTimer);
+    completionTimer = null;
+    scratchLine.classList.remove("idle", "scraper-done", "scraper-glow", "scraper-idle");
     scratchLine.classList.toggle("scraper-shimmer", !!shimmer && busyScratch);
   }
 
@@ -894,6 +925,7 @@ export function initScraperTool(deps, context = {}) {
     }
     setScratchBusy(false);
     setFieldShimmer(false);
+    sweepComplete();
   }
 
   async function fetchAqaXlsx(url, board, qual, series) {
@@ -985,6 +1017,7 @@ export function initScraperTool(deps, context = {}) {
           appendLog(`Series now available: ${list.map((s) => s.label).join(", ") || "(none)"}`);
           setStatus(`Found ${list.length} series for ${result.boardName}.`, "ok");
           pulseTaskComplete();
+          sweepComplete();
         } catch (e) {
           setStatus(e.message || String(e), "err");
           appendLog("ERROR: " + (e.message || String(e)));
@@ -1143,6 +1176,7 @@ export function initScraperTool(deps, context = {}) {
     }
     appendLog("Background caching complete.");
     pulseTaskComplete();
+    sweepComplete();
   }
 
   // Like fetchBoundaries, but targeted at an explicit board/qual/series and

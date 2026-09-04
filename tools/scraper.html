@@ -56,9 +56,9 @@
     .scraper-shimmer-field { animation: none; position: relative; overflow: hidden; }
     .scraper-shimmer-field::after {
       content: ""; position: absolute; inset: 0; border-radius: 10px; pointer-events: none;
-      background-image: linear-gradient(100deg, transparent 35%, rgba(44,255,179,0.18) 50%, transparent 65%);
+      background-image: linear-gradient(100deg, rgba(230,255,245,0.55) 30%, rgba(44,255,179,0.95) 50%, rgba(230,255,245,0.55) 70%);
       background-size: 200% 100%;
-      animation: scraper-shimmer-sweep 2.6s linear infinite;
+      animation: scraper-shimmer-sweep 1.25s linear infinite;
     }
 
     .scraper-suggestions {
@@ -87,33 +87,80 @@
       display: flex; flex-direction: column; justify-content: center;
     }
     .scraper-line {
-      position: relative; padding: 4px 2px; border-radius: 8px;
+      position: relative; padding: 4px 2px; border-radius: 10px;
     }
     .scraper-line.idle { padding: 0; }
-    .scraper-line .scraper-log-text { position: relative; color: rgba(230,255,245,0.65); }
 
-    /* Text-only single steady gradient sweep (AI-style loading). One clean
-       pass over the text, no box background, no double shimmer. Literal colors
-       keep it self-contained (won't go invisible if a CSS var is undefined),
-       and it's scoped to .scraper-log-text so index.html's global
-       .shimmer-text can't hijack it. */
-    .scraper-shimmer .scraper-log-text {
-      background-image: linear-gradient(
-        100deg,
-        rgba(230,255,245,0.65) 35%,
-        #2cffb3 50%,
-        rgba(230,255,245,0.65) 65%
-      );
+    /* Text-only steady gradient sweep (AI-style loading). One clean pass over
+       the text, no box background / no double shimmer. Scoped to
+       .scraper-log-text so index.html's global .shimmer-text can't hijack it.
+       Green lit-up style: a bright green peak sweeps across the text,
+       lighting it into clarity, then it settles back. */
+    #scraperTool .scraper-log-text { color: rgba(230,255,245,0.55); }
+    @keyframes scraper-shimmer-sweep {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+    #scraperTool .scraper-shimmer .scraper-log-text {
       background-size: 200% 100%;
       -webkit-background-clip: text;
       background-clip: text;
       -webkit-text-fill-color: transparent;
       color: transparent;
-      animation: scraper-shimmer-sweep 2.6s linear infinite;
+      animation: scraper-shimmer-sweep 1.25s linear infinite;
+      background-image: linear-gradient(
+        100deg,
+        rgba(230,255,245,0.55) 30%, rgba(44,255,179,0.95) 50%, rgba(230,255,245,0.55) 70%
+      );
     }
-    @keyframes scraper-shimmer-sweep {
-      0% { background-position: 200% 0; }
-      100% { background-position: -200% 0; }
+
+    /* Completion fill: the gradient sweeps from left to right and FILLS the
+       existing descriptive log line into full brightness. */
+    @keyframes scraper-fill-sweep {
+      0%   { background-position: 200% 0; }
+      100% { background-position: 0 0; }
+    }
+    #scraperTool .scraper-done .scraper-log-text {
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      color: transparent;
+      background-image: linear-gradient(
+        100deg,
+        rgba(44,255,179,0.95) 0%, rgba(44,255,179,0.95) 47%,
+        rgba(44,255,179,0.95) 49%, rgba(230,255,245,0.55) 51%,
+        rgba(230,255,245,0.55) 100%
+      );
+      background-size: 200% 100%;
+      background-position: 200% 0;
+      animation: scraper-fill-sweep 2s cubic-bezier(0.22, 0.8, 0.36, 1) 1 forwards;
+    }
+
+    /* Stay alive after completion: the finished log line keeps breathing. */
+    @keyframes scraper-glow-breathe {
+      0%, 100% { opacity: 0.94; filter: drop-shadow(0 0 3px rgba(44,255,179,0.42)); }
+      50%       { opacity: 1; filter: drop-shadow(0 0 11px rgba(44,255,179,0.72)); }
+    }
+    /* Most of the time this is a solid green fill. The first layer makes a
+       restrained green highlight drift through it only occasionally. */
+    @keyframes scraper-glow-sweep {
+      0%, 20%  { background-position: 100% 0, 0 0; }
+      55%, 75% { background-position: 0 0, 0 0; }
+      100%     { background-position: 100% 0, 0 0; }
+    }
+    #scraperTool .scraper-glow .scraper-log-text {
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      color: transparent;
+      background-image:
+        linear-gradient(100deg, transparent 34%, rgba(112,255,198,0.78) 50%, transparent 66%),
+        linear-gradient(100deg, rgba(44,255,179,0.95), rgba(44,255,179,0.95));
+      background-size: 200% 100%, 100% 100%;
+      background-position: 100% 0, 0 0;
+      animation:
+        scraper-glow-breathe 2.8s ease-in-out infinite,
+        scraper-glow-sweep 7s ease-in-out infinite;
     }
 
     #scraperResult { flex: 1; overflow: auto; }
