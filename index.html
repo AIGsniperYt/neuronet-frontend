@@ -412,6 +412,22 @@ canvas { position: fixed; inset:0; z-index:-1; }
   transform: translateY(20px);
 }
 
+.tool-reference {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 8px;
+  padding: 3px 7px 3px 5px;
+  border: 1px solid rgba(145, 255, 213, 0.2);
+  border-radius: 5px;
+  background: rgba(3, 14, 10, 0.58);
+  color: #8dffc2;
+  vertical-align: 0.12em;
+}
+
+.tool-reference i { color: #4cff9a; font-size: 0.82em; }
+.tool-reference code { color: inherit; font: 600 0.72em/1 "Fira Code", ui-monospace, monospace; letter-spacing: 0; }
+
 #toolContainer.exiting {
   opacity: 0;
   transform: translateY(-20px);
