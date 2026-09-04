@@ -237,7 +237,7 @@ html, body, * {
 }
 
 .layer-dropdown-group {
-  display: flex;
+  display: none;
   align-items: center;
   gap: 6px;
 }
@@ -259,6 +259,265 @@ html, body, * {
 
 .source-select {
   min-width: 120px;
+}
+
+.source-navigator-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-width: min(260px, 32vw);
+  max-width: 320px;
+  min-height: 36px;
+  padding: 7px 11px;
+  border: 1px solid rgba(145, 255, 213, 0.22);
+  border-radius: 9px;
+  background: rgba(5, 18, 13, 0.72);
+  color: #e6fff5;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.source-navigator-trigger i {
+  flex: 0 0 auto;
+  color: #4cff9a;
+}
+
+.source-navigator-trigger:hover,
+.source-navigator-trigger:focus-visible {
+  border-color: rgba(44, 255, 179, 0.55);
+  background: rgba(44, 255, 179, 0.08);
+}
+
+.source-navigator-trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.source-library-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  gap: 14px;
+  padding: clamp(16px, 2.2vw, 26px);
+  overflow: hidden;
+}
+
+.source-library-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.source-library-head h1 {
+  margin: 0;
+  color: #e6fff5;
+  font-size: clamp(1.35rem, 2.2vw, 1.85rem);
+  line-height: 1.08;
+}
+
+.source-library-subtitle {
+  max-width: 620px;
+  margin: 8px 0 0;
+  color: rgba(230, 255, 245, 0.62);
+  line-height: 1.5;
+}
+
+.source-library-head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.source-library-view > .source-navigator-toolbar { margin: 0; max-width: 920px; }
+.source-library-view > .source-navigator-list { flex: 1; min-height: 180px; max-width: 1040px; }
+.source-library-count { color: rgba(230, 255, 245, 0.55); font-size: 0.78rem; white-space: nowrap; }
+
+.source-navigator-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.source-navigator-modal[hidden] { display: none; }
+.source-navigator-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.58); backdrop-filter: blur(4px); }
+.source-navigator-dialog {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  max-height: min(720px, calc(100dvh - 48px));
+  padding: 20px;
+  border: 1px solid rgba(145, 255, 213, 0.18);
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(15, 42, 30, 0.98), rgba(7, 22, 16, 0.98));
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+}
+
+.source-navigator-head,
+.source-navigator-toolbar,
+.source-navigator-recent,
+.source-navigator-item,
+.source-navigator-item-main,
+.source-navigator-item-actions {
+  display: flex;
+  align-items: center;
+}
+
+.source-navigator-head { justify-content: space-between; gap: 16px; }
+.source-navigator-head h2 { margin: 0; }
+.source-navigator-toolbar { gap: 10px; margin: 16px 0 12px; }
+.source-search-wrap { flex: 1; min-width: 0; }
+.source-search-wrap .inline-input { min-height: 40px; }
+.source-navigator-recent {
+  display: block;
+  margin: 0 0 16px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid rgba(145, 255, 213, 0.12);
+}
+.source-navigator-recent:empty { display: none; }
+.source-navigator-recent-label { margin-bottom: 7px; color: rgba(230, 255, 245, 0.52); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.12em; }
+.source-navigator-recent-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 7px; }
+.source-navigator-recent-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(145, 255, 213, 0.1);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.025);
+  color: #e6fff5;
+}
+.source-navigator-recent-open {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  flex: 1;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.source-navigator-recent-item:focus-within,
+.source-navigator-recent-item:hover {
+  border-color: rgba(44, 255, 179, 0.35);
+  background: rgba(44, 255, 179, 0.07);
+  transform: translateY(-1px);
+}
+.source-navigator-recent-remove { display: grid; flex: 0 0 auto; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: rgba(230, 255, 245, 0.42); cursor: pointer; }
+.source-navigator-recent-remove:hover, .source-navigator-recent-remove:focus-visible { background: rgba(255, 130, 130, 0.12); color: #ff9a9a; }
+.source-navigator-recent-remove svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.source-navigator-file-icon { display: grid; flex: 0 0 auto; place-items: center; width: 28px; height: 28px; border-radius: 7px; background: rgba(44, 255, 179, 0.1); color: #8dffc2; }
+.source-navigator-file-icon svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.source-navigator-recent-copy { display: grid; min-width: 0; gap: 2px; }
+.source-navigator-recent-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.82rem; }
+.source-navigator-recent-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(230, 255, 245, 0.52); font-size: 0.7rem; }
+.source-navigator-list { min-height: 0; overflow-y: auto; padding-right: 3px; }
+.source-navigator-list::before { content: "All sources"; display: block; margin: 0 0 8px; color: rgba(230, 255, 245, 0.52); font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase; }
+.source-navigator-group + .source-navigator-group { margin-top: 14px; }
+.source-navigator-group-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  margin: 0 0 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(145, 255, 213, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  color: rgba(230, 255, 245, 0.72);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.source-navigator-group-title::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid #4cff9a;
+  border-bottom: 1.5px solid #4cff9a;
+  transform: rotate(-45deg);
+  transition: transform 180ms ease, border-color 180ms ease;
+}
+.source-navigator-group.is-open > .source-navigator-group-title::before {
+  transform: rotate(45deg);
+}
+.source-navigator-group-count { color: rgba(230, 255, 245, 0.45); font-variant-numeric: tabular-nums; }
+.source-navigator-group .source-navigator-group { margin: 6px 0 0 14px; padding-left: 10px; border-left: 1px solid rgba(145, 255, 213, 0.12); }
+.source-navigator-level-0 > .source-navigator-group-title { font-size: 0.78rem; }
+.source-navigator-group.is-open > .source-navigator-group-title {
+  border-color: rgba(44, 255, 179, 0.28);
+  background: rgba(44, 255, 179, 0.07);
+}
+.source-navigator-group-content {
+  display: grid;
+  grid-template-rows: 0fr;
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(-5px);
+  transition: grid-template-rows 220ms cubic-bezier(0.2, 0.8, 0.2, 1), max-height 220ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 160ms ease, transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.source-navigator-group-content > * { min-height: 0; }
+.source-navigator-group.is-open > .source-navigator-group-content {
+  grid-template-rows: 1fr;
+  max-height: 2400px;
+  opacity: 1;
+  transform: translateY(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .source-navigator-group-content,
+  .source-navigator-group-title::before { transition: none; }
+}
+.source-navigator-item { width: 100%; gap: 10px; padding: 10px; border: 1px solid transparent; border-radius: 10px; background: rgba(255,255,255,0.035); color: #e6fff5; text-align: left; }
+.source-navigator-item + .source-navigator-item { margin-top: 6px; }
+.source-navigator-item:hover, .source-navigator-item:focus-within { border-color: rgba(44,255,179,0.3); background: rgba(44,255,179,0.08); }
+.source-navigator-item-main {
+  min-width: 0;
+  flex: 1;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #e6fff5;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.source-navigator-item-copy { min-width: 0; }
+.source-navigator-item-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.source-navigator-item-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 3px; color: rgba(230,255,245,0.58); font-size: 0.76rem; }
+.source-navigator-item-actions { gap: 4px; }
+.source-navigator-item-actions .icon-btn { margin: 0; width: 30px; height: 30px; }
+.source-navigator-item-actions .icon-btn svg { display: block; width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.source-navigator-item-actions .danger:hover { color: #ff9a9a; border-color: rgba(255,120,120,0.45); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+@media (max-width: 700px) {
+  .source-navigator-trigger { min-width: 0; max-width: 100%; flex: 1 1 180px; }
+  .source-navigator-modal { padding: 12px; }
+  .source-navigator-dialog { max-height: calc(100dvh - 24px); padding: 16px; }
+  .source-navigator-toolbar { align-items: stretch; flex-direction: column; }
+  .source-navigator-toolbar .btn { width: 100%; }
+  .source-navigator-item { align-items: flex-start; }
+  .source-navigator-item-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .source-library-view { padding: 18px 14px; gap: 14px; overflow-y: auto; }
+  .source-library-head-actions { width: 100%; }
+  .source-library-head-actions .btn { flex: 1; }
+  .source-library-view > .source-navigator-list { min-height: 320px; }
 }
 
 .study-grid {
@@ -1154,7 +1413,8 @@ button.analysis-quote-jump.active-quote,
     <div class="panel launch-top">
       <div>
         <p class="kicker">Primary Engine</p>
-        <h2>Analysis Workspace</h2>
+
+        <h2><span class="tool-reference" title="Analysis tool"><i class="fa-solid fa-pen-clip" aria-hidden="true"></i><code>Analysis</code></span> Workspace</h2>
         <p>Choose a subject to enter focus mode, explore sources, and generate source-linked analysis nodes.</p>
       </div>
       <div class="subject-toolbar">
@@ -1173,6 +1433,30 @@ button.analysis-quote-jump.active-quote,
     </section>
   </section>
 
+  <section id="sourceLibraryView" class="source-library-view" hidden>
+    <header class="source-library-head">
+      <div>
+        <p class="kicker">Source library</p>
+        <h1>Select a source to edit or <span class="tool-reference" title="Analysis tool"><i class="fa-solid fa-pen-clip" aria-hidden="true"></i><code>Analyse</code></span></h1>
+        <p class="source-library-subtitle">Open a source to write, organise, quote, and build linked analysis. New material can stay unfiled until you are ready.</p>
+      </div>
+      <div class="source-library-head-actions">
+        <button id="sourceLibrarySubjects" class="btn" type="button">Browse subjects</button>
+        <button id="sourceNavigatorNew" class="btn primary" type="button">+ New source</button>
+      </div>
+    </header>
+    <div class="source-navigator-toolbar">
+      <label class="source-search-wrap">
+        <span class="sr-only">Search sources</span>
+        <input id="sourceNavigatorSearch" class="inline-input" type="search" placeholder="Search titles, subjects, and folders" autocomplete="off" />
+      </label>
+      <span id="sourceLibraryCount" class="source-library-count"></span>
+    </div>
+    <div id="sourceNavigatorRecent" class="source-navigator-recent"></div>
+    <div id="sourceNavigatorList" class="source-navigator-list" role="listbox" aria-label="Sources"></div>
+    <p id="sourceNavigatorEmpty" class="empty-note" hidden>No matching sources.</p>
+  </section>
+
   <section id="studyView" class="analysis-study" hidden>
     <div class="panel study-head">
       <div class="study-top">
@@ -1182,6 +1466,9 @@ button.analysis-quote-jump.active-quote,
           <div id="currentHierarchy" class="reader-meta"></div>
         </div>
         <div class="header-controls">
+          <button id="sourceNavigatorBtn" class="source-navigator-trigger" type="button" aria-controls="sourceLibraryView">
+            <i class="fa-solid fa-folder-tree" aria-hidden="true"></i><span class="source-navigator-trigger-label">Source library</span>
+          </button>
           <div class="layer-dropdown-group">
             <select id="layer1Select" class="inline-select layer-select"></select>
             <select id="layer2Select" class="inline-select layer-select" style="display: none;"></select>

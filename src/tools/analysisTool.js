@@ -57,6 +57,15 @@ export async function initAnalysisToolV2(deps, context = {}) {
   const backToLaunchpad = document.getElementById("backToLaunchpad");
   const studySubjectTitle = document.getElementById("studySubjectTitle");
   const sourceSelect = document.getElementById("sourceSelect");
+  const sourceNavigatorBtn = document.getElementById("sourceNavigatorBtn");
+  const sourceLibraryView = document.getElementById("sourceLibraryView");
+  const sourceLibrarySubjects = document.getElementById("sourceLibrarySubjects");
+  const sourceLibraryCount = document.getElementById("sourceLibraryCount");
+  const sourceNavigatorSearch = document.getElementById("sourceNavigatorSearch");
+  const sourceNavigatorNew = document.getElementById("sourceNavigatorNew");
+  const sourceNavigatorRecent = document.getElementById("sourceNavigatorRecent");
+  const sourceNavigatorList = document.getElementById("sourceNavigatorList");
+  const sourceNavigatorEmpty = document.getElementById("sourceNavigatorEmpty");
   const layer1Select = document.getElementById("layer1Select");
   const layer2Select = document.getElementById("layer2Select");
   const layer3Select = document.getElementById("layer3Select");
@@ -158,7 +167,8 @@ function enforceUserSelect() {
     sources: [],
     analysisNodes: [],
     selectedSubject: "",
-    view: "launchpad",
+    view: context.newSource || context.capture || context.subject || context.sourceId ? "study" : "library",
+    libraryReturnView: "library",
     selectedSourceId: context.newSource ? "" : (context.sourceId || ""),
     draftSourceId,
     selectedRange: null,
@@ -1166,6 +1176,223 @@ function htmlToPlainText(html) {
 
   function getSourcesForSelectedSubject() {
     return state.sources.filter((source) => source.subject === state.selectedSubject);
+  }
+
+  function sourceHierarchy(source) {
+    const path = source?.meta?.hierarchyPath || [source?.subject, ...(source?.section ? source.section.split(" > ") : [])];
+    return (path || []).map((part) => String(part || "").trim()).filter(Boolean);
+  }
+
+  function sourceLocation(source) {
+    const path = sourceHierarchy(source);
+    return path.length > 1 ? path.join(" / ") : (path[0] || "Unfiled");
+  }
+
+  function sourceNavigatorRecentIds() {
+    try {
+      return JSON.parse(localStorage.getItem("nn-analysis-recent-sources") || "[]");
+    } catch {
+      return [];
+    }
+  }
+
+  function rememberRecentSource(sourceId) {
+    if (!sourceId) return;
+    const ids = [sourceId, ...sourceNavigatorRecentIds().filter((id) => id !== sourceId)].slice(0, 6);
+    try { localStorage.setItem("nn-analysis-recent-sources", JSON.stringify(ids)); } catch { /* private mode */ }
+  }
+
+  function removeRecentSource(sourceId) {
+    const ids = sourceNavigatorRecentIds().filter((id) => id !== sourceId);
+    try { localStorage.setItem("nn-analysis-recent-sources", JSON.stringify(ids)); } catch { /* private mode */ }
+  }
+
+  function updateSourceNavigatorTrigger() {
+    if (!sourceNavigatorBtn) return;
+    const source = getSourceById(state.selectedSourceId);
+    const label = source
+      ? (source.title || "Untitled source")
+      : (state.isCreatingSource ? "New unsaved source" : "Choose source");
+    const labelEl = sourceNavigatorBtn.querySelector(".source-navigator-trigger-label");
+    if (labelEl) labelEl.textContent = label;
+    sourceNavigatorBtn.title = source ? sourceLocation(source) : label;
+  }
+
+  function sourceActionIcon(name) {
+    const paths = {
+      rename: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/>',
+      move: '<path d="M5 19h14"/><path d="M12 5v10"/><path d="m8 9 4-4 4 4"/>',
+      duplicate: '<rect x="8" y="8" width="11" height="11" rx="2"/><path d="M5 16H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v1"/>',
+      delete: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 14h10l1-14M9 7V4h6v3"/>'
+    };
+    return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${paths[name] || ""}</svg>`;
+  }
+
+  function sourceFileIcon() {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/></svg>';
+  }
+
+  function closeIcon() {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m7 7 10 10M17 7 7 17"/></svg>';
+  }
+
+  function renderSourceNavigator() {
+    if (!sourceNavigatorList) return;
+    const query = String(sourceNavigatorSearch?.value || "").trim().toLocaleLowerCase();
+    const matches = state.sources.filter((source) => {
+      if (!query) return true;
+      return [source.title, source.subject, source.section, sourceLocation(source)]
+        .some((value) => String(value || "").toLocaleLowerCase().includes(query));
+    });
+    const roots = new Map();
+
+    for (const source of matches) {
+      const hierarchy = sourceHierarchy(source);
+      const folderPath = source.subject
+        ? [source.subject, ...hierarchy.slice(1)]
+        : ["Unfiled", ...hierarchy];
+      let level = roots;
+      let leaf = null;
+      for (const label of folderPath) {
+        if (!level.has(label)) level.set(label, { label, children: new Map(), sources: [] });
+        const node = level.get(label);
+        leaf = node;
+        level = node.children;
+      }
+      leaf?.sources.push(source);
+    }
+
+    const sortNodes = (nodes) => Array.from(nodes.values()).sort((a, b) => {
+      if (a.label === "Unfiled") return -1;
+      if (b.label === "Unfiled") return 1;
+      return a.label.localeCompare(b.label);
+    });
+    const renderSources = (sources) => sources
+      .sort((a, b) => String(a.title || "Untitled source").localeCompare(String(b.title || "Untitled source")))
+      .map((source) => `
+        <div class="source-navigator-item" role="option" aria-selected="${source.id === state.selectedSourceId}">
+          <button class="source-navigator-item-main" type="button" data-source-select="${escapeHtml(source.id)}">
+            <span class="source-navigator-item-copy">
+              <span class="source-navigator-item-title">${escapeHtml(source.title || "Untitled source")}</span>
+              <span class="source-navigator-item-path">${escapeHtml(sourceLocation(source))}</span>
+            </span>
+          </button>
+          <span class="source-navigator-item-actions">
+            <button class="icon-btn edit-btn" type="button" data-source-action="rename" data-source-id="${escapeHtml(source.id)}" title="Rename source" aria-label="Rename ${escapeHtml(source.title || "source")}">${sourceActionIcon("rename")}</button>
+            <button class="icon-btn" type="button" data-source-action="move" data-source-id="${escapeHtml(source.id)}" title="Move source" aria-label="Move ${escapeHtml(source.title || "source")}">${sourceActionIcon("move")}</button>
+            <button class="icon-btn copy-btn" type="button" data-source-action="duplicate" data-source-id="${escapeHtml(source.id)}" title="Duplicate source" aria-label="Duplicate ${escapeHtml(source.title || "source")}">${sourceActionIcon("duplicate")}</button>
+            <button class="icon-btn delete-btn danger" type="button" data-source-action="delete" data-source-id="${escapeHtml(source.id)}" title="Delete source" aria-label="Delete ${escapeHtml(source.title || "source")}">${sourceActionIcon("delete")}</button>
+          </span>
+        </div>
+      `).join("");
+    const sourceCount = (node) => node.sources.length + Array.from(node.children.values()).reduce((total, child) => total + sourceCount(child), 0);
+    const renderNodes = (nodes, depth = 0) => sortNodes(nodes).flatMap((node) => {
+      // A folder with one nested folder and no direct files adds navigation
+      // friction without adding a choice. Keep root categories visible, but
+      // promote redundant nested sections to the current level.
+      if (depth > 0 && node.sources.length === 0 && node.children.size === 1) {
+        return renderNodes(node.children, depth);
+      }
+      const isOpen = depth === 0 && node.label === "Unfiled";
+      return [`
+        <div class="source-navigator-group source-navigator-level-${depth}${isOpen ? " is-open" : ""}">
+          <button class="source-navigator-group-title" type="button" aria-expanded="${isOpen}">
+            <span>${escapeHtml(node.label)}</span>
+            <span class="source-navigator-group-count">${sourceCount(node)}</span>
+          </button>
+          <div class="source-navigator-group-content">
+            ${node.children.size ? renderNodes(node.children, depth + 1) : ""}
+            ${node.sources.length ? renderSources(node.sources) : ""}
+          </div>
+        </div>
+      `];
+    }).join("");
+
+    sourceNavigatorList.innerHTML = renderNodes(roots);
+    sourceNavigatorEmpty.hidden = matches.length > 0;
+    if (sourceLibraryCount) {
+      sourceLibraryCount.textContent = `${state.sources.length} source${state.sources.length === 1 ? "" : "s"}`;
+    }
+
+    if (sourceNavigatorRecent) {
+      const recent = sourceNavigatorRecentIds()
+        .map((id) => getSourceById(id))
+        .filter(Boolean)
+        .slice(0, 4);
+      sourceNavigatorRecent.innerHTML = recent.length && !query
+        ? `<div class="source-navigator-recent-label">Recently opened</div><div class="source-navigator-recent-list">${recent.map((source) => `<div class="source-navigator-recent-item"><button class="source-navigator-recent-open" type="button" data-source-select="${escapeHtml(source.id)}"><span class="source-navigator-file-icon">${sourceFileIcon()}</span><span class="source-navigator-recent-copy"><strong>${escapeHtml(source.title || "Untitled source")}</strong><small>${escapeHtml(sourceLocation(source))}</small></span></button><button class="source-navigator-recent-remove" type="button" data-recent-remove="${escapeHtml(source.id)}" title="Remove from recently opened" aria-label="Remove ${escapeHtml(source.title || "source")} from recently opened">${closeIcon()}</button></div>`).join("")}</div>`
+        : "";
+    }
+  }
+
+  function closeSourceNavigator() {
+    state.view = state.libraryReturnView || "launchpad";
+    renderState();
+  }
+
+  function openSourceNavigator() {
+    state.libraryReturnView = state.view === "study" ? "study" : "launchpad";
+    state.view = "library";
+    renderState();
+    requestAnimationFrame(() => sourceNavigatorSearch?.focus());
+  }
+
+  function sourceFormIsDirty() {
+    if (state.isCreatingSource) {
+      return Boolean(sourceTitleInput?.value.trim() || sourceSubjectInput?.value.trim() || mdEditor.getMarkdown().trim());
+    }
+    const source = getSourceById(state.selectedSourceId);
+    if (!source || state.viewMode !== "editor") return false;
+    const path = sourceHierarchy(source);
+    return sourceTitleInput.value.trim() !== String(source.title || "").trim()
+      || sourceSubjectInput.value.trim() !== String(source.subject || "").trim()
+      || sourceLevel1Input.value.trim() !== String(path[1] || "").trim()
+      || sourceLevel2Input.value.trim() !== String(path[2] || "").trim()
+      || sourceLevel3Input.value.trim() !== String(path[3] || "").trim()
+      || mdEditor.getMarkdown().trim() !== String(sourceMarkdown(source) || "").trim();
+  }
+
+  async function confirmSourceNavigation() {
+    if (!sourceFormIsDirty()) return true;
+    return dialog.confirm("You have unsaved source changes. Discard them and continue?", "Discard", "danger");
+  }
+
+  async function persistSourcePatch(source, patch) {
+    const stayInLibrary = state.view === "library";
+    const updated = { ...source, ...patch, updatedAt: Date.now() };
+    await addNode(updated);
+    await refreshData();
+    await backupLocalNodesToCloud();
+    state.selectedSubject = updated.subject || "";
+    state.selectedSourceId = updated.id;
+    state.isCreatingSource = false;
+    setSourceViewMode("reader");
+    selectSource(updated.id);
+    updateSourceNavigatorTrigger();
+    if (stayInLibrary) {
+      state.view = "library";
+      renderState();
+    }
+  }
+
+  async function deleteSourceById(sourceId) {
+    const source = getSourceById(sourceId);
+    if (!source) return;
+    const linked = state.analysisNodes.filter((node) => analysisTouchesSource(node, source.id));
+    const approved = await dialog.confirm(`Delete "${source.title || "Untitled source"}" and ${linked.length} linked analysis node(s)?`, "Delete", "danger");
+    if (!approved) return;
+    for (const node of linked) await deleteAnalysisNodeWithIntegrity(node);
+    for (const quote of state.quotes.filter((item) => item.link?.sourceId === source.id)) await removeQuoteAndLinkedCuesEverywhere(quote.id);
+    await removeNodeEverywhere(source.id);
+    if (state.selectedSourceId === source.id) {
+      state.selectedSourceId = "";
+      resetSourceForm();
+      setSourceViewMode("reader");
+    }
+    await refreshData();
+    await backupLocalNodesToCloud();
+    if (typeof toast === "function") toast("Source deleted");
+    updateSourceNavigatorTrigger();
   }
 
   /** Human-readable location for a quote ref (e.g. "Act 1 > Scene 7"), omitting subject when redundant. */
@@ -2606,6 +2833,7 @@ const updateLayerSelection = () => {
     updateLayerSelection();
 
     state.updateLayerSelection = updateLayerSelection;
+    updateSourceNavigatorTrigger();
   }
 
   if (layer1Select) {
@@ -2756,7 +2984,9 @@ const updateLayerSelection = () => {
 
   function renderState() {
     const inStudy = state.view === "study";
-    launchpadView.hidden = inStudy;
+    const inLibrary = state.view === "library";
+    launchpadView.hidden = inStudy || inLibrary;
+    if (sourceLibraryView) sourceLibraryView.hidden = !inLibrary;
     studyView.hidden = !inStudy;
     studySubjectTitle.textContent = state.selectedSubject || "Unfiled";
     if (!getSourceById(state.selectedSourceId)) {
@@ -2768,7 +2998,9 @@ const updateLayerSelection = () => {
     }
     window.__neuronetCanFocus = () => inStudy;
 
-    if (inStudy) {
+    if (inLibrary) {
+      renderSourceNavigator();
+    } else if (inStudy) {
       setSourceViewMode(state.viewMode);
       renderSources();
       renderReaderAndNodes();
@@ -3002,6 +3234,115 @@ const updateLayerSelection = () => {
     });
   }
 
+  if (sourceNavigatorBtn) sourceNavigatorBtn.addEventListener("click", openSourceNavigator);
+  if (sourceNavigatorSearch) sourceNavigatorSearch.addEventListener("input", renderSourceNavigator);
+  sourceLibraryView?.addEventListener("click", async (event) => {
+    const groupTitle = event.target.closest(".source-navigator-group-title");
+    if (groupTitle) {
+      event.preventDefault();
+      const group = groupTitle.parentElement;
+      const isOpen = group?.classList.toggle("is-open");
+      groupTitle.setAttribute("aria-expanded", String(Boolean(isOpen)));
+      return;
+    }
+
+    const recentRemove = event.target.closest("[data-recent-remove]");
+    if (recentRemove) {
+      event.preventDefault();
+      removeRecentSource(recentRemove.dataset.recentRemove);
+      renderSourceNavigator();
+      return;
+    }
+
+    if (event.target.closest("[data-source-navigator-close]")) {
+      closeSourceNavigator();
+      return;
+    }
+
+    const actionButton = event.target.closest("[data-source-action]");
+    const sourceButton = event.target.closest("[data-source-select]");
+    const sourceId = actionButton?.dataset.sourceId || sourceButton?.dataset.sourceSelect;
+    if (!sourceId) return;
+
+    if (actionButton) {
+      const source = getSourceById(sourceId);
+      if (!source) return;
+      if (source.id === state.selectedSourceId && !(await confirmSourceNavigation())) return;
+      if (actionButton.dataset.sourceAction === "rename") {
+        const title = await dialog.prompt("Rename source", source.title || "Untitled source");
+        if (title === null || !title.trim() || title.trim() === source.title) return;
+        await persistSourcePatch(source, { title: title.trim() });
+        renderSourceNavigator();
+      } else if (actionButton.dataset.sourceAction === "move") {
+        const subject = await dialog.prompt("Move to subject (leave blank for Unfiled)", source.subject || "");
+        if (subject === null) return;
+        const currentPath = sourceHierarchy(source).slice(1).join(" > ");
+        const section = await dialog.prompt("Move to folder path (optional, use > between levels)", currentPath);
+        if (section === null) return;
+        const path = normalizeHierarchyPath([subject.trim(), ...section.split(">")]);
+        await persistSourcePatch(source, {
+          subject: subject.trim(),
+          section: buildSection(path),
+          meta: { ...(source.meta || {}), hierarchyPath: path }
+        });
+        if (typeof toast === "function") toast("Source moved");
+        renderSourceNavigator();
+      } else if (actionButton.dataset.sourceAction === "duplicate") {
+        const copy = {
+          ...source,
+          id: crypto.randomUUID(),
+          title: `${source.title || "Untitled source"} (Copy)`,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          meta: { ...(source.meta || {}) }
+        };
+        await addNode(copy);
+        await refreshData();
+        await backupLocalNodesToCloud();
+        state.selectedSubject = copy.subject || "";
+        state.selectedSourceId = copy.id;
+        selectSource(copy.id);
+        if (typeof toast === "function") toast("Source duplicated");
+        closeSourceNavigator();
+      } else if (actionButton.dataset.sourceAction === "delete") {
+        await deleteSourceById(sourceId);
+        renderSourceNavigator();
+      }
+      return;
+    }
+
+    if (!(await confirmSourceNavigation())) return;
+    const source = getSourceById(sourceId);
+    if (!source) return;
+    state.selectedSubject = source.subject || "";
+    state.selectedSourceId = source.id;
+    state.isCreatingSource = false;
+    rememberRecentSource(source.id);
+    selectSource(source.id);
+    state.view = "study";
+    closeSourceNavigator();
+    renderState();
+  });
+
+  if (sourceLibrarySubjects) {
+    sourceLibrarySubjects.addEventListener("click", () => {
+      state.view = "launchpad";
+      renderState();
+    });
+  }
+
+  if (sourceNavigatorNew) {
+    sourceNavigatorNew.addEventListener("click", async () => {
+      if (!(await confirmSourceNavigation())) return;
+      closeSourceNavigator();
+      newSourceBtn?.click();
+    });
+  }
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state.view === "library") closeSourceNavigator();
+  });
+
 
   // Add click handler for the new "+ Add Analysis Node" button
   if (addAnalysisNodeBtn) {
@@ -3162,6 +3503,8 @@ function selectSource(sourceId) {
   }
   state.selectedSourceId = sourceId;
   rememberWorkspace();
+  rememberRecentSource(sourceId);
+  updateSourceNavigatorTrigger();
 
   if (sourceSelect) sourceSelect.value = sourceId;
 
