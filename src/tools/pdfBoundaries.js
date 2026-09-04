@@ -60,7 +60,8 @@ function buildLayoutLines(pageResults) {
 
 // `proxyFn(url)` maps a target URL through the CORS proxy; returns the
 // proxied absolute URL. We fetch through it so the browser can read the file.
-export async function extractPdfLayoutLines(url, proxyFn) {
+// Optional `onProgress(page, total)` fires per page for live progress feedback.
+export async function extractPdfLayoutLines(url, proxyFn, onProgress) {
   const lib = await ensurePdfJs();
   const res = await fetch(proxyFn(url));
   if (!res.ok) throw new Error(`HTTP ${res.status} fetching PDF`);
@@ -72,6 +73,7 @@ export async function extractPdfLayoutLines(url, proxyFn) {
     const page = await doc.getPage(p);
     const tc = await page.getTextContent();
     pageResults.push({ page: p, items: tc.items });
+    if (onProgress) onProgress(p, doc.numPages);
   }
   return buildLayoutLines(pageResults);
 }

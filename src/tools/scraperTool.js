@@ -262,10 +262,14 @@ export function initScraperTool(deps, context = {}) {
   // ---------- AQA discovery ----------
   // Scrape the current + archive pages for the Sanity JSON: each hashed xlsx
   // carries "title":"<Qual> - Grade boundaries <Month> <Year>" + a "url".
-  async function discoverAqaSeries() {
+  async function discoverAqaSeries(onProgress) {
     const found = [];
-    const pages = [proxyUrl(AQA_PAGE_ARCHIVE), proxyUrl(AQA_PAGE_BASE)];
-    for (const page of pages) {
+    const pages = [
+      { url: proxyUrl(AQA_PAGE_ARCHIVE), name: "archive page" },
+      { url: proxyUrl(AQA_PAGE_BASE), name: "current page" }
+    ];
+    for (const { url: page, name } of pages) {
+      if (onProgress) onProgress(`Fetching AQA ${name} for hashed xlsx + legacy PDFs...`);
       let text;
       try {
         const res = await fetch(page);
@@ -274,9 +278,11 @@ export function initScraperTool(deps, context = {}) {
       } catch {
         continue;
       }
+      if (onProgress) onProgress(`Parsing ${name}...`);
       found.push(...extractGradeBoundaryPairs(text));
       // The archive page also lists legacy (2018-2021) PDF files in <li> anchors.
       parseAqaArchiveAnchors(text);
+      if (onProgress) onProgress(`AQA ${name}: ${found.length} hashed + legacy files so far.`);
     }
     for (const { url, title } of found) {
       const parsed = parseBoundaryTitle(title);
@@ -394,9 +400,14 @@ export function initScraperTool(deps, context = {}) {
   // ---------- OCR discovery ----------
   // OCR index + archive pages list every series' PDFs as
   //   <a href="/Images/<id>-gcse-grade-boundaries-june-2026.pdf">...
-  async function discoverOcrSeries() {
+  async function discoverOcrSeries(onProgress) {
     const found = [];
-    for (const page of [proxyUrl(OCR_PAGE_BASE), proxyUrl(OCR_PAGE_ARCHIVE)]) {
+    const pages = [
+      { url: proxyUrl(OCR_PAGE_BASE), name: "index page" },
+      { url: proxyUrl(OCR_PAGE_ARCHIVE), name: "archive page" }
+    ];
+    for (const { url: page, name } of pages) {
+      if (onProgress) onProgress(`Fetching OCR ${name} for grade-boundary PDFs...`);
       let text;
       try {
         const res = await fetch(page);
@@ -405,8 +416,10 @@ export function initScraperTool(deps, context = {}) {
       } catch {
         continue;
       }
+      if (onProgress) onProgress(`Extracting PDF links from OCR ${name}...`);
       found.push(...extractOcrPdfLinks(text));
     }
+    if (onProgress) onProgress(`Classifying ${found.length} OCR grade-boundary PDF links by series/qual...`);
     let kept = 0;
     for (const { url, fileName } of found) {
       const fullMatch = fileName.match(/-(january|february|march|april|may|june|july|august|september|october|november|december)-(\d{4})\b/i);
@@ -439,8 +452,9 @@ export function initScraperTool(deps, context = {}) {
   // Current series comes from the hidden-asset list on grade-boundaries.html:
   //   <span class= "hiddenAssetTitle">Grade Boundaries - June 2026 - GCE</span>
   //   <span class= "hiddenAssetUrl">/content/dam/pdf/.../grade-boundaries-june-2026-gce.pdf</span>
-  async function discoverPearsonSeries() {
+  async function discoverPearsonSeries(onProgress) {
     let text;
+    if (onProgress) onProgress("Fetching Pearson grade-boundaries page hidden assets...");
     try {
       const res = await fetch(proxyUrl(PEARSON_PAGE));
       if (!res.ok) return { found: 0, kept: 0 };
@@ -450,6 +464,7 @@ export function initScraperTool(deps, context = {}) {
     }
     const titles = [...text.matchAll(/class= *"hiddenAssetTitle">\s*([^<]+?)\s*<\/span>/g)].map((m) => m[1]);
     const urls = [...text.matchAll(/class= *"hiddenAssetUrl">\s*([^<]+?)\s*<\/span>/g)].map((m) => m[1]);
+    if (onProgress) onProgress(`Classifying ${titles.length} Pearson hidden assets by series/qual...`);
     let kept = 0;
     for (let i = 0; i < Math.min(titles.length, urls.length); i++) {
       const title = titles[i];
@@ -912,9 +927,9 @@ export function initScraperTool(deps, context = {}) {
 
     try {
       if (fileType === "xlsx") {
-        await fetchAqaXlsx(url, board, qual, series);
+        await fetchAqaXlsx(url, board, qual, series, (m) => scratch(m));
       } else {
-        await fetchBoardPdf(url, board, qual, series);
+        await fetchBoardPdf(url, board, qual, series, (m) => scratch(m));
       }
     } catch (e) {
       setScratchBusy(false);
@@ -928,23 +943,30 @@ export function initScraperTool(deps, context = {}) {
     sweepComplete();
   }
 
-  async function fetchAqaXlsx(url, board, qual, series) {
+  async function fetchAqaXlsx(url, board, qual, series, onProgress) {
+    if (onProgress) onProgress(`Downloading spreadsheet (size may be a few hundred KB)...`);
     const res = await fetch(proxyUrl(url));
     if (!res.ok) throw new Error(`HTTP ${res.status} fetching spreadsheet`);
-    setStatus("Downloaded spreadsheet. Parsing...", "busy");
+    if (onProgress) onProgress("Spreadsheet downloaded. Reading workbook buffer...");
     const buf = await res.arrayBuffer();
+    if (onProgress) onProgress(`Parsing workbook (${(buf.byteLength / 1024).toFixed(0)} KB)...`);
     const wb = XLSX.read(buf, { type: "array" });
     appendLog(`Sheets: ${wb.SheetNames.join(", ")}`);
+    if (onProgress) onProgress(`Parsed ${wb.SheetNames.length} sheet(s); extracting ${qual.name} grades...`);
 
     subjects = parseAqaXlsx(wb, qual, qual.grades).map((s) => ({ ...s, board, qual: qual.id }));
     appendLog(`Parsed ${subjects.length} ${qual.name} subject rows.`);
     finishFetch(qual, series);
   }
 
-  async function fetchBoardPdf(url, board, qual, series) {
-    appendLog("Extracting PDF text (pdf.js)...");
-    const lines = await extractPdfLayoutLines(url, proxyUrl);
+  async function fetchBoardPdf(url, board, qual, series, onProgress) {
+    if (onProgress) onProgress("Fetching PDF text (pdf.js)...");
+    const lines = await extractPdfLayoutLines(url, proxyUrl, (p, total) => {
+      if (onProgress) onProgress(`Reading PDF page ${p}/${total}...`);
+    });
+    if (onProgress) onProgress(`Read ${new Set(lines.map((l) => l.page)).size} PDF page(s); reconstructing layout...`);
     appendLog(`Extracted ${lines.length} layout lines across ${new Set(lines.map((l) => l.page)).size} pages.`);
+    if (onProgress) onProgress(`Detecting grade labels + subject rows (${lines.length} lines)...`);
 
     subjects = parsePdfBoundaries(lines, board, qual.id).map((s) => ({
       ...s,
@@ -995,20 +1017,24 @@ export function initScraperTool(deps, context = {}) {
         try {
           setScratchBusy(true);
           let result;
+          const progress = (msg) => {
+            scratch(msg);
+            setStatus(msg, "busy");
+          };
           if (board === "aqa") {
             setStatus("Scanning AQA grade-boundaries pages for available series...", "busy");
             appendLog("Scanning AQA grade-boundaries pages for hashed xlsx files...");
-            const count = await discoverAqaSeries();
+            const count = await discoverAqaSeries(progress);
             result = { found: count, kept: discoveredAqa.size, boardName: "AQA" };
           } else if (board === "ocr") {
             setStatus("Scanning OCR grade-boundaries pages for available series...", "busy");
             appendLog("Scanning OCR index + archive pages for PDF links...");
-            result = await discoverOcrSeries();
+            result = await discoverOcrSeries(progress);
             result.boardName = "OCR";
           } else {
             setStatus("Scanning Pearson grade-boundaries page...", "busy");
             appendLog("Scanning Pearson grade-boundaries page hidden assets...");
-            result = await discoverPearsonSeries();
+            result = await discoverPearsonSeries(progress);
             result.boardName = "Pearson";
           }
           populateSeriesPicker();
@@ -1169,7 +1195,7 @@ export function initScraperTool(deps, context = {}) {
     for (const { board, qual, series } of jobs) {
       if (document.hidden) break;
       try {
-        await fetchBoundariesFor(board, qual, series);
+        await fetchBoundariesFor(board, qual, series, (m) => scratch(m));
       } catch {
         /* best-effort; a failure here just means that combo stays uncached */
       }
@@ -1181,7 +1207,7 @@ export function initScraperTool(deps, context = {}) {
 
   // Like fetchBoundaries, but targeted at an explicit board/qual/series and
   // silent (no UI churn beyond log lines + cache write).
-  async function fetchBoundariesFor(board, qual, series) {
+  async function fetchBoundariesFor(board, qual, series, onProgress) {
     let url;
     let fileType;
     if (board === "aqa") {
@@ -1196,15 +1222,19 @@ export function initScraperTool(deps, context = {}) {
       fileType = "pdf";
     }
     if (!url) return;
+    if (onProgress) onProgress(`[bg] ${board} ${qual.name} ${series.label}: fetching...`);
 
     if (fileType === "xlsx") {
       const res = await fetch(proxyUrl(url));
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (onProgress) onProgress(`[bg] ${board} ${qual.name}: parsing workbook...`);
       const wb = XLSX.read(await res.arrayBuffer(), { type: "array" });
       const parsed = parseAqaXlsx(wb, qual, qual.grades).map((s) => ({ ...s, board, qual: qual.id }));
       if (parsed.length) setCachedSubjects(board, series, qual, parsed);
     } else {
+      if (onProgress) onProgress(`[bg] ${board} ${qual.name}: extracting PDF text...`);
       const lines = await extractPdfLayoutLines(url, proxyUrl);
+      if (onProgress) onProgress(`[bg] ${board} ${qual.name}: detecting grade rows...`);
       const parsed = parsePdfBoundaries(lines, board, qual.id).map((s) => ({ ...s, board, qual: qual.id }));
       if (parsed.length) setCachedSubjects(board, series, qual, parsed);
     }
