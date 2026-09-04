@@ -147,12 +147,28 @@ export function parseBlocks(lines) {
     const blocks = [];
     const n = lines.length;
     let i = 0;
+    let blankLines = 0;
+
+    // Keep the number of blank lines between blocks available to renderers.
+    // The normal Markdown AST does not need this information, so it remains
+    // metadata on the following block and is ignored by every non-HTML
+    // renderer. The editor's optional Word-style mode uses it to avoid
+    // collapsing repeated empty lines in the preview.
+    const addBlock = (block) => {
+        if (blankLines) block.gapBefore = blankLines;
+        blocks.push(block);
+        blankLines = 0;
+    };
 
     while (i < n) {
         const line = lines[i];
 
         // ---- blank line: nothing here, skip ---------------------------------
-        if (isBlank(line)) { i++; continue; }
+        if (isBlank(line)) {
+            blankLines++;
+            i++;
+            continue;
+        }
 
         // ---- fenced code block: ```js ... ``` -------------------------------
         // Eat lines until the closing fence. If the fence is never closed we
@@ -173,12 +189,12 @@ export function parseBlocks(lines) {
                 textLines.push(lines[i]);
                 i++;
             }
-            blocks.push({ type: "code", lang, text: textLines.join("\n") });
+            addBlock({ type: "code", lang, text: textLines.join("\n") });
             continue;
         }
 
         // ---- horizontal rule: ---  ***  ___ ----------------------------------
-        if (HR_RE.test(line)) { blocks.push({ type: "hr" }); i++; continue; }
+        if (HR_RE.test(line)) { addBlock({ type: "hr" }); i++; continue; }
 
         // ---- ATX heading: ## Hello -------------------------------------------
         const atx = line.match(ATX_RE);
@@ -186,7 +202,7 @@ export function parseBlocks(lines) {
             // "## Big ##" — trailing hashes are decoration, strip them.
             let headingText = (atx[2] ?? "").trim();
             headingText = headingText.replace(/[ \t]+#+[ \t]*$/, "");
-            blocks.push({ type: "heading", level: atx[1].length, children: parseInline(headingText) });
+            addBlock({ type: "heading", level: atx[1].length, children: parseInline(headingText) });
             i++;
             continue;
         }
@@ -201,7 +217,7 @@ export function parseBlocks(lines) {
                 quoteLines.push(lines[i].match(QUOTE_RE)[1]);   // drop the "> "
                 i++;
             }
-            blocks.push({ type: "blockquote", children: parseBlocks(quoteLines) });
+            addBlock({ type: "blockquote", children: parseBlocks(quoteLines) });
             continue;
         }
 
@@ -214,7 +230,7 @@ export function parseBlocks(lines) {
             const oneLine = line.match(/^ {0,3}\$\$(.*)\$\$[ \t]*$/);
             if (oneLine) {
                 const tex = oneLine[1].trim();
-                if (tex) { blocks.push({ type: "math", tex, display: true }); i++; continue; }
+                if (tex) { addBlock({ type: "math", tex, display: true }); i++; continue; }
             }
             const texLines = [];
             i++;
@@ -231,7 +247,7 @@ export function parseBlocks(lines) {
             }
             while (texLines.length && isBlank(texLines[texLines.length - 1])) texLines.pop();
             const tex = texLines.join("\n");
-            if (tex) blocks.push({ type: "math", tex, display: true });
+            if (tex) addBlock({ type: "math", tex, display: true });
             continue;
         }
 
@@ -242,7 +258,7 @@ export function parseBlocks(lines) {
         const listStart = matchListItem(line);
         if (listStart) {
             const { node, next } = parseList(lines, i, listStart);
-            blocks.push(node);
+            addBlock(node);
             i = next;
             continue;
         }
@@ -259,7 +275,7 @@ export function parseBlocks(lines) {
             }
             // the greedy loop hoovered up trailing blanks — trim them
             while (codeLines.length && isBlank(codeLines[codeLines.length - 1])) codeLines.pop();
-            blocks.push({ type: "code", text: codeLines.join("\n") });
+            addBlock({ type: "code", text: codeLines.join("\n") });
             continue;
         }
 
@@ -275,7 +291,7 @@ export function parseBlocks(lines) {
                 ruler.some(c => c.includes("-"));
             if (looksLikeTable) {
                 const { node, next } = parseTable(lines, i, line, lines[i + 1]);
-                blocks.push(node);
+                addBlock(node);
                 i = next;
                 continue;
             }
@@ -309,7 +325,7 @@ export function parseBlocks(lines) {
         }
 
         const paraChildren = parseInline(paraLines.join("\n"));
-        blocks.push(setextLevel
+        addBlock(setextLevel
             ? { type: "heading", level: setextLevel, children: paraChildren }
             : { type: "paragraph", children: paraChildren });
     }

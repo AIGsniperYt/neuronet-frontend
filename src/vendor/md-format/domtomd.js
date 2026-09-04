@@ -33,6 +33,7 @@ function mdBlock(node, depth) {
     if (node.nodeType !== Node.ELEMENT_NODE) return "";
 
     const tag = node.tagName.toLowerCase();
+    if (node.hasAttribute("data-md-blank-line")) return "\n";
     switch (tag) {
 
         case "h1": case "h2": case "h3": case "h4": case "h5": case "h6":
@@ -256,9 +257,23 @@ function mdBlockChildren(el, depth) {
 /** domToMarkdown(container) — the one entry point. Feed it the rendered root
  * (the `.md` div) and get the whole document as markdown text. */
 export function domToMarkdown(container) {
-    return Array.from(container.childNodes)
-        .filter(n => n.nodeType !== Node.TEXT_NODE || n.textContent.trim())
-        .map(n => mdBlock(n, 0))
-        .filter(s => s.length)
-        .join("\n\n");
+    const nodes = Array.from(container.childNodes)
+        .filter(n => n.nodeType !== Node.TEXT_NODE || n.textContent.trim());
+    let out = "";
+    for (const node of nodes) {
+        const value = mdBlock(node, 0);
+        if (!value.length) continue;
+        const isBlankMarker = node.nodeType === Node.ELEMENT_NODE &&
+            node.hasAttribute("data-md-blank-line");
+        if (isBlankMarker) {
+            // A marker is one additional source newline. It replaces the
+            // normal block separator at this position; treating it as a full
+            // block and joining with \n\n would add two blank lines.
+            out += out ? "\n" : "";
+            continue;
+        }
+        if (out) out += "\n\n";
+        out += value;
+    }
+    return out;
 }

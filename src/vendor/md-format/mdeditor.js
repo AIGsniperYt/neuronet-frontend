@@ -19,19 +19,16 @@
  * What gets built (all under the container you hand over):
  *
  *     .mdedit
- *       .mdedit-bar        ← the optional formatting toolbar
+ *       .mdedit-bar        ← the formatting toolbar and optional editor actions
  *         button.tbtn      ← one per tool in opts.toolbar
  *       .mdedit-cols       ← the 50/50 split
  *         .mdedit-pane     ← editor:  textarea.mdedit-editor
  *         .mdedit-divider  ← draggable splitter (changes a RATIO, not px)
  *         .mdedit-pane     ← preview: div.mdedit-scroll → div.md
  *
- * THE DESIGN RULE: the container owns its chrome. The editor does NOT draw a
- * header, a status bar or a view switcher — anyone embedding it wants their
- * own chrome (neuronet has a floating taskbar, the demo has the toolbar above
- * the split). Which is why the bare minimum is one <div> and everything else
- * is optional: `toolbar: false` and you get a clean two-pane WYSIWYG with no
- * bars at all.
+ * The editor owns its editing chrome. Formatting tools and the optional view /
+ * line-break actions live in one taskbar so hosts do not need to duplicate
+ * stateful controls beside the editor.
  *
  * The returned object is the whole public API (see the bottom of this file
  * for the instance methods): getMarkdown / setMarkdown / focus / command /
@@ -92,7 +89,7 @@ export const MDEDITOR_TOOLS = [
     { id: "bold", label: "<b>B</b>", title: "Bold (select text first)", group: "inline" },
     { id: "italic", label: "<i>I</i>", title: "Italic", group: "inline" },
     { id: "strike", label: "<s>S</s>", title: "Strikethrough", group: "inline" },
-    { id: "code", label: "<code>&lt;/&gt;</code>", title: "Inline code", group: "inline" },
+    { id: "code", label: "Inline code", title: "Inline code", group: "inline" },
     { id: "h1", label: "H1", title: "Heading 1", group: "heading" },
     { id: "h2", label: "H2", title: "Heading 2", group: "heading" },
     { id: "h3", label: "H3", title: "Heading 3", group: "heading" },
@@ -102,7 +99,7 @@ export const MDEDITOR_TOOLS = [
     { id: "task", label: "[ ] Task", title: "Task checkbox", group: "block" },
     { id: "link", label: "Link", title: "Link", group: "insert" },
     { id: "img", label: "Image", title: "Image", group: "insert" },
-    { id: "codeblock", label: "<code>&lt;/&gt; block</code>", title: "Fenced code block", group: "insert" },
+    { id: "codeblock", label: "Code block", title: "Fenced code block", group: "insert" },
     { id: "hr", label: "&#8212;", title: "Horizontal rule", group: "insert" },
 ];
 
@@ -191,7 +188,7 @@ export function createEditor(container, opts = {}) {
     const editorPane = div("mdedit-pane");
     const editor = document.createElement("textarea");
     editor.className = "mdedit-editor";
-    editor.placeholder = "markdown";
+    editor.placeholder = opts.placeholder || "Start writing… Use # for headings, - for lists, and blank lines between ideas.";
     editor.spellcheck = false;
     editor.readOnly = readonly;
     editor.value = opts.value ?? "";
@@ -204,12 +201,14 @@ export function createEditor(container, opts = {}) {
     cols.append(editorPane, dividerEl, previewPane);
     container.appendChild(cols);
 
-    /* ---- optional toolbar ------------------------------------------ */
+    /* ---- taskbar ---------------------------------------------------- */
     let toolbarBar = null;
+    let viewControls = null;
+    let historyControls = null;
     const wantedTools = opts.toolbar === undefined
         ? MDEDITOR_TOOLS.map(t => t.id)
         : (opts.toolbar === false || opts.toolbar === null ? [] : opts.toolbar);
-    if (wantedTools.length && !readonly) {
+    if ((wantedTools.length && !readonly) || opts.taskbar !== false) {
         toolbarBar = div("mdedit-bar");
         let lastGroup = null;
         for (const id of wantedTools) {
@@ -226,6 +225,58 @@ export function createEditor(container, opts = {}) {
             btn.innerHTML = tool.label;
             toolbarBar.appendChild(btn);
         }
+        if (opts.taskbar !== false) {
+            viewControls = div("mdedit-actions");
+            historyControls = div("mdedit-action-group");
+            historyControls.setAttribute("aria-label", "History");
+            for (const [value, label, title] of [
+                ["undo", "Undo", "Undo the last edit (Ctrl/Cmd+Z)"],
+                ["redo", "Redo", "Redo the last undone edit (Ctrl/Cmd+Y or Shift+Z)"]
+            ]) {
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "mdedit-action mdedit-history-action";
+                btn.dataset.history = value;
+                btn.disabled = true;
+                btn.title = title;
+                btn.textContent = label;
+                historyControls.appendChild(btn);
+            }
+            const viewGroup = div("mdedit-action-group");
+            viewGroup.setAttribute("aria-label", "Editor view");
+            for (const [value, label, title] of [
+                ["preview", "Visual", "Edit the rendered document"],
+                ["split", "Split", "Edit markdown beside the rendered document"],
+                ["md", "Source", "Edit raw markdown"]
+            ]) {
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "mdedit-action";
+                btn.dataset.view = value;
+                btn.setAttribute("aria-pressed", "false");
+                btn.title = title;
+                btn.textContent = label;
+                viewGroup.appendChild(btn);
+            }
+            const breakGroup = div("mdedit-action-group");
+            breakGroup.setAttribute("aria-label", "Line break style");
+            for (const [value, label, title] of [
+                ["1", "Word breaks", "Treat each Enter as a visible line break"],
+                ["0", "Markdown", "Use strict markdown line-break rules"]
+            ]) {
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "mdedit-action mdedit-break-action";
+                btn.dataset.softBreak = value;
+                btn.setAttribute("aria-pressed", "false");
+                btn.title = title;
+                btn.textContent = label;
+                breakGroup.appendChild(btn);
+            }
+            viewControls.append(viewGroup, breakGroup);
+            toolbarBar.insertBefore(historyControls, toolbarBar.firstChild);
+            toolbarBar.appendChild(viewControls);
+        }
         if (toolbarBar.children.length) container.insertBefore(toolbarBar, cols);
         else toolbarBar = null;
     }
@@ -235,7 +286,7 @@ export function createEditor(container, opts = {}) {
      * even after setMarkdown/refresh churn. */
     const ed = {
         container, cols, editor, editorPane, preview, previewPane,
-        divider: dividerEl, toolbarBar,
+        divider: dividerEl, toolbarBar, viewControls,
         syncEnabled: opts.syncScroll !== false,
         tabSize, readonly,
         focus() { (currentView === "preview" ? (preview.querySelector(".md") || preview) : editor).focus(); },
@@ -256,6 +307,34 @@ export function createEditor(container, opts = {}) {
     /* a document-induced API object for onRender() — rebuild the stats each
      * pass rather than keeping a stale counter around. */
     const currentStats = { chars: 0, blocks: 0, ms: 0, source: "", type: "html", error: null };
+    const historyPast = [];
+    const historyFuture = [];
+    let historyCurrent = editor.value;
+    function noteEditorChange(next) {
+        if (next === historyCurrent) return;
+        historyPast.push(historyCurrent);
+        historyFuture.length = 0;
+        historyCurrent = next;
+        syncTaskbar();
+    }
+    function restoreHistory(next) {
+        historyCurrent = next;
+        editor.value = next;
+        refresh();
+        editor.focus();
+        editor.setSelectionRange(next.length, next.length);
+        syncTaskbar();
+    }
+    function undo() {
+        if (!historyPast.length) return;
+        historyFuture.push(historyCurrent);
+        restoreHistory(historyPast.pop());
+    }
+    function redo() {
+        if (!historyFuture.length) return;
+        historyPast.push(historyCurrent);
+        restoreHistory(historyFuture.pop());
+    }
     function emitRender() {
         for (const cb of onRenderCbs) {
             try { cb(currentStats); } catch { /* a host callback must never
@@ -296,6 +375,7 @@ export function createEditor(container, opts = {}) {
                     // lost on save.
                     wysiwyg = currentView !== "md";
                     const mdEl = preview.querySelector(".md");
+                    if (mdEl) mdEl.dataset.placeholder = opts.placeholder || "Start writing… Use # for headings, - for lists, and blank lines between ideas.";
                     (mdEl || preview).contentEditable = wysiwyg && !readonly ? "true" : "false";
                     // typing depends on the checkbox being clickable — the
                     // renderer emits it `disabled`, undo that.
@@ -357,7 +437,10 @@ export function createEditor(container, opts = {}) {
         clearTimeout(refreshTimer);
         refreshTimer = setTimeout(refresh, 120);
     }
-    editor.addEventListener("input", requestRefresh, sig);
+    editor.addEventListener("input", () => {
+        noteEditorChange(editor.value);
+        requestRefresh();
+    }, sig);
 
     /* ====================================================================
      * VIEW MODES — split / markdown-only / preview-only.
@@ -412,16 +495,28 @@ export function createEditor(container, opts = {}) {
      * in the browser before the submit handler fires — kill that so the newline
      * stays in the textarea and focus is not yanked. */
     editor.addEventListener("keydown", (e) => {
+        const modifier = e.ctrlKey || e.metaKey;
+        const key = e.key.toLowerCase();
+        if (modifier && !e.altKey && (key === "z" || key === "y")) {
+            e.preventDefault();
+            if (key === "y" || (key === "z" && e.shiftKey)) redo();
+            else undo();
+            return;
+        }
         if (e.key === "Tab") {
             e.preventDefault();
             const start = editor.selectionStart, end = editor.selectionEnd;
-            editor.value = editor.value.slice(0, start) + " ".repeat(tabSize) + editor.value.slice(end);
+            const next = editor.value.slice(0, start) + " ".repeat(tabSize) + editor.value.slice(end);
+            noteEditorChange(next);
+            editor.value = next;
             editor.selectionStart = editor.selectionEnd = start + tabSize;
             refresh();
         } else if (e.key === "Enter") {
             e.preventDefault();
             const start = editor.selectionStart, end = editor.selectionEnd;
-            editor.value = editor.value.slice(0, start) + "\n" + editor.value.slice(end);
+            const next = editor.value.slice(0, start) + "\n" + editor.value.slice(end);
+            noteEditorChange(next);
+            editor.value = next;
             editor.selectionStart = editor.selectionEnd = start + 1;
             refresh();
         }
@@ -458,6 +553,23 @@ export function createEditor(container, opts = {}) {
         const node = sel.focusNode;
         if (!node || !container.contains(node)) return null;
         const off = sel.focusOffset;
+        // Keep a semantic block anchor as well as the DOM path. Enter in a
+        // contenteditable commonly changes a <p> into browser-created <div>s;
+        // the child-index path then points at the previous block after the
+        // markdown round-trip. A block-local text offset survives that shape
+        // change and is the preferred restoration route.
+        let block = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+        while (block && block.parentElement !== container) block = block.parentElement;
+        let blockIndex = block ? Array.prototype.indexOf.call(container.children, block) : -1;
+        let blockOffset = 0;
+        if (block && blockIndex >= 0) {
+            try {
+                const before = document.createRange();
+                before.selectNodeContents(block);
+                before.setEnd(node, off);
+                blockOffset = before.toString().length;
+            } catch { blockIndex = -1; }
+        }
         const isText = node.nodeType === Node.TEXT_NODE;
         const path = [];
         let n = node;
@@ -474,6 +586,8 @@ export function createEditor(container, opts = {}) {
             off,
             isText,
             len: isText ? node.data.length : 0,
+            blockIndex,
+            blockOffset,
             context: isText ? node.data.slice(0, 160) : ""
         };
     }
@@ -493,6 +607,31 @@ export function createEditor(container, opts = {}) {
         const mdEl = container.closest?.(".md") || container;
         mdEl.focus({ preventScroll: true });
         if (!state) return;
+
+        if (state.blockIndex >= 0) {
+            const block = container.children[state.blockIndex];
+            if (block) {
+                const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+                let n, left = state.blockOffset;
+                while ((n = walker.nextNode())) {
+                    if (left <= n.data.length) {
+                        const range = document.createRange();
+                        range.setStart(n, left); range.collapse(true);
+                        const sel = window.getSelection();
+                        sel.removeAllRanges(); sel.addRange(range);
+                        mdEl.focus({ preventScroll: true });
+                        return;
+                    }
+                    left -= n.data.length;
+                }
+                const range = document.createRange();
+                range.selectNodeContents(block); range.collapse(false);
+                const sel = window.getSelection();
+                sel.removeAllRanges(); sel.addRange(range);
+                mdEl.focus({ preventScroll: true });
+                return;
+            }
+        }
 
         let node = locateCaretNode(container, state.path);
         if (!node) {
@@ -562,6 +701,7 @@ export function createEditor(container, opts = {}) {
             // `[https://x.y](https://x.y)` → plain `https://x.y`
             md = md.replace(/\[((?:https?:\/\/|www\.)[^\s\]\\]+)\]\(\1(?:\s*"[^"]*")?\)/g, "$1");
             const keptScroll = preview.scrollTop;   // the preview is a lens:
+            noteEditorChange(md);
             editor.value = md;                      // clean source, no tokens
             refresh();                              // re-render from clean source
             preview.scrollTop = Math.min(keptScroll, preview.scrollHeight - preview.clientHeight);
@@ -576,6 +716,14 @@ export function createEditor(container, opts = {}) {
     preview.addEventListener("input", (ev) => {
         if (!wysiwyg) return;
         scheduleWysiwyg();
+    }, sig);
+    preview.addEventListener("keydown", (e) => {
+        const modifier = e.ctrlKey || e.metaKey;
+        const key = e.key.toLowerCase();
+        if (!modifier || e.altKey || (key !== "z" && key !== "y")) return;
+        e.preventDefault();
+        if (key === "y" || (key === "z" && e.shiftKey)) redo();
+        else undo();
     }, sig);
 
     /* a clicked task checkbox edits the DOM; fold it back too. We deliberately
@@ -660,23 +808,65 @@ export function createEditor(container, opts = {}) {
         }, sig);
     }
 
-    /* parkSent: drop a private-use sentinel into the LIVE dom at a caret
-     * edge, without disturbing the browser's own selection. Split the text
-     * node at the offset so the sentinel is truly BETWEEN characters. */
-    function parkSent(node, off, ch) {
-        const m = document.createTextNode(ch);
-        if (node.nodeType === Node.TEXT_NODE) {
-            if (off > 0 && off < node.length) {
-                const rest = node.splitText(off);
-                node.parentNode.insertBefore(m, rest);
-            } else if (off === 0) {
-                node.parentNode.insertBefore(m, node);
-            } else {
-                node.parentNode.insertBefore(m, node.nextSibling);
-            }
-        } else {
-            node.insertBefore(m, node.childNodes[off] || null);
+    /* placeSentinelInDom: drop a private-use sentinel into the LIVE dom at a
+     * caret/selection edge, splitting the text node so the marker sits truly
+     * BETWEEN characters (matching the rendered markdown offsets). */
+    function placeSentinelInDom(node, off, marker) {
+        if (node.nodeType !== Node.TEXT_NODE) {
+            node.insertBefore(marker, node.childNodes[off] || null);
+            return;
         }
+        if (off === 0) {
+            node.parentNode.insertBefore(marker, node);
+        } else if (off >= node.length) {
+            node.parentNode.insertBefore(marker, node.nextSibling);
+        } else {
+            const rest = node.splitText(off);
+            node.parentNode.insertBefore(marker, rest);
+        }
+    }
+
+    /* parkSelection: place the two private-use sentinels (\uE000 = selection
+     * start, \uE002 = selection end) into the LIVE dom, then fold to markdown
+     * and return it. domToMarkdown carries the sentinels through, so their md
+     * indices ARE the selection's source offsets — the bridge between DOM
+     * coordinates and markdown coordinates, which never share an offset space.
+
+     * WHY this isn't just two naive "split at each offset" calls: the start
+     * and end boundary of a Range can reference the SAME text node (the common
+     * "select a few words inside one paragraph" case). Splitting that node at
+     * the first offset truncates it, so the second boundary's offset — recorded
+     * against the ORIGINAL length — no longer points where it did, and both
+     * sentinels land at the selection START. The fix is to split at the HIGHER
+     * offset first, so the lower offset is still valid when we split for it. */
+    function parkSelection(range) {
+        const S = document.createTextNode("\uE000");
+        const E = document.createTextNode("\uE002");
+        const start = { node: range.startContainer, off: range.startOffset };
+        const end = { node: range.endContainer, off: range.endOffset };
+        if (start.node === end.node) {
+            // Same container — split at the higher offset first so the lower
+            // one stays valid. START lands before END in document order.
+            const a = Math.min(start.off, end.off);
+            const b = Math.max(start.off, end.off);
+            placeSentinelInDom(start.node, b, E);   // end first (higher offset)
+            placeSentinelInDom(start.node, a, S);   // then start
+        } else {
+            // Different containers — park the end first because the start split
+            // lives in a separate node and can't invalidate it.
+            placeSentinelInDom(end.node, end.off, E);
+            placeSentinelInDom(start.node, start.off, S);
+        }
+        return domToMarkdown(rootForMd());
+    }
+
+    /* parkSingleSentinel: a collapsed caret (no selected text) parks just the
+     * start marker at the caret and returns the folded markdown, so the wrap
+     * range collapses to [p, p) and formatText inserts markers with the caret
+     * sitting between them. */
+    function parkSingleSentinel(node, off) {
+        placeSentinelInDom(node, off, document.createTextNode("\uE000"));
+        return domToMarkdown(rootForMd());
     }
 
     /* wrapInline: bold / italic / strike / inline-code share this. Wraps the
@@ -691,8 +881,7 @@ export function createEditor(container, opts = {}) {
             const at = s + pre.length;
             return { text, s: at, e: at };
         }
-        const isWrapped = src.slice(Math.max(0, s - pre.length), s) === pre &&
-                          src.slice(e, e + post.length) === post;
+        const isWrapped = hasIndependentWrapper(src, s, e, pre, post);
         if (isWrapped) {
             const text = src.slice(0, s - pre.length) + sel + src.slice(e + post.length);
             return { text, s: s - pre.length, e: e - pre.length };
@@ -701,15 +890,70 @@ export function createEditor(container, opts = {}) {
         return { text, s, e: e + pre.length + post.length };
     }
 
+    function delimiterRun(src, index, step) {
+        const ch = src[index];
+        if (!ch) return 0;
+        let count = 0;
+        for (let i = index; i >= 0 && i < src.length && src[i] === ch; i += step) count++;
+        return count;
+    }
+
+    function hasIndependentWrapper(src, s, e, pre, post) {
+        if (pre !== post || !pre || pre[0] !== post[0]) {
+            return src.slice(Math.max(0, s - pre.length), s) === pre &&
+                src.slice(e, e + post.length) === post;
+        }
+        const width = pre.length;
+        if (src.slice(s - width, s) !== pre || src.slice(e, e + width) !== post) return false;
+        const before = delimiterRun(src, s - 1, -1);
+        const after = delimiterRun(src, e, 1);
+        // A single star is the italic layer of ***text***, while a pair is
+        // the bold layer. This keeps the three inline styles composable:
+        // toggling italic on bold text adds/removes only its own layer.
+        if (width === 1) return before % 2 === 1 && after % 2 === 1;
+        return before >= width && after >= width;
+    }
+
+    function collapsedInlineRange(src, caret, pre, post) {
+        const lineStart = src.lastIndexOf("\n", Math.max(0, caret - 1)) + 1;
+        const newline = src.indexOf("\n", caret);
+        const lineEnd = newline < 0 ? src.length : newline;
+        const line = src.slice(lineStart, lineEnd);
+        const prefixMatch = line.match(/^\s*(?:#{1,6}\s+|>\s+|(?:[-+*]|\d+[.)])\s+)/);
+        let start = lineStart + (prefixMatch ? prefixMatch[0].length : 0);
+        let end = lineEnd;
+        // Do not wrap indentation or a block marker; formatting the content of
+        // a list/heading keeps the markdown valid instead of producing
+        // `**- item**` or `**# heading**`.
+        while (end > start && /[ \t]/.test(src[end - 1])) end--;
+        const body = src.slice(start, end);
+        if (!body.trim()) return { s: caret, e: caret };
+        if (hasIndependentWrapper(src, start + pre.length, end - post.length, pre, post)) {
+            return { s: start + pre.length, e: end - post.length };
+        }
+        return { s: start, e: end };
+    }
+
     /* linePrefix: headings, quotes and lists are PREFIX markers. Toggle the
      * prefix on every line the selection touches (like wrapInline's toggle) —
      * handles multi-line selections by splitting on \n. */
+    function moveBlockPrefixOutsideInline(line, prefix) {
+        const wrapped = line.match(/^(\*{1,3}|~{2,})([\s\S]*?)\1$/);
+        if (!wrapped || !wrapped[2].startsWith(prefix)) return line;
+        return prefix + wrapped[1] + wrapped[2].slice(prefix.length) + wrapped[1];
+    }
+
     function linePrefix(text, s, e, prefix) {
         const ls = text.lastIndexOf("\n", Math.max(0, s - 1)) + 1;
-        const nl = text.indexOf("\n", e);
+        const selectionEnd = Math.max(s, e);
+        const nl = text.indexOf("\n", Math.max(ls, selectionEnd - 1));
         const le = nl < 0 ? text.length : nl;
         const out = text.slice(ls, le).split("\n")
-            .map(l => l.startsWith(prefix) ? l.slice(prefix.length) : prefix + l)
+            .map(l => {
+                if (l.startsWith(prefix)) return l.slice(prefix.length);
+                const moved = moveBlockPrefixOutsideInline(l, prefix);
+                return moved === l ? prefix + l : moved;
+            })
             .join("\n");
         return { text: text.slice(0, ls) + out + text.slice(le), s: ls, e: ls + out.length };
     }
@@ -721,10 +965,22 @@ export function createEditor(container, opts = {}) {
     function formatText(src, s, e, tool) {
         const sel = src.slice(s, e);
         switch (tool) {
-            case "bold":   return wrapInline(src, s, e, "**", "**");
-            case "italic": return wrapInline(src, s, e, "*", "*");
-            case "strike": return wrapInline(src, s, e, "~~", "~~");
-            case "code":   return wrapInline(src, s, e, "`", "`");
+            case "bold": {
+                if (s === e) ({ s, e } = collapsedInlineRange(src, s, "**", "**"));
+                return wrapInline(src, s, e, "**", "**");
+            }
+            case "italic": {
+                if (s === e) ({ s, e } = collapsedInlineRange(src, s, "*", "*"));
+                return wrapInline(src, s, e, "*", "*");
+            }
+            case "strike": {
+                if (s === e) ({ s, e } = collapsedInlineRange(src, s, "~~", "~~"));
+                return wrapInline(src, s, e, "~~", "~~");
+            }
+            case "code": {
+                if (s === e) ({ s, e } = collapsedInlineRange(src, s, "`", "`"));
+                return wrapInline(src, s, e, "`", "`");
+            }
             case "link": {
                 const url = prompt("Link URL", "https://");
                 if (!url) return null;
@@ -762,34 +1018,6 @@ export function createEditor(container, opts = {}) {
         return { text: src, s, e };
     }
 
-    /* restoreByContext: put the caret back after a source rewrite. capture a
-     * fingerprint (start of the caret text node + offset) BEFORE re-render;
-     * afterwards glue ALL the text nodes together, find the needle in the
-     * whole string, then convert that char offset back to (node, offset). A
-     * bold wrap SPLITS the text across the new <strong>, so hunting one text
-     * node would miss — the gluing exists for exactly that. */
-    function restoreByContext(container, ctx) {
-        if (!ctx) return;
-        const needle = ctx.text.slice(0, 28);
-        const parts = [];
-        const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-        let n;
-        while ((n = walker.nextNode())) parts.push({ n, t: n.data });
-        if (!parts.length) return;
-        const joined = parts.map(p => p.t).join("");
-        const i = joined.indexOf(needle);
-        if (i < 0) return;                 // page changed too hard — let it be
-        let pos = Math.min(i + ctx.off, joined.length - 1);
-        let acc = 0, k = 0;
-        while (k < parts.length && acc + parts[k].t.length <= pos) { acc += parts[k].t.length; k++; }
-        const node = parts[Math.min(k, parts.length - 1)].n;
-        const o = Math.min(pos - acc, node.data.length);
-        const range = document.createRange();
-        range.setStart(node, o); range.collapse(true);
-        const sel = window.getSelection();
-        sel.removeAllRanges(); sel.addRange(range);
-    }
-
     /* applyTool: the one shared entry point for every toolbar request, and
      * the backing of ed.command(). KNOWING WHERE THE EDIT MEANS is the hard
      * part: if the caret lives in the live preview we park sentinels at the
@@ -799,44 +1027,57 @@ export function createEditor(container, opts = {}) {
      * use selectionStart/End directly. */
     function applyTool(tool) {
         const caretInPreview = wysiwyg && preview.contains(document.activeElement);
-        let src, s, e, ctx = null;
+        let src, s, e, caretState = null;
         if (caretInPreview) {
             const sel = window.getSelection();
             if (!sel.rangeCount) return;
             const r = sel.getRangeAt(0);
             if (!rootForMd().contains(r.startContainer)) return;
-            if (sel.focusNode && sel.focusNode.nodeType === Node.TEXT_NODE) {
-                // grab a fingerprint BEFORE we nuke the dom re-rendering
-                ctx = { text: sel.focusNode.data.slice(0, 140), off: sel.focusOffset };
-            }
-            parkSent(r.startContainer, r.startOffset, "\uE000");
-            parkSent(r.endContainer, r.endOffset, "\uE002");
-            const md = domToMarkdown(rootForMd());
+            // capture the caret on the LIVE dom BEFORE we park sentinels or
+            // re-render; restored after with the same robust path the typing
+            // path uses, so the caret no longer drifts after a wrap.
+            caretState = saveCaretPath(rootForMd());
+            // Park sentinels at the selection edges in the live dom, then fold
+            // the DOM to markdown: the sentinel md indices are the wrap range.
+            // When the selection is COLLAPSED (plain caret, nothing selected)
+            // park a single sentinel so the range collapses to [p, p) and the
+            // wrap simply inserts markers with the caret parked between them.
+            const collapsed = r.collapsed ||
+                (r.startContainer === r.endContainer &&
+                 r.startContainer.nodeType === Node.TEXT_NODE &&
+                 r.startOffset === r.endOffset);
+            const md = collapsed
+                ? parkSingleSentinel(r.startContainer, r.startOffset)
+                : parkSelection(r);
             let a = md.indexOf("\uE000");
             let b = md.indexOf("\uE002");
             src = md.replace(/[\uE000\uE002]/g, "");
             if (a < 0) a = 0;
             if (b < 0) b = src.length;
-            if (a > b) { const t = a; a = b; b = t; }   // backwards selection
-            // a and b point AT the sentinel positions in `md`. The opening
-            // sentinel is where the selection starts, but the CLOSING one sits
-            // immediately AFTER it — so the real end in the stripped source is
-            // b - 1. Get this wrong and every wrap eats one extra character.
-            s = a;
-            e = Math.max(a, b - 1);
+            if (collapsed) {
+                // one sentinel → start === end === caret
+                s = a;
+                e = a;
+            } else {
+                if (a > b) { const t = a; a = b; b = t; }   // backwards selection
+                // a is the first selected char, b is one-past-the-last.
+                s = a;
+                e = b;
+                if (e < s) e = s;
+            }
         } else {
             src = editor.value;
             s = editor.selectionStart ?? 0;
             e = editor.selectionEnd ?? 0;
-            ctx = { text: src.slice(Math.max(0, s - 70), s + 70), off: 70 };
         }
         const out = formatText(src, s, e, tool);
         if (!out) return;   // user cancelled a prompt
+        noteEditorChange(out.text);
         editor.value = out.text;
         if (caretInPreview) {
             refresh();
             (preview.querySelector(".md") || preview).focus({ preventScroll: true });
-            restoreByContext(rootForMd(), ctx);
+            restoreCaretPath(rootForMd(), caretState);
         } else {
             editor.focus();
             // collapse the caret to the END of the formatted span: re-selecting
@@ -878,6 +1119,7 @@ export function createEditor(container, opts = {}) {
         if (!VIEWS.includes(v)) return ed;
         currentView = v;
         store.set("view", v);
+        syncTaskbar();
         applyView();
         return ed;
     };
@@ -900,12 +1142,18 @@ export function createEditor(container, opts = {}) {
         return ed;
     };
     ed.setSyncScroll = (on) => { ed.syncEnabled = !!on; return ed; };
-    ed.setSoftBreaks = (on) => {
+    ed.setSoftBreaks = (on, { persist = true } = {}) => {
         softBreaks = !!on;
+        syncTaskbar();
+        if (persist && typeof opts.onSoftBreaksChange === "function") {
+            try { opts.onSoftBreaksChange(softBreaks); } catch { /* host callback is advisory */ }
+        }
         refresh();
         return ed;
     };
     ed.getSoftBreaks = () => softBreaks;
+    ed.undo = () => { undo(); return ed; };
+    ed.redo = () => { redo(); return ed; };
     ed.command = (tool) => { applyTool(tool); return ed; };
     ed.onChange = (cb) => { onChangeCbs.push(cb); return () => onChangeCbs.splice(onChangeCbs.indexOf(cb), 1); };
     ed.onRender = (cb) => { onRenderCbs.push(cb); return () => onRenderCbs.splice(onRenderCbs.indexOf(cb), 1); };
@@ -916,13 +1164,20 @@ export function createEditor(container, opts = {}) {
                 let md = domToMarkdown(rootForMd());
                 if (md !== null && md !== undefined && md !== editor.value) {
                     md = md.replace(/\[((?:https?:\/\/|www\.)[^\s\]\\]+)\]\(\1(?:\s*"[^"]*")?\)/g, "$1");
+                    noteEditorChange(md);
                     editor.value = md;
                 }
             } catch (err) { /* fall through, keep last editor value */ }
         }
         return editor.value;
     };
-    ed.setMarkdown = (md) => { editor.value = md; refresh(); return ed; };
+    ed.setMarkdown = (md) => {
+        const next = String(md ?? "");
+        noteEditorChange(next);
+        editor.value = next;
+        refresh();
+        return ed;
+    };
     ed.getMarkdown = () => { ed.flush(); return editor.value; };
     ed.getTheme = () => container.dataset.theme || (readonly ? "green" : "green");
     ed.resize = () => { applySplit(); };
@@ -934,6 +1189,44 @@ export function createEditor(container, opts = {}) {
         container.replaceChildren();
         container.classList.remove("mdedit");
     };
+
+    function syncTaskbar() {
+        if (!viewControls) return;
+        viewControls.querySelectorAll("[data-view]").forEach((button) => {
+            const active = button.dataset.view === currentView;
+            button.classList.toggle("active", active);
+            button.setAttribute("aria-pressed", active ? "true" : "false");
+        });
+        viewControls.querySelectorAll("[data-soft-break]").forEach((button) => {
+            const active = (button.dataset.softBreak === "1") === softBreaks;
+            button.classList.toggle("active", active);
+            button.setAttribute("aria-pressed", active ? "true" : "false");
+        });
+        const historyRoot = historyControls || viewControls;
+        const undoButton = historyRoot?.querySelector('[data-history="undo"]');
+        const redoButton = historyRoot?.querySelector('[data-history="redo"]');
+        if (undoButton) undoButton.disabled = !historyPast.length;
+        if (redoButton) redoButton.disabled = !historyFuture.length;
+    }
+    if (viewControls) {
+        viewControls.addEventListener("click", (event) => {
+            const button = event.target.closest("button");
+            if (!button || !viewControls.contains(button)) return;
+            if (button.dataset.history === "undo") undo();
+            if (button.dataset.history === "redo") redo();
+            if (button.dataset.view) ed.setView(button.dataset.view);
+            if (button.dataset.softBreak) ed.setSoftBreaks(button.dataset.softBreak === "1");
+        }, sig);
+        syncTaskbar();
+    }
+    if (historyControls) {
+        historyControls.addEventListener("click", (event) => {
+            const button = event.target.closest("button");
+            if (!button) return;
+            if (button.dataset.history === "undo") undo();
+            if (button.dataset.history === "redo") redo();
+        }, sig);
+    }
 
     /* ---- boot ------------------------------------------------------ */
     // an object palette wins over anything stored; otherwise restore the

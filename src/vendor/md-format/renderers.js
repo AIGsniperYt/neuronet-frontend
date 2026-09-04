@@ -65,7 +65,11 @@ function flattenText(children) {
  * ========================================================================== */
 function renderHtml(tree, opts = {}) {
     if (tree.type === "document") {
-        return tree.children.map(c => renderHtml(c, opts)).join("\n");
+        return tree.children.map((c, i) => {
+            const gap = opts.softBreaks && i > 0 ? Math.max(0, (c.gapBefore || 0) - 1) : 0;
+            const spacer = gap ? Array.from({ length: gap }, () => '<div class="md-blank-line" data-md-blank-line="1"><br></div>').join("\n") + "\n" : "";
+            return spacer + renderHtml(c, opts);
+        }).join("\n");
     }
     switch (tree.type) {
 
