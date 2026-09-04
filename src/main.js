@@ -66,7 +66,9 @@ const tools = {
       linkAnalysisToQuote,
       unlinkAnalysisFromQuote,
       getFormattedQuote,
-      resolveQuoteInSource
+      resolveQuoteInSource,
+      recordActivity: (details = {}) => logActivity(details.subject || currentSubject, "analysis", details),
+      toast
     }, context)
   },
 
@@ -788,10 +790,13 @@ function openTool(toolName, context = {}) {
 const ACTIVITY_KEY = "nn-last-activity";
 const SESSIONS_KEY = "nn-study-sessions";
 
-function logActivity(subject, toolName) {
+function logActivity(subject, toolName, details = {}) {
   try {
     localStorage.setItem(ACTIVITY_KEY, JSON.stringify({
-      subject, tool: toolName, timestamp: Date.now()
+      subject, tool: toolName, timestamp: Date.now(),
+      sourceId: details.sourceId || "",
+      sourceTitle: details.sourceTitle || "",
+      sourceMode: details.sourceMode || ""
     }));
     const sessions = JSON.parse(localStorage.getItem(SESSIONS_KEY) || "[]");
     const today = new Date().toISOString().slice(0, 10);
@@ -825,15 +830,25 @@ async function renderQuickActions() {
   const studyBtn = document.getElementById("dashStudyNow");
   const studySub = document.getElementById("dashStudySub");
 
-  if (last && last.subject) {
+  // Analysis sources can be created before they have a subject. Keep those
+  // sessions resumable by their source id instead of treating them as empty.
+  const canResume = last && (last.subject || (last.tool === "analysis" && last.sourceId));
+  if (canResume) {
     resumeBtn.disabled = false;
     const toolLabel = last.tool ? last.tool.charAt(0).toUpperCase() + last.tool.slice(1) : "Analysis";
-    resumeSub.textContent = `${last.subject} \u2192 ${toolLabel}`;
+    const subjectLabel = last.subject || "Unfiled source";
+    resumeSub.textContent = last.sourceTitle
+      ? `${subjectLabel} \u2192 ${last.sourceTitle}`
+      : `${subjectLabel} \u2192 ${toolLabel}`;
     resumeBtn.onclick = () => {
       if (last.tool === "memory" || last.tool === "mindmap" || last.tool === "tracker") {
         loadTool(last.tool, { subject: last.subject });
       } else {
-        enterSubjectWorkspace(last.subject);
+        loadTool("analysis", {
+          subject: last.subject,
+          sourceId: last.sourceId || "",
+          sourceMode: last.sourceMode || "reader"
+        });
       }
     };
   } else {
@@ -865,8 +880,42 @@ async function renderQuickActions() {
 
   const newSourceBtn = document.getElementById("dashNewSource");
   if (newSourceBtn) {
-    newSourceBtn.onclick = () => {
-      loadTool("analysis", { capture: true });
+    let creatingSource = false;
+    // The launchpad button must always be actionable after the dashboard has
+    // rendered. Use an internal lock for duplicate clicks instead of leaving
+    // the actual control stuck disabled if persistence or navigation fails.
+    newSourceBtn.disabled = false;
+    newSourceBtn.onclick = async () => {
+      if (creatingSource) return;
+      creatingSource = true;
+      const id = crypto.randomUUID();
+      try {
+        // Empty launchpad drafts are buffers, not saved sources. Remove only
+        // old records produced by the previous implementation, then let the
+        // editor own the new draft until the user presses Save.
+        const oldDrafts = (await getAllNodes()).filter((node) => (
+          isSourceNode(node) &&
+          !String(node.subject || "").trim() &&
+          String(node.title || "").trim().toLowerCase() === "untitled source" &&
+          !String(node.contentMarkdown || node.content || "").trim() &&
+          !String(node.contentText || "").trim() &&
+          (!node.contentHtml || node.contentHtml === "<p><br></p>")
+        ));
+        for (const draft of oldDrafts) await removeNodeEverywhere(draft.id);
+
+        loadTool("analysis", {
+          subject: "",
+          sourceId: id,
+          sourceMode: "editor",
+          newSource: true
+        });
+      } catch (error) {
+        console.error("Failed to create source:", error);
+        toast("Could not create a new source");
+      } finally {
+        creatingSource = false;
+        newSourceBtn.disabled = false;
+      }
     };
   }
 

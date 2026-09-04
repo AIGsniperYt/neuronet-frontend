@@ -202,7 +202,14 @@ html, body, * {
   grid-template-rows: auto 1fr;
   gap: 12px;
   height: 100%;
+  width: 100%;
+  min-height: 0;
   overflow: hidden;
+}
+
+.analysis-study .study-head {
+  padding: 14px 18px;
+  background: linear-gradient(145deg, rgba(18, 48, 35, 0.94), rgba(9, 27, 20, 0.9));
 }
 
 .study-top {
@@ -211,6 +218,15 @@ html, body, * {
   align-items: center;
   gap: 16px;
   flex-wrap: wrap;
+}
+
+.study-top > div:first-child {
+  min-width: 0;
+}
+
+.study-top h2 {
+  font-size: clamp(1.15rem, 2vw, 1.45rem);
+  letter-spacing: -0.025em;
 }
 
 .header-controls {
@@ -232,6 +248,11 @@ html, body, * {
   gap: 6px;
 }
 
+.header-controls .inline-select,
+.header-controls .btn {
+  min-height: 34px;
+}
+
 .layer-select {
   min-width: 80px;
 }
@@ -247,6 +268,8 @@ html, body, * {
   gap: 12px;
   position: relative;
   min-height: 0;
+  height: 100%;
+  width: 100%;
   overflow: hidden;
   transition: grid-template-columns 0.3s ease, gap 0.3s ease;
 }
@@ -275,6 +298,7 @@ html, body, * {
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+  height: 100%;
   overflow: hidden;
   user-select: text !important;
   -webkit-user-select: text !important;
@@ -285,16 +309,28 @@ html, body, * {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  height: 100%;
   position: relative;
   padding: 16px !important;
   user-select: text !important;
   -webkit-user-select: text !important;
   overflow: hidden;
+  background: linear-gradient(145deg, rgba(15, 42, 30, 0.94), rgba(7, 22, 16, 0.94));
+  border-color: rgba(145, 255, 213, 0.1);
 }
 
 .study-column {
   user-select: text !important;
   -webkit-user-select: text !important;
+}
+
+/* .study-column is also used by the right-hand grid column. Keep the source
+ * column's deliberate vertical flex chain from being overwritten by that
+ * shared grid rule. */
+.study-column.main-surface {
+  display: flex;
+  flex-direction: column;
+  align-content: normal;
 }
 
 
@@ -309,49 +345,6 @@ html, body, * {
   display: inline-block;
 }
 
-.view-seg {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-bottom: 10px;
-}
-
-.editor-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 10px;
-}
-.editor-toolbar .view-seg {
-  margin-bottom: 0;
-}
-.editor-toolbar #softBreakSeg button {
-  font-size: 0.7rem;
-  padding: 3px 10px;
-  opacity: 0.85;
-}
-.editor-toolbar #softBreakSeg button.active {
-  opacity: 1;
-}
-
-.view-seg button {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: rgba(230, 255, 245, 0.75);
-  border-radius: 999px;
-  padding: 4px 12px;
-  font-size: 0.75rem;
-  font-family: inherit;
-  cursor: pointer;
-}
-
-.view-seg button:hover {
-  border-color: rgba(44, 255, 179, 0.3);
-  color: #e6fff5;
-}
-
 .view-seg button.active {
   background: rgba(44, 255, 179, 0.18);
   border-color: rgba(44, 255, 179, 0.5);
@@ -359,8 +352,9 @@ html, body, * {
 }
 
 #sourceEditor {
-  flex: 1;
-  min-height: 160px;
+  flex: 1 1 0;
+  min-height: 0;
+  height: auto;
   padding: 0;
   overflow: hidden;
   display: flex;
@@ -368,10 +362,33 @@ html, body, * {
   background: rgba(5, 18, 13, 0.85);
   border-radius: 8px;
   box-shadow: none;
+  min-width: 0;
 }
 
-#sourceEditor .mdedit {
-  flex: 1;
+#sourceEditor.mdedit {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* Preserve the full-height chain when this injected tool is nested inside
+ * Neuronet's flex layout. Each intermediate must be allowed to shrink so the
+ * editor receives the remaining row instead of resolving to content height. */
+#studyView,
+#studyView > .study-grid,
+#studyView .main-surface,
+#studyView .source-panel,
+#studyView .reader-wrap,
+#editorWrapper,
+#sourceForm,
+#sourceEditor,
+#sourceEditor .mdedit,
+#sourceEditor .mdedit-cols,
+#sourceEditor .mdedit-pane,
+#sourceEditor .mdedit-scroll {
+  min-height: 0;
 }
 
 /* the editor is the field that replaces the reader surface: give the inner
@@ -379,10 +396,31 @@ html, body, * {
  * fill the pane, so it reads as the editing surface instead of a small well. */
 #sourceEditor .mdedit-scroll {
   background: var(--md-bg, rgba(5, 18, 13, 0.85));
-  padding: 8px 12px;
+  padding: 10px 12px 32px;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 #sourceEditor .mdedit-scroll.raw {
   padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+#sourceEditor .mdedit-scroll .md {
+  width: 100%;
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.62;
+}
+
+#sourceEditor .mdedit-scroll .md > p:first-child {
+  margin-top: 0;
+}
+
+#sourceEditor .mdedit-editor {
+  padding: 12px 14px 32px;
+  background: rgba(5, 18, 13, 0.72);
 }
 
 /* deliberate, non-jumpy focus: accent ring on the field, no browser outline
@@ -418,6 +456,7 @@ html, body, * {
   display: flex;
   flex-direction: column;
   flex: 1;
+  height: 100%;
   min-height: 0;
   gap: 6px;
   user-select: text !important;
@@ -716,10 +755,37 @@ html, body, * {
   min-height: 0;
 }
 
+#editorWrapper,
+#sourceForm {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+#editorWrapper {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
+}
+
+#sourceForm {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  align-self: stretch;
+  overflow: hidden;
+}
+
 .source-fields {
   display: grid;
-  grid-template-columns: 1.4fr 1fr;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1.45fr) minmax(160px, 0.8fr);
+  gap: 8px;
+  align-items: end;
 }
 
 .source-field-main,
@@ -737,6 +803,82 @@ html, body, * {
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: rgba(230, 255, 245, 0.5);
+}
+
+.source-field-main .inline-input {
+  min-height: 48px;
+  padding: 6px 2px;
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  border: 0;
+  border-bottom: 1px solid rgba(145, 255, 213, 0.18);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.source-field-main .inline-input:hover {
+  border-bottom-color: rgba(145, 255, 213, 0.34);
+}
+
+.source-field-main .inline-input:focus {
+  border-bottom-color: rgba(44, 255, 179, 0.78);
+  box-shadow: 0 2px 0 rgba(44, 255, 179, 0.16);
+}
+
+.source-field:not(.source-field-main) .inline-input {
+  min-height: 40px;
+  border-radius: 10px;
+  border-color: rgba(145, 255, 213, 0.1);
+  background: rgba(5, 18, 13, 0.5);
+  color: rgba(230, 255, 245, 0.86);
+}
+
+.source-field:not(.source-field-main) .inline-input:focus {
+  border-color: rgba(44, 255, 179, 0.5);
+  background: rgba(5, 18, 13, 0.72);
+}
+
+.source-organization {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.source-organization summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 36px;
+  padding: 7px 10px;
+  color: rgba(230, 255, 245, 0.78);
+  font-size: 0.76rem;
+  font-weight: 650;
+  cursor: pointer;
+  list-style: none;
+}
+
+.source-organization summary::-webkit-details-marker { display: none; }
+.source-organization summary::after {
+  content: "＋";
+  color: rgba(44, 255, 179, 0.75);
+  font-size: 1rem;
+  line-height: 1;
+}
+.source-organization[open] summary::after { content: "−"; }
+
+.source-organization-hint {
+  margin-left: auto;
+  color: rgba(230, 255, 245, 0.38);
+  font-size: 0.68rem;
+  font-weight: 500;
+}
+
+.source-organization .source-path {
+  padding: 0 10px 10px;
 }
 
 .source-path-row {
@@ -966,7 +1108,7 @@ button.analysis-quote-jump.active-quote,
   .subject-card { min-width: 0; }
 }
 
-@media (max-width: 700px), (pointer: coarse) and (hover: none) {
+@media (max-width: 700px) {
   .analysis-shell {
     height: 100%;
     overflow-x: hidden;
@@ -974,24 +1116,24 @@ button.analysis-quote-jump.active-quote,
     -webkit-overflow-scrolling: touch;
   }
   .analysis-study {
-    height: auto;
-    min-height: 100%;
-    overflow: visible;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
   }
   .study-grid,
   .study-grid.editor-expanded {
     min-height: 0;
-    overflow: visible;
+    overflow: hidden;
   }
   .main-surface,
   .source-panel {
-    min-height: auto;
-    overflow: visible;
+    min-height: 0;
+    overflow: hidden;
   }
   #sourceEditor {
-    flex: 0 0 auto;
-    height: clamp(260px, 52dvh, 460px);
-    min-height: 260px;
+    flex: 1 1 0;
+    height: auto;
+    min-height: 0;
   }
   .reader-surface {
     max-height: min(60dvh, 520px);
@@ -1051,7 +1193,7 @@ button.analysis-quote-jump.active-quote,
             <button id="saveSourceBtn" class="btn primary save-source-edit-only" type="button">Save</button>
             <button id="cancelEditSourceBtn" class="btn cancel-source-edit-only" type="button">Cancel</button>
             <button id="deleteSourceBtn" class="btn" type="button" title="Delete this source">Delete</button>
-            <button id="toggleSourceModeBtn" class="btn" type="button">Edit Source</button>
+            <button id="toggleSourceModeBtn" class="btn" type="button">View Reader</button>
             <button id="backToLaunchpad" class="btn" type="button">Back</button>
           </div>
         </div>
@@ -1068,23 +1210,12 @@ button.analysis-quote-jump.active-quote,
             </div>
 
             <div id="editorWrapper" class="source-view hidden">
-              <div class="editor-toolbar">
-                <div id="editorViewSeg" class="view-seg">
-                  <button type="button" class="active" data-view="preview" title="Edit as a live preview">Write</button>
-                  <button type="button" data-view="split" title="Markdown and preview side by side">Split</button>
-                  <button type="button" data-view="md" title="Raw markdown source">Source</button>
-                </div>
-                <div id="softBreakSeg" class="view-seg" title="Line breaks in this document. 'Word-style' treats a single Enter as a new line (like a normal editor); 'Markdown' follows strict markdown rules (a single newline continues the same line, use a blank line to break). Your choice is saved per document and also becomes the default for new documents.">
-                  <button type="button" data-soft-break="1">Word-style line breaks</button>
-                  <button type="button" data-soft-break="0">Markdown</button>
-                </div>
-              </div>
               <form id="sourceForm" class="form-grid">
                 <input type="hidden" id="sourceId" />
                 <div class="source-fields">
                   <label class="source-field-main">
                     <span class="source-field-label">Title</span>
-                    <input id="sourceTitle" class="inline-input" type="text" placeholder="Source title" maxlength="120" required />
+                    <input id="sourceTitle" class="inline-input" type="text" placeholder="Source title (optional)" maxlength="120" />
                   </label>
                   <label class="source-field">
                     <span class="source-field-label">Subject</span>
@@ -1092,16 +1223,22 @@ button.analysis-quote-jump.active-quote,
                     <datalist id="sourceSubjectList"></datalist>
                   </label>
                 </div>
-                <label class="source-path">
-                  <span class="source-field-label">Hierarchy</span>
-                  <span class="source-path-row">
-                    <input id="sourceLevel1" class="inline-input" type="text" placeholder="Layer 1 (optional)" maxlength="80" />
-                    <span class="source-path-sep" aria-hidden="true">/</span>
-                    <input id="sourceLevel2" class="inline-input" type="text" placeholder="Layer 2 (optional)" maxlength="80" />
-                    <span class="source-path-sep" aria-hidden="true">/</span>
-                    <input id="sourceLevel3" class="inline-input" type="text" placeholder="Layer 3 (optional)" maxlength="80" />
-                  </span>
-                </label>
+                <details class="source-organization">
+                  <summary>
+                    <span>Organization</span>
+                    <span class="source-organization-hint">Optional hierarchy</span>
+                  </summary>
+                  <label class="source-path">
+                    <span class="source-field-label">Hierarchy</span>
+                    <span class="source-path-row">
+                      <input id="sourceLevel1" class="inline-input" type="text" placeholder="Layer 1" maxlength="80" />
+                      <span class="source-path-sep" aria-hidden="true">/</span>
+                      <input id="sourceLevel2" class="inline-input" type="text" placeholder="Layer 2" maxlength="80" />
+                      <span class="source-path-sep" aria-hidden="true">/</span>
+                      <input id="sourceLevel3" class="inline-input" type="text" placeholder="Layer 3" maxlength="80" />
+                    </span>
+                  </label>
+                </details>
                 <div id="sourceEditor" class="source-editor"></div>
               </form>
             </div>

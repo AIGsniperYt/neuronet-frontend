@@ -31,12 +31,17 @@ export async function initAnalysisToolV2(deps, context = {}) {
     linkAnalysisToQuote,
     unlinkAnalysisFromQuote,
     getFormattedQuote,
-    resolveQuoteInSource
+    resolveQuoteInSource,
+    recordActivity,
+    toast
   } = deps;
 
   let textMap = null;
 
   const { subject: contextSubject, nodeId: contextNodeId } = context;
+  const draftSourceId = context.newSource
+    ? (context.sourceId || crypto.randomUUID())
+    : "";
 
   if (typeof window.__neuronetAnalysisCleanup === "function") {
     window.__neuronetAnalysisCleanup();
@@ -65,8 +70,6 @@ export async function initAnalysisToolV2(deps, context = {}) {
   const sourceLevel2Input = document.getElementById("sourceLevel2");
   const sourceLevel3Input = document.getElementById("sourceLevel3");
   const sourceEditor = document.getElementById("sourceEditor");
-  const editorViewSeg = document.getElementById("editorViewSeg");
-  const softBreakSeg = document.getElementById("softBreakSeg");
 
   // Soft line breaks: the library is markdown-first (softBreaks OFF by
   // default). Neuronet opts IN by default so the editor behaves like a regular
@@ -83,22 +86,11 @@ export async function initAnalysisToolV2(deps, context = {}) {
     if (source && typeof source.meta?.softBreaks === "boolean") return source.meta.softBreaks;
     return getSoftBreaksDefault();
   }
-  function syncSoftBreakUI(on) {
-    if (!softBreakSeg) return;
-    softBreakSeg.querySelectorAll("button").forEach((b) => {
-      b.classList.toggle("active", (b.dataset.softBreak === "1") === on);
-    });
-  }
-  function applySoftBreaks(on, { persistDefault = true } = {}) {
-    if (typeof mdEditor.setSoftBreaks === "function") mdEditor.setSoftBreaks(on);
-    if (persistDefault) setSoftBreaksDefault(on);
-    syncSoftBreakUI(on);
-  }
-
   const mdEditor = createEditor(sourceEditor, {
     view: "preview",
     storage: false,
-    softBreaks: getSoftBreaksDefault()
+    softBreaks: getSoftBreaksDefault(),
+    onSoftBreaksChange: setSoftBreaksDefault
   });
   const newSourceBtn = document.getElementById("newSourceBtn");
   const studyGrid = document.querySelector(".study-grid");
@@ -167,13 +159,17 @@ function enforceUserSelect() {
     analysisNodes: [],
     selectedSubject: "",
     view: "launchpad",
-    selectedSourceId: "",
+    selectedSourceId: context.newSource ? "" : (context.sourceId || ""),
+    draftSourceId,
     selectedRange: null,
     subjectEditMode: false,
     analysisEditMode: false,
     quoteEditMode: false, // NEW: for editing quotes
     wasInStudy: false,
-    viewMode: "reader",
+    // Source editing is the primary workspace. The rendered reader remains
+    // available through the explicit "View Reader" toggle.
+    viewMode: context.sourceMode === "reader" ? "reader" : "editor",
+    isCreatingSource: Boolean(context.newSource),
     focusedNodeId: null,
     /** When set, only this "start-end" highlight is active for the focused analysis (multi-quote UX). */
     focusedRangeKey: null,
@@ -182,6 +178,19 @@ function enforceUserSelect() {
     analysisSessionCreatedQuoteIds: [],
     lastLayer1Value: null
   };
+
+  function rememberWorkspace() {
+    if (typeof recordActivity !== "function") return;
+    // A blank New draft is not resumable and must not erase the last saved
+    // source from the dashboard's Resume action.
+    if (state.isCreatingSource) return;
+    recordActivity({
+      subject: state.selectedSubject,
+      sourceId: state.selectedSourceId,
+      sourceTitle: getSourceById(state.selectedSourceId)?.title || "",
+      sourceMode: state.viewMode
+    });
+  }
 
   function rebuildTextMap(root) {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -197,8 +206,10 @@ function enforceUserSelect() {
     textMap = map;
   }
 
-  // Handle context subject from global launchpad
-  if (contextSubject) {
+  // A source can be intentionally unfiled. Enter the workspace when the
+  // caller supplies either a subject or a concrete source, rather than
+  // treating an empty subject as a reason to return to the launchpad.
+  if (contextSubject || context.sourceId || context.newSource) {
     state.selectedSubject = contextSubject;
     state.view = "study";
   }
@@ -627,7 +638,7 @@ function htmlToPlainText(html) {
     }
 
     if (toggleSourceModeBtn) {
-      toggleSourceModeBtn.textContent = isEditor ? "View Source" : "Edit Source";
+      toggleSourceModeBtn.textContent = isEditor ? "View Reader" : "Edit Source";
     }
 
     if (studyGrid) {
@@ -645,6 +656,7 @@ function htmlToPlainText(html) {
     if (!isEditor) {
       hideQuoteButton();
     }
+    rememberWorkspace();
   }
 
   function showQuoteButton(range) {
@@ -1887,6 +1899,7 @@ function htmlToPlainText(html) {
   }
 
   function hydrateSourceForm(source) {
+    state.isCreatingSource = false;
     const path = source?.meta?.hierarchyPath || [source?.subject || "", ...(source?.section ? source.section.split(" > ") : [])];
 
     sourceIdInput.value = source?.id || "";
@@ -1896,15 +1909,15 @@ function htmlToPlainText(html) {
     sourceLevel2Input.value = path[2] || "";
     sourceLevel3Input.value = path[3] || "";
     // per-document line-break preference (falls back to the account default)
-    applySoftBreaks(sourceSoftBreaks(source), { persistDefault: false });
+    mdEditor.setSoftBreaks(sourceSoftBreaks(source), { persist: false });
     mdEditor.setMarkdown(sourceMarkdown(source));
   }
 
   function resetSourceForm() {
     sourceForm.reset();
-    sourceIdInput.value = "";
+    sourceIdInput.value = state.isCreatingSource ? state.draftSourceId : "";
     sourceSubjectInput.value = state.selectedSubject;
-    applySoftBreaks(getSoftBreaksDefault(), { persistDefault: false });
+    mdEditor.setSoftBreaks(getSoftBreaksDefault(), { persist: false });
     mdEditor.setMarkdown("");
   }
 
@@ -2399,10 +2412,11 @@ function htmlToPlainText(html) {
         state.selectedSubject = card.dataset.subject || "";
         state.view = "study";
         state.selectedSourceId = "";
-        // Entering from launchpad must not restore a stale editor session:
-        // an empty subject opens a fresh blank editor, otherwise show the reader.
-        const sourcesInSubject = state.sources.filter((s) => String(s.subject || "") === state.selectedSubject);
-        state.viewMode = sourcesInSubject.length ? "reader" : "editor";
+        state.isCreatingSource = false;
+        // Entering from launchpad always starts in the WYSIWYG source editor.
+        // This avoids restoring a stale reader/editor choice from a previous
+        // subject while keeping the reader one click away.
+        state.viewMode = "editor";
         resetSourceForm();
         resetAnalysisForm();
         renderState();
@@ -2412,6 +2426,30 @@ function htmlToPlainText(html) {
 
   function renderSources() {
     const sources = getSourcesForSelectedSubject();
+
+    if (state.isCreatingSource) {
+      layer1Select.style.display = "none";
+      layer2Select.style.display = "none";
+      layer3Select.style.display = "none";
+      // Keep existing files reachable while the new source is still a
+      // transient buffer. The blank option keeps the current draft selected.
+      const otherSources = state.sources
+        .slice()
+        .sort((a, b) => String(a?.title || "").localeCompare(String(b?.title || "")));
+      sourceSelect.style.display = otherSources.length ? "inline-block" : "none";
+      sourceSelect.innerHTML = [
+        `<option value="">New source (unsaved)</option>`,
+        ...otherSources.map((source) => {
+          const subject = source.subject ? `${source.subject} — ` : "";
+          return `<option value="${escapeHtml(source.id)}">${escapeHtml(subject + (source.title || "Untitled source"))}</option>`;
+        })
+      ].join("");
+      sourceSelect.value = "";
+      analysisReader.innerHTML = "";
+      analysisNodeList.innerHTML = `<div class="empty-note">New source — save it to begin analysing.</div>`;
+      deleteSourceBtn.disabled = true;
+      return;
+    }
 
     if (!sources.length) {
       layer1Select.innerHTML = `<option value="">No sources</option>`;
@@ -2895,6 +2933,8 @@ const updateLayerSelection = () => {
       state.selectedSubject = card.dataset.subject || "";
       state.view = "study";
       state.selectedSourceId = "";
+      state.isCreatingSource = false;
+      state.viewMode = "editor";
       resetSourceForm();
       resetAnalysisForm();
       renderState();
@@ -2906,6 +2946,7 @@ const updateLayerSelection = () => {
     backToLaunchpad.addEventListener("click", async () => {
       state.selectedSubject = "";
       state.selectedSourceId = "";
+      state.isCreatingSource = false;
       state.viewMode = "reader";
       state.wasInStudy = false;
       state.view = "launchpad";
@@ -2944,13 +2985,16 @@ const updateLayerSelection = () => {
       if (!selectedId) return;
 
       state.selectedSourceId = selectedId;
+      state.isCreatingSource = false;
+      const selectedSource = getSourceById(selectedId);
+      if (selectedSource) state.selectedSubject = selectedSource.subject || "";
+      rememberWorkspace();
       state.focusedNodeId = null;
       state.focusedRangeKey = null;
 
       if (state.viewMode === "editor") {
-        const source = getSourceById(selectedId);
-        if (source) {
-          hydrateSourceForm(source);
+        if (selectedSource) {
+          hydrateSourceForm(selectedSource);
         }
       } else {
         renderReaderAndNodes();
@@ -2994,25 +3038,18 @@ const updateLayerSelection = () => {
     });
   }
 
-
+  let sourceSaveInProgress = false;
   if (sourceForm) {
     sourceForm.addEventListener("submit", async (event) => {
       event.preventDefault();
+      if (sourceSaveInProgress) return;
+      sourceSaveInProgress = true;
+      if (saveSourceBtn) saveSourceBtn.disabled = true;
+      let sourcePersisted = false;
 
-      const title = (sourceTitleInput.value || "").trim();
-      if (!title) {
-        sourceTitleInput.classList.add("input-invalid");
-        sourceTitleInput.setAttribute("aria-invalid", "true");
-        sourceTitleInput.focus();
-        if (!sourceForm.querySelector(".title-error")) {
-          const err = document.createElement("span");
-          err.className = "title-error form-error";
-          err.textContent = "Add a title to save this source.";
-          sourceTitleInput.insertAdjacentElement("afterend", err);
-        }
-        return;
-      }
+      try {
 
+      const enteredTitle = (sourceTitleInput.value || "").trim();
       const subject = (sourceSubjectInput.value || "").trim();
 
       const path = normalizeHierarchyPath([
@@ -3036,6 +3073,17 @@ const updateLayerSelection = () => {
           if (!root || !root.textContent || !root.textContent.trim()) return "";
           return domToMarkdown(root) || "";
         })();
+      const hasOrganization = [subject, sourceLevel1Input?.value, sourceLevel2Input?.value, sourceLevel3Input?.value]
+        .some((value) => String(value || "").trim());
+      if (!enteredTitle && !contentMarkdown.trim() && !hasOrganization) {
+        if (typeof toast === "function") toast("Nothing to save yet");
+        return;
+      }
+      // Writing can start before naming or filing the source. Give a non-empty
+      // source a stable fallback title, while keeping a completely untouched
+      // draft out of storage.
+      const title = enteredTitle || "Untitled source";
+      if (!enteredTitle) sourceTitleInput.value = title;
       const contentAst = parse(contentMarkdown);
       // render with the same soft-break mode the user chose, so the saved
       // html and the reader match the editor.
@@ -3073,15 +3121,26 @@ const updateLayerSelection = () => {
         createdAt: existing?.createdAt || now,
         updatedAt: now
       });
+      sourcePersisted = true;
+      if (typeof toast === "function") toast("Source saved");
 
       // Enter the saved source's subject workspace (or unfiled if subject is empty).
       state.selectedSubject = subject;
 
       state.selectedSourceId = sourceId;
-      resetSourceForm();
+      state.isCreatingSource = false;
       setSourceViewMode("reader");
       await refreshData();
+      rememberWorkspace();
+      resetSourceForm();
       await backupLocalNodesToCloud();
+      } catch (error) {
+        console.error("Failed to save source:", error);
+        if (typeof toast === "function") toast(sourcePersisted ? "Source saved locally; refresh failed" : "Source could not be saved");
+      } finally {
+        sourceSaveInProgress = false;
+        if (saveSourceBtn) saveSourceBtn.disabled = false;
+      }
     });
 
     sourceTitleInput.addEventListener("input", () => {
@@ -3102,6 +3161,7 @@ function selectSource(sourceId) {
     state.focusedRangeKey = null;
   }
   state.selectedSourceId = sourceId;
+  rememberWorkspace();
 
   if (sourceSelect) sourceSelect.value = sourceId;
 
@@ -3123,14 +3183,21 @@ if (saveSourceBtn) {
 
   if (newSourceBtn) {
     newSourceBtn.addEventListener("click", () => {
+      state.isCreatingSource = true;
       state.selectedSourceId = "";
+      state.draftSourceId = crypto.randomUUID();
+      state.focusedNodeId = null;
+      state.focusedRangeKey = null;
       resetSourceForm();
       setSourceViewMode("editor");
+      renderState();
     });
   }
 
   if (cancelEditSourceBtn) {
     cancelEditSourceBtn.addEventListener("click", () => {
+      state.isCreatingSource = false;
+      state.draftSourceId = "";
       resetSourceForm();
       setSourceViewMode("reader");
     });
@@ -3148,26 +3215,6 @@ if (saveSourceBtn) {
           resetSourceForm();
         }
       }
-    });
-  }
-
-  if (editorViewSeg) {
-    editorViewSeg.querySelectorAll("button").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const v = btn.dataset.view;
-        if (!v) return;
-        mdEditor.setView(v);
-        editorViewSeg.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
-      });
-    });
-  }
-
-  if (softBreakSeg) {
-    softBreakSeg.querySelectorAll("button").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const on = btn.dataset.softBreak === "1";
-        applySoftBreaks(on, { persistDefault: true });
-      });
     });
   }
 
