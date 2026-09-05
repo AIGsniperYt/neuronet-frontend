@@ -828,7 +828,9 @@ export function initTrackerTool(deps, context = {}) {
     const actionsCell = document.createElement("td");
     actionsCell.className = "col-actions";
     actionsCell.innerHTML =
-      (hasNote ? `<button class="row-btn note-toggle ${noteOpen ? "open" : ""}" data-act="note" title="${noteOpen ? "Collapse" : "Expand"} note"><i class="fa-solid fa-circle-info" aria-hidden="true"></i></button>` : "") +
+      (hasNote ? `<button class="row-btn note-toggle ${noteOpen ? "open" : ""}" data-act="note" title="${noteOpen ? "Collapse" : "Expand"} note">` +
+        `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 15.7v-5.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="7.1" r="1.3" fill="currentColor"/></svg>` +
+        `</button>` : "") +
       `<button class="row-btn" data-act="edit" title="Edit">&#9998;</button>` +
       `<button class="row-btn danger" data-act="del" title="Delete">&#10005;</button>`;
     if (hasNote) {
