@@ -66,6 +66,7 @@ export function initTrackerTool(deps, context = {}) {
   let boardsBySubject = {}; // subject -> examBoard (from subject nodes)
   let coursesBySubject = {}; // subject -> linked official course { board, code, title, qual }
   let autoFilled = false; // boundary field value was populated from the cache
+  let chipTokens = new Set(); // toggled quick-filter chips — level + board coexist
   let focusedSubject = context.subject || null;
   let editingId = null;
   let slotSeq = 0;
@@ -334,7 +335,8 @@ export function initTrackerTool(deps, context = {}) {
     if (!subject) { flash("Pick a subject first.", false); return; }
     el.coursePicker.hidden = false;
     if (el.courseFilter) el.courseFilter.value = "";
-    renderCourseList("");
+    chipTokens.clear();
+    renderCourseList();
   }
 
   // Search strengthening: every whitespace token must match (order-independent),
@@ -368,47 +370,55 @@ export function initTrackerTool(deps, context = {}) {
     return set;
   }
 
-  function courseMatches(c, raw) {
-    const norm = normalizeSearch(raw);
-    if (!norm) return true;
-    const tokens = norm.split(/\s+/).filter(Boolean);
+  // Match a course only if every token is present somewhere in it (AND, order
+  // independent). Level and board tokens coexist — "alevel" + "aqa" both apply.
+  function matchesTokens(c, tokens) {
+    if (tokens.length === 0) return true;
     const hay = courseTerms(c);
     return tokens.every((tok) => [...hay].some((h) => h.includes(tok)));
   }
 
-  // Same tokenization the filter uses, so a token like "gcse", "alevel" or
-  // "a level" lights up the matching quick-filter pill too.
-  function activeChipData(filter) {
-    const norm = normalizeSearch(filter);
-    if (!norm) return new Set([""]);
-    const tokens = norm.split(/\s+/).filter(Boolean);
-    const lit = new Set();
-    for (const tok of tokens) {
-      if (tok === "alevel") lit.add("alevel");
-      else if (tok === "as") lit.add("as");
-      else if (["aqa", "ocr", "pearson", "edexcel"].includes(tok)) lit.add(tok === "edexcel" ? "pearson" : tok);
-      else if (["gcse", "alevel"].some((q) => tok.includes(q))) lit.add(q === "gcse" ? "gcse" : "alevel");
-    }
-    return lit.size ? lit : new Set([""]);
+  // The live query = toggled chips + whatever is typed, de-duplicated.
+  function queryTokens() {
+    const typed = normalizeSearch(el.courseFilter ? el.courseFilter.value : "");
+    const t = typed ? typed.split(/\s+/).filter(Boolean) : [];
+    return [...new Set([...chipTokens, ...t])];
   }
 
-  function renderCourseList(filter) {
+  // Which quick-filter pill a token would light up (board and level are
+  // separate categories, so both can be lit at once).
+  function chipForToken(tok) {
+    if (tok === "alevel") return "alevel";
+    if (tok === "as") return "as";
+    if (tok === "gcse") return "gcse";
+    if (tok === "aqa") return "aqa";
+    if (tok === "ocr") return "ocr";
+    if (tok && (tok === "pearson" || tok.includes("edexcel"))) return "pearson";
+    return null;
+  }
+
+  function updateChipLighting() {
+    if (!el.courseFilters) return;
+    const tokens = queryTokens();
+    const lit = new Set(tokens.map(chipForToken).filter(Boolean));
+    if (tokens.length === 0) lit.add("");
+    el.courseFilters.querySelectorAll(".tracker-chip").forEach((ch) =>
+      ch.classList.toggle("active", lit.has(ch.dataset.f || ""))
+    );
+  }
+
+  function renderCourseList() {
     const courses = listCachedCourses(loadBoundaryCache());
-    const f = (filter || "").trim().toLowerCase();
-    const visible = courses.filter((c) => courseMatches(c, f));
-    if (el.courseFilters) {
-      const lit = activeChipData(f);
-      el.courseFilters.querySelectorAll(".tracker-chip").forEach((ch) =>
-        ch.classList.toggle("active", lit.has(ch.dataset.f || "") || lit.has(""))
-      );
-    }
+    const tokens = queryTokens();
+    const visible = courses.filter((c) => matchesTokens(c, tokens));
+    updateChipLighting();
     const subject = el.formSubject.value.trim();
     const current = subject ? coursesBySubject[subject] : null;
 
     if (visible.length === 0) {
       el.courseList.innerHTML = courses.length === 0
         ? `<div class="tracker-course-empty">No subjects cached yet.<br>Open the <b>Scraper</b> tool, pick a board / qualification / series and fetch boundaries, then link here.</div>`
-        : `<div class="tracker-course-empty">No subjects match &ldquo;${escapeHtml(filter)}&rdquo;.</div>`;
+        : `<div class="tracker-course-empty">No subjects match those filters.</div>`;
       return;
     }
 
@@ -856,7 +866,7 @@ export function initTrackerTool(deps, context = {}) {
     el.formQualification.onchange = () => renderCourseState();
     el.formBoard.oninput = () => renderCourseState();
     if (el.courseFilter) {
-      el.courseFilter.oninput = () => renderCourseList(el.courseFilter.value);
+      el.courseFilter.oninput = () => renderCourseList();
     }
 
     const slots = sitting ? (sitting.results || []) : [];
@@ -1258,8 +1268,23 @@ export function initTrackerTool(deps, context = {}) {
     if (el.courseFilters) {
       el.courseFilters.querySelectorAll(".tracker-chip").forEach((ch) =>
         ch.addEventListener("click", () => {
-          el.courseFilter.value = ch.dataset.f || "";
-          renderCourseList(el.courseFilter.value);
+          const f = ch.dataset.f || "";
+          if (f === "") {
+            chipTokens.clear();
+            el.courseFilter.value = "";
+          } else {
+            const typed = normalizeSearch(el.courseFilter.value);
+            const typedTokens = typed ? typed.split(/\s+/).filter(Boolean) : [];
+            const inTyped = typedTokens.includes(f) || (f === "pearson" && typedTokens.some((t) => t.includes("edexcel")));
+            if (chipTokens.has(f) || inTyped) {
+              chipTokens.delete(f);
+              const keep = typedTokens.filter((t) => t !== f && !(f === "pearson" && t.includes("edexcel")));
+              el.courseFilter.value = keep.join(" ");
+            } else {
+              chipTokens.add(f);
+            }
+          }
+          renderCourseList();
         })
       );
     }
