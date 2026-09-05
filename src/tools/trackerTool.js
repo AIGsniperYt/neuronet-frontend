@@ -566,7 +566,7 @@ export function initTrackerTool(deps, context = {}) {
     }
     const lines = table.gradesInOrder.filter((g) => Number.isFinite(table.grades[g])).map((g) => `${g}:${table.grades[g]}`);
     el.boundaryHint.innerHTML =
-      `<span class="bnd-auto">Auto: ${escapeHtml(boardIdToName(table.board))} ${escapeHtml(qualIdToName(table.qual))}${table.seriesLabel ? " " + escapeHtml(table.seriesLabel) : ""}</span>` +
+      `<span class="bnd-auto">${escapeHtml(boardIdToName(table.board))} ${escapeHtml(qualIdToName(table.qual))}${table.seriesLabel ? " " + escapeHtml(table.seriesLabel) : ""}</span>` +
       (lines.length ? ` &middot; ${escapeHtml(lines.join("  "))}` : "") +
       (table.fresh ? "" : " &middot; <em>older cached series</em>");
   }
@@ -801,7 +801,6 @@ export function initTrackerTool(deps, context = {}) {
       const badge =
         `<span class="tracker-sitting-badge bnd"${tip !== null ? ` title="${escapeHtml(tip)}"` : ""}>` +
         `${topLabel}${shownMark !== null ? ` &ge; ${shownMark}` : ""}` +
-        `${hasG ? ` <span class="bnd-auto-chip">auto</span>` : ""}` +
         `</span>`;
       boundaryEl = badge + (hasG ? `<div class="tracker-bounds" title="${escapeHtml(tip)}">${inlineBounds(gb)}</div>` : "");
     } else {
