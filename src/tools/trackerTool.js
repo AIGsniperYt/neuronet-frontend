@@ -46,8 +46,9 @@ export function initTrackerTool(deps, context = {}) {
     boardList: $("trackerBoardList"),
     formYear: $("trackerFormYear"),
     formSeries: $("trackerFormSeries"),
-    formBoundary: $("trackerFormBoundary"),
+    boundaryGrid: $("trackerBoundaryGrid"),
     boundaryHint: $("trackerBoundaryHint"),
+    gradeLive: $("trackerGradeLive"),
     courseState: $("trackerCourseState"),
     coursePicker: $("trackerCoursePicker"),
     courseFilter: $("trackerCourseFilter"),
@@ -67,7 +68,10 @@ export function initTrackerTool(deps, context = {}) {
   let subjectNodes = [];
   let boardsBySubject = {}; // subject -> examBoard (from subject nodes)
   let coursesBySubject = {}; // subject -> linked official course { board, code, title, qual }
-  let autoFilled = false; // boundary field value was populated from the cache
+  let subjectBoundaries = {}; // subject -> remembered editable boundary profile { grades, gradesInOrder, maxMark }
+  let boundaryDirty = false; // user has edited the boundary grid this session
+  let lastBoundary = null; // table last loaded into the grid (cache / sitting snapshot)
+  let currentBoundarySource = null; // human label for where the grid came from
   let chipTokens = new Set(); // toggled quick-filter chips — level + board coexist
   let focusedSubject = context.subject || null;
   let editingId = null;
@@ -105,6 +109,7 @@ export function initTrackerTool(deps, context = {}) {
           const name = n.name || n.subject;
           if (name && n.examBoard) boardsBySubject[name] = n.examBoard;
           if (name && n.officialCourse && n.officialCourse.code) coursesBySubject[name] = n.officialCourse;
+          if (name && n.boundaries && n.boundaries.gradesInOrder && n.boundaries.gradesInOrder.length) subjectBoundaries[name] = n.boundaries;
         }
       }
     } catch (e) { /* ignore */ }
@@ -255,11 +260,6 @@ export function initTrackerTool(deps, context = {}) {
     return `${gb.seriesLabel || "Grade boundaries"}` + (lines.length ? " · " + lines.join(", ") : "");
   }
 
-  function inlineBounds(gb) {
-    const lines = gb.gradesInOrder.filter((g) => Number.isFinite(gb.grades[g])).map((g) => `${g}=${gb.grades[g]}`);
-    return lines.slice(0, 3).join(" ") + (lines.length > 3 ? " &hellip;" : "");
-  }
-
   // Subject-level grade, NOT per-paper. Sums each paper's best-attempt raw total
   // and compares that aggregate against the whole-subject boundary table:
   //   - totalMax (sum of paper maxes) is compared to the subject maxMark. If they
@@ -331,7 +331,7 @@ export function initTrackerTool(deps, context = {}) {
       $("trackerCourseUnlinkBtn").addEventListener("click", async () => {
         await unlinkOfficialCourse(subject);
         renderCourseState();
-        maybeAutoFillBoundary();
+        refreshBoundary();
         flash(`Unlinked ${subject}.`, true);
       });
     } else if (hint) {
@@ -512,7 +512,7 @@ export function initTrackerTool(deps, context = {}) {
     if (!el.formQualification.value) el.formQualification.value = candidate.qualName;
     el.coursePicker.hidden = true;
     renderCourseState();
-    maybeAutoFillBoundary();
+    refreshBoundary();
     flash(`Linked ${subject} to ${courseSummary(course)}.`, true);
   }
 
@@ -532,43 +532,204 @@ export function initTrackerTool(deps, context = {}) {
     await loadSubjects();
     el.coursePicker.hidden = true;
     renderCourseState();
-    maybeAutoFillBoundary();
+    refreshBoundary();
     renderPapers();
   }
 
   // Auto-fill the boundary field (and show the resolved table) whenever the
   // modal's subject is linked to an official course and a cached series is near
-  // the sitting's year/series. Manual input is never clobbered.
-  function maybeAutoFillBoundary() {
-    if (!el.boundaryHint) return;
+  // the sitting's year/series. Manual input is never clobbered — once the user
+  // edits a cell, nothing re-populates it.
+  function refreshBoundary() {
+    if (boundaryDirty) { renderBoundaryControls(); return; }
     const subject = el.formSubject.value.trim();
-    const course = subject ? coursesBySubject[subject] : null;
-    if (!course) {
-      el.boundaryHint.innerHTML = "";
+
+    // 1) remembered profile for the subject beats everything else — explicit choice
+    const profile = subject ? subjectBoundaries[subject] : null;
+    if (profile) {
+      currentBoundarySource = "Saved for this subject";
+      lastBoundary = profile;
+      populateBoundaryGrid(profile);
+      renderBoundaryControls();
+      updateLiveGrade();
       return;
     }
+
+    // 2) live cache match for the sitting's series
     const year = numberEq(el.formYear.value.trim());
     const series = el.formSeries.value;
     const table = resolveBoundaryTable(subject, year, series);
-    if (!table) {
-      el.boundaryHint.innerHTML =
-        `<span class="bnd-auto">${escapeHtml(courseSummary(course))}</span>` +
-        ` &mdash; no cached boundaries for a matching series yet; fetch in the <b>Scraper</b> tool.`;
+    if (table) {
+      currentBoundarySource = `${boardIdToName(table.board)} ${qualIdToName(table.qual)}${table.seriesLabel ? " " + escapeHtml(table.seriesLabel) : ""}`;
+      if (!table.fresh) currentBoundarySource += " &middot; older cached series";
+      lastBoundary = table;
+      populateBoundaryGrid(table);
+      renderBoundaryControls();
+      updateLiveGrade();
       return;
     }
-    const top = topGradeOf(table);
-    if (top !== null) {
-      const hasManual = el.formBoundary.value.trim() !== "";
-      if (!hasManual || autoFilled) {
-        el.formBoundary.value = top;
-        autoFilled = true;
-      }
+
+    // 3) whatever was loaded before (e.g. this sitting's own snapshot)
+    if (lastBoundary) {
+      currentBoundarySource = null;
+      populateBoundaryGrid(lastBoundary);
+      renderBoundaryControls();
+      updateLiveGrade();
+      return;
     }
-    const lines = table.gradesInOrder.filter((g) => Number.isFinite(table.grades[g])).map((g) => `${g}:${table.grades[g]}`);
-    el.boundaryHint.innerHTML =
-      `<span class="bnd-auto">${escapeHtml(boardIdToName(table.board))} ${escapeHtml(qualIdToName(table.qual))}${table.seriesLabel ? " " + escapeHtml(table.seriesLabel) : ""}</span>` +
-      (lines.length ? ` &middot; ${escapeHtml(lines.join("  "))}` : "") +
-      (table.fresh ? "" : " &middot; <em>older cached series</em>");
+
+    // 4) nothing known — show an empty editable shape (default grade labels)
+    currentBoundarySource = null;
+    if (!readBoundaryGrid()) populateBoundaryGrid(null);
+    renderBoundaryControls();
+    updateLiveGrade();
+  }
+
+  // Default grade labels shown for an empty grid, by qualification.
+  function defaultBoundaryLabels() {
+    const q = el.formQualification ? el.formQualification.value : "";
+    if (String(q).toLowerCase().includes("a-level")) return ["A*", "A", "B", "C", "D", "E", "U"];
+    return ["9", "8", "7", "6", "5", "4", "3", "2", "1", "U"];
+  }
+
+  function populateBoundaryGrid(source) {
+    if (!el.boundaryGrid) return;
+    const labels = source && source.gradesInOrder && source.gradesInOrder.length
+      ? source.gradesInOrder
+      : defaultBoundaryLabels();
+    const maxVal = source && source.maxMark != null ? String(source.maxMark) : "";
+    let html =
+      `<div class="tracker-bnd-cell tracker-bnd-max"><span class="tracker-bnd-cap">Max</span>` +
+      `<input class="tracker-bnd-max-input" type="number" value="${escapeHtml(maxVal)}" placeholder="–" /></div>`;
+    for (const label of labels) {
+      const mark = source && source.grades && source.grades[label] != null ? String(source.grades[label]) : "";
+      html +=
+        `<div class="tracker-bnd-cell">` +
+        `<input class="tracker-bnd-label" value="${escapeHtml(label)}" />` +
+        `<input class="tracker-bnd-mark" type="number" value="${escapeHtml(mark)}" placeholder="–" />` +
+        `</div>`;
+    }
+    el.boundaryGrid.innerHTML = html;
+  }
+
+  // Reads the grid into a boundary profile; null when nothing usable is entered.
+  function readBoundaryGrid() {
+    if (!el.boundaryGrid) return null;
+    const maxInput = el.boundaryGrid.querySelector(".tracker-bnd-max-input");
+    const maxMark = maxInput ? numberEq(maxInput.value) : null;
+    const grades = {};
+    const gradesInOrder = [];
+    el.boundaryGrid.querySelectorAll(".tracker-bnd-cell:not(.tracker-bnd-max)").forEach((cell) => {
+      const label = cell.querySelector(".tracker-bnd-label").value.trim();
+      const mark = numberEq(cell.querySelector(".tracker-bnd-mark").value);
+      if (!label || mark === null) return;
+      if (!grades[label]) { grades[label] = mark; gradesInOrder.push(label); }
+    });
+    if (gradesInOrder.length === 0 && (maxMark === null || maxMark === 0)) return null;
+    return { grades, gradesInOrder, maxMark };
+  }
+
+  // Puts the "where did this come from" line + remember / copy buttons under the grid.
+  function renderBoundaryControls() {
+    if (!el.boundaryHint) return;
+    const subject = el.formSubject ? el.formSubject.value.trim() : "";
+    const saved = subject ? subjectBoundaries[subject] : null;
+    const grid = readBoundaryGrid();
+    let html = currentBoundarySource
+      ? `<span class="bnd-auto">${currentBoundarySource}</span>`
+      : (subject ? `<span class="tracker-muted-hint">Type max + per-grade marks — or link a subject to auto-load from the cache.</span>` : "");
+    if (subject && grid) {
+      if (saved) {
+        html += ` <button type="button" class="tracker-btn" data-bnd="forget" style="font-size:0.75rem;padding:3px 9px;">Forget saved</button>`;
+      } else {
+        html += ` <button type="button" class="tracker-btn primary" data-bnd="remember" style="font-size:0.75rem;padding:3px 9px;">Remember for ${escapeHtml(subject)}</button>`;
+      }
+      html += ` <button type="button" class="tracker-btn" data-bnd="copy" style="font-size:0.75rem;padding:3px 9px;" title="Copy from the most recent sitting of this subject">Copy last</button>`;
+    }
+    el.boundaryHint.innerHTML = html || "";
+    const rm = el.boundaryHint.querySelector('[data-bnd="remember"]');
+    const fg = el.boundaryHint.querySelector('[data-bnd="forget"]');
+    const cp = el.boundaryHint.querySelector('[data-bnd="copy"]');
+    if (rm) rm.addEventListener("click", () => rememberBoundary(subject));
+    if (fg) fg.addEventListener("click", () => forgetBoundary(subject));
+    if (cp) cp.addEventListener("click", () => copyLastBoundary(subject));
+  }
+
+  async function rememberBoundary(subject) {
+    if (!subject) return;
+    const profile = readBoundaryGrid();
+    if (!profile) { flash("Enter max and at least one grade mark first.", false); return; }
+    await saveSubjectMeta(subject, { boundaries: profile });
+    subjectBoundaries[subject] = profile;
+    currentBoundarySource = "Saved for this subject";
+    flash(`Boundaries remembered for ${subject}.`, true);
+    renderBoundaryControls();
+  }
+
+  async function forgetBoundary(subject) {
+    if (!subject) return;
+    await saveSubjectMeta(subject, { boundaries: null });
+    delete subjectBoundaries[subject];
+    currentBoundarySource = null;
+    lastBoundary = null;
+    flash(`Saved boundaries removed for ${subject}.`, true);
+    refreshBoundary();
+  }
+
+  function copyLastBoundary(subject) {
+    if (!subject) return;
+    const recent = papers
+      .filter((p) => p.subject === subject && p.gradeBoundaries && p.gradeBoundaries.gradesInOrder && p.gradeBoundaries.gradesInOrder.length)
+      .sort(compareSorted)[0];
+    if (!recent) { flash(`No earlier boundaries for ${subject}.`, false); return; }
+    boundaryDirty = true;
+    currentBoundarySource = "Copied from a previous sitting";
+    lastBoundary = recent.gradeBoundaries;
+    populateBoundaryGrid(recent.gradeBoundaries);
+    renderBoundaryControls();
+    updateLiveGrade();
+    flash("Copied boundaries from a previous sitting.", true);
+  }
+
+  // Persist a patch on the subject node (create it on the fly if it doesn't exist).
+  async function saveSubjectMeta(subject, patch) {
+    const nodes = (await getAllNodes()) || [];
+    const existing = nodes.find((n) => n.type === "subject" && (n.subject === subject || n.name === subject));
+    const base = existing || { type: "subject", subject, name: subject, customized: false, createdAt: Date.now() };
+    await addNode({ ...base, ...patch, updatedAt: Date.now() });
+  }
+
+  // Live "grade for the scores entered so far" readout against the grid.
+  function updateLiveGrade() {
+    if (!el.gradeLive) return;
+    const profile = readBoundaryGrid();
+    if (!profile) { el.gradeLive.innerHTML = ""; return; }
+    const sg = subjectGrade(pseudoSitting(), profile);
+    el.gradeLive.innerHTML = sg
+      ? `Grade with these scores: <b>${escapeHtml(String(sg.grade))}</b>` +
+        (sg.projected ? ` <em class="proj-label">proj · ${escapeHtml(String(sg.answered))}/${profile.gradesInOrder.length ? profile.gradesInOrder.length : "?"} papers</em>` : "")
+      : "";
+  }
+
+  function pseudoSitting() {
+    const results = [];
+    for (const row of el.slotList.querySelectorAll(".tracker-slot-editor")) {
+      const paper = row.querySelector(".tracker-slot-paper").value.trim();
+      if (!paper) continue;
+      const attempts = [];
+      for (const ar of row.querySelectorAll(".attempt-row")) {
+        const score = ar.querySelector("[data-att-score]").value.trim();
+        const max = ar.querySelector("[data-att-max]").value.trim();
+        if (score === "" && max === "") continue;
+        if (score === "" || max === "") continue;
+        const nScore = Number(score), nMax = Number(max);
+        if (!Number.isFinite(nScore) || !Number.isFinite(nMax)) continue;
+        attempts.push({ score: nScore, maxMarks: nMax, date: "" });
+      }
+      if (!attempts.length) continue;
+      results.push({ paper, score: attempts[attempts.length - 1].score, maxMarks: attempts[attempts.length - 1].maxMarks, date: "", attempts });
+    }
+    return { results };
   }
 
   // ---- view switching ----
@@ -802,7 +963,7 @@ export function initTrackerTool(deps, context = {}) {
         `<span class="tracker-sitting-badge bnd"${tip !== null ? ` title="${escapeHtml(tip)}"` : ""}>` +
         `${topLabel}${shownMark !== null ? ` &ge; ${shownMark}` : ""}` +
         `</span>`;
-      boundaryEl = badge + (hasG ? `<div class="tracker-bounds" title="${escapeHtml(tip)}">${inlineBounds(gb)}</div>` : "");
+      boundaryEl = badge;
     } else {
       boundaryEl = `<span class="tracker-sitting-badge">&ndash;</span>`;
     }
@@ -872,7 +1033,9 @@ export function initTrackerTool(deps, context = {}) {
   // ---- modal (add / edit a sitting) ----
   function openModal(sitting) {
     editingId = sitting ? sitting.id : null;
-    autoFilled = false;
+    boundaryDirty = false;
+    currentBoundarySource = null;
+    lastBoundary = (sitting && sitting.gradeBoundaries) ? sitting.gradeBoundaries : null;
     slotSeq = (sitting && sitting.results) ? sitting.results.map((r) => r.paper || "").filter(Boolean) : [];
     el.modalTitle.textContent = editingId ? "Edit sitting" : "Add sitting";
 
@@ -882,7 +1045,6 @@ export function initTrackerTool(deps, context = {}) {
     el.formQualification.value = sitting ? (qualFor(sitting.subject) || "") : (qualFor(initSubject) || "");
     el.formYear.value = sitting ? (sitting.year ?? "") : "";
     el.formSeries.value = sitting ? (sitting.series || "") : "";
-    el.formBoundary.value = sitting ? (sitting.gradeBoundary ?? "") : "";
     el.formNotes.value = sitting ? (sitting.notes || "") : "";
     el.courseState.innerHTML = "";
     el.boundaryHint.innerHTML = "";
@@ -890,19 +1052,35 @@ export function initTrackerTool(deps, context = {}) {
 
     // keep board + qualification in sync with subject selection
     el.formSubject.oninput = () => {
+      boundaryDirty = false;
       const b = boardFor(el.formSubject.value);
       if (b) el.formBoard.value = b;
       const q = qualFor(el.formSubject.value);
       if (q) el.formQualification.value = q;
       renderCourseState();
-      maybeAutoFillBoundary();
+      refreshBoundary();
     };
-    el.formYear.oninput = () => maybeAutoFillBoundary();
-    el.formSeries.onchange = () => maybeAutoFillBoundary();
+    el.formYear.oninput = () => refreshBoundary();
+    el.formSeries.onchange = () => refreshBoundary();
     el.formQualification.onchange = () => renderCourseState();
     el.formBoard.oninput = () => renderCourseState();
     if (el.courseFilter) {
       el.courseFilter.oninput = () => renderCourseList();
+    }
+
+    // live grade readout as papers/boundaries are edited
+    if (!el.modal._liveBound) {
+      el.modal._liveBound = true;
+      el.modal.addEventListener("input", (e) => {
+        if (!e.target) return;
+        if (e.target.closest && (e.target.closest("#trackerSlotList") || e.target.closest("#trackerBoundaryGrid"))) {
+          updateLiveGrade();
+          if (e.target.closest("#trackerBoundaryGrid")) {
+            boundaryDirty = true;
+            renderBoundaryControls();
+          }
+        }
+      });
     }
 
     const slots = sitting ? (sitting.results || []) : [];
@@ -916,7 +1094,7 @@ export function initTrackerTool(deps, context = {}) {
     el.formMsg.textContent = "";
     el.modal.classList.add("open");
     renderCourseState();
-    maybeAutoFillBoundary();
+    refreshBoundary();
     setTimeout(() => el.formSubject.focus(), 0);
   }
 
@@ -1003,14 +1181,13 @@ export function initTrackerTool(deps, context = {}) {
     const yearRaw = el.formYear.value.trim();
     const year = yearRaw === "" ? null : Number(yearRaw);
     const series = el.formSeries.value;
-    const boundaryRaw = el.formBoundary.value.trim();
-    let boundary = boundaryRaw === "" ? null : Number(boundaryRaw);
+    const gridBoundaries = readBoundaryGrid();
+    const boundary = gridBoundaries ? topGradeOf(gridBoundaries) : null;
     const notes = el.formNotes.value.trim();
     const examBoard = el.formBoard.value.trim() || boardFor(subject);
     const qualification = el.formQualification.value.trim() || qualFor(subject);
 
-    const gradeBoundaries = resolveBoundaryTable(subject, year, series);
-    if (boundary === null && gradeBoundaries) boundary = topGradeOf(gradeBoundaries);
+    const gradeBoundaries = gridBoundaries || resolveBoundaryTable(subject, year, series) || null;
 
     if (!subject) { flash("Subject is required.", false); return null; }
     if ((year !== null && !Number.isFinite(year))) { flash("Enter a valid year.", false); return null; }
@@ -1159,6 +1336,7 @@ export function initTrackerTool(deps, context = {}) {
         qualification: n.qualification || "",
         customized: n.customized || false,
         officialCourse: n.officialCourse ?? null,
+        boundaries: n.boundaries ?? null,
         createdAt: n.createdAt, updatedAt: n.updatedAt
       })),
       sittings: papers.map((p) => ({
@@ -1253,6 +1431,7 @@ export function initTrackerTool(deps, context = {}) {
           qualification: meta.qualification || "",
           customized: meta.customized || false,
           officialCourse: meta.officialCourse ?? null,
+          boundaries: meta.boundaries ?? null,
           createdAt: Date.now(), updatedAt: Date.now()
         });
       } else if (meta.examBoard || meta.qualification || meta.customized || meta.officialCourse) {
@@ -1277,6 +1456,7 @@ export function initTrackerTool(deps, context = {}) {
         qualification: meta.qualification || "",
         customized: meta.customized || false,
         officialCourse: meta.officialCourse ?? null,
+        boundaries: meta.boundaries ?? null,
         createdAt: Date.now(), updatedAt: Date.now()
       });
     } else {

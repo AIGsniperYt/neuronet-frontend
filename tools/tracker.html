@@ -305,7 +305,17 @@
     .tracker-course-empty { font-size: 0.8rem; color: var(--text-muted); padding: 8px 4px; line-height: 1.5; }
     .tracker-boundary-hint { font-size: 0.72rem; color: var(--text-muted); line-height: 1.5; display: block; }
     .tracker-boundary-hint .bnd-auto { color: var(--accent); font-weight: 600; }
-    .tracker-bounds { font-size: 0.72rem; color: var(--text-muted); margin-top: 3px; max-width: 250px; line-height: 1.4; }
+    .tracker-boundary-field { grid-column: 1 / -1; }
+    .tracker-boundary-grid { display: flex; flex-wrap: wrap; gap: 7px; }
+    .tracker-bnd-cell { display: flex; flex-direction: column; gap: 3px; width: 52px; }
+    .tracker-bnd-cell .tracker-bnd-cap { font-size: 0.62rem; text-align: center; color: var(--text-muted); letter-spacing: 0.04em; }
+    .tracker-bnd-cell input { padding: 5px 4px; border-radius: 9px; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.05); color: var(--text-main); text-align: center; font-size: 0.82rem; min-width: 0; }
+    .tracker-bnd-cell .tracker-bnd-label { font-weight: 600; color: var(--accent-soft); }
+    .tracker-bnd-cell.tracker-bnd-max { width: 56px; }
+    .tracker-bnd-cell.tracker-bnd-max input { color: var(--text-main); font-weight: 700; }
+    .tracker-bnd-cell input:focus { outline: 1px solid var(--accent); }
+    .tracker-grade-live { font-size: 0.78rem; color: var(--text-main); min-height: 1.1em; }
+    .tracker-grade-live .proj-label { color: var(--accent); font-style: normal; font-weight: 600; }
 
     @media (max-width: 700px), (pointer: coarse) and (hover: none) {
       #trackerTool,
@@ -405,10 +415,11 @@
             <option value="Specimen">Specimen</option>
           </select>
         </div>
-        <div class="tracker-form-row">
-          <label>Boundary for top grade (this sitting)</label>
-          <input id="trackerFormBoundary" type="number" placeholder="e.g. 132" />
-          <span id="trackerBoundaryHint" class="tracker-boundary-hint"></span>
+        <div class="tracker-form-row tracker-boundary-field">
+          <label>Grade boundaries <span class="tracker-muted-hint">— max + per-grade marks, editable</span></label>
+          <div id="trackerBoundaryGrid" class="tracker-boundary-grid"></div>
+          <div id="trackerBoundaryHint" class="tracker-boundary-hint"></div>
+          <div id="trackerGradeLive" class="tracker-grade-live"></div>
         </div>
       </div>
       <div class="tracker-form-row">
