@@ -1,5 +1,6 @@
 import * as XLSX from "../vendor/xlsx/index.js";
 import { extractPdfLayoutLines, parsePdfBoundaries } from "./pdfBoundaries.js";
+import { createBoundaryCacheStore } from "./gradeBoundaries.js";
 
 export function initScraperTool(deps, context = {}) {
   const { escapeHtml } = deps;
@@ -132,55 +133,11 @@ export function initScraperTool(deps, context = {}) {
 
   // ---------- isolated boundary cache ----------
   // Grade boundaries are a self-contained reference lookup and MUST NEVER enter
-  // the user's mindmap graph or JSON export. They live only here under their
-  // own localStorage key. Exam data changes on results days (roughly Jan/Aug),
-  // so we refresh only when a new series appears or the cache is older than the
-  // results-day window (60 days) — never on a daily cadence.
-  const CACHE_KEY = "neuronet:gradeBoundaries";
-  const RESULTS_WINDOW_MS = 60 * 24 * 60 * 60 * 1000; // ~60 days
-  let boundaryCache = loadBoundaryCache();
-
-  function loadBoundaryCache() {
-    try {
-      const raw = localStorage.getItem(CACHE_KEY);
-      if (!raw) return { version: 1, entries: {} };
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === "object" ? parsed : { version: 1, entries: {} };
-    } catch {
-      return { version: 1, entries: {} };
-    }
-  }
-
-  function saveBoundaryCache() {
-    try {
-      localStorage.setItem(CACHE_KEY, JSON.stringify(boundaryCache));
-    } catch {
-      /* storage full/unavailable — degrade to no-cache */
-    }
-  }
-
-  function cacheKeyFor(board, series, qual) {
-    return `${board}:${seriesKey(series)}:${qual.id}`;
-  }
-
-  function getCachedSubjects(board, series, qual) {
-    const entry = boundaryCache.entries[cacheKeyFor(board, series, qual)];
-    if (!entry) return null;
-    // Stale if fetched too long ago (results-day window elapsed since).
-    if (Date.now() - (entry.fetchedAt || 0) > RESULTS_WINDOW_MS) return null;
-    return entry.subjects;
-  }
-
-  function setCachedSubjects(board, series, qual, subjects) {
-    boundaryCache.entries[cacheKeyFor(board, series, qual)] = {
-      series: { month: series.month, year: series.year, label: series.label },
-      qual: qual.id,
-      board,
-      fetchedAt: Date.now(),
-      subjects
-    };
-    saveBoundaryCache();
-  }
+  // the user's mindmap graph or JSON export. They live only under their own
+  // localStorage key, accessed through the shared boundary store (the tracker
+  // reads the same store to link subjects to official courses + auto-fill
+  // boundary tables). See gradeBoundaries.js for the file layout + staleness.
+  const boundary = createBoundaryCacheStore();
 
   function seriesKey(series) {
     return `${series.month}-${series.year}`;
@@ -892,10 +849,11 @@ export function initScraperTool(deps, context = {}) {
     }
 
     // Serve from cache first (isolated boundary store; never user graph data).
-    const cached = getCachedSubjects(board, series, qual);
+    const cached = boundary.getCachedSubjects(board, qual.id, series);
     if (cached && cached.length) {
       subjects = cached;
-      appendLog(`Loaded ${cached.length} ${qual.name} subjects from cache (${boundaryCache.entries[cacheKeyFor(board, series, qual)].fetchedAt ? new Date(boundaryCache.entries[cacheKeyFor(board, series, qual)].fetchedAt).toLocaleDateString() : "?"}).`);
+      const fetchedAt = boundary.getEntry(board, qual.id, series).fetchedAt;
+      appendLog(`Loaded ${cached.length} ${qual.name} subjects from cache (${fetchedAt ? new Date(fetchedAt).toLocaleDateString() : "?"}).`);
       finishFetch(qual, series, true);
       return;
     }
@@ -982,7 +940,7 @@ export function initScraperTool(deps, context = {}) {
 
   function finishFetch(qual, series, fromCache = false) {
     if (!fromCache && subjects && subjects.length) {
-      setCachedSubjects(currentBoardId(), series, qual, subjects);
+      boundary.setCachedSubjects(currentBoardId(), qual.id, series, subjects);
     }
     renderSubjectPicker(subjects);
     appendLog("Choose a subject from the picker to view its grade boundaries.");
@@ -1186,7 +1144,7 @@ export function initScraperTool(deps, context = {}) {
       for (const qid of qualIds) {
         const qual = quals[qid];
         if (!qual) continue;
-        if (getCachedSubjects(board, newest, qual)) continue; // fresh already
+        if (boundary.getCachedSubjects(board, qual.id, newest)) continue; // fresh already
         jobs.push({ board, qual, series: newest });
       }
     }
@@ -1230,13 +1188,13 @@ export function initScraperTool(deps, context = {}) {
       if (onProgress) onProgress(`[bg] ${board} ${qual.name}: parsing workbook...`);
       const wb = XLSX.read(await res.arrayBuffer(), { type: "array" });
       const parsed = parseAqaXlsx(wb, qual, qual.grades).map((s) => ({ ...s, board, qual: qual.id }));
-      if (parsed.length) setCachedSubjects(board, series, qual, parsed);
+      if (parsed.length) boundary.setCachedSubjects(board, qual.id, series, parsed);
     } else {
       if (onProgress) onProgress(`[bg] ${board} ${qual.name}: extracting PDF text...`);
       const lines = await extractPdfLayoutLines(url, proxyUrl);
       if (onProgress) onProgress(`[bg] ${board} ${qual.name}: detecting grade rows...`);
       const parsed = parsePdfBoundaries(lines, board, qual.id).map((s) => ({ ...s, board, qual: qual.id }));
-      if (parsed.length) setCachedSubjects(board, series, qual, parsed);
+      if (parsed.length) boundary.setCachedSubjects(board, qual.id, series, parsed);
     }
     appendLog(`Cached ${qual.name} ${series.label} (${board}).`);
   }
