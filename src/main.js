@@ -1019,67 +1019,175 @@ async function renderDueForReview() {
   });
 }
 
+function timeAgo(ts) {
+  const t = Number(ts || 0);
+  if (!t) return "";
+  const diff = Date.now() - t;
+  if (diff < 45 * 1000) return "just now";
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(diff / 3600000);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(diff / 86400000);
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days}d ago`;
+  return new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function paperSittingAverage(p) {
+  if (!p.results || p.results.length === 0) return null;
+  let total = 0, count = 0;
+  for (const r of p.results) {
+    const attempts = r.attempts || [];
+    if (attempts.length === 0) continue;
+    let best = 0;
+    for (const a of attempts) {
+      const pct = a.maxMarks ? Math.round((a.score / a.maxMarks) * 100) : 0;
+      if (pct > best) best = pct;
+    }
+    total += best; count++;
+  }
+  return count > 0 ? Math.round(total / count) : null;
+}
+
 async function renderRecentActivity() {
   const list = document.getElementById("dashActivityList");
   if (!list) return;
 
   const [allNodes, allQuotes] = await Promise.all([getAllNodes(), getAllQuotes()]);
-  const rows = [];
 
-  const papers = allNodes.filter(n => n.type === "pastpaper").sort((a, b) => {
-    return Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0);
-  }).slice(0, 3);
-
-  for (const p of papers) {
-    const sittingAvg = (() => {
-      if (!p.results || p.results.length === 0) return null;
-      let total = 0, count = 0;
-      for (const r of p.results) {
-        const attempts = r.attempts || [];
-        if (attempts.length > 0) {
-          let best = 0;
-          for (const a of attempts) {
-            const pct = a.maxMarks ? Math.round((a.score / a.maxMarks) * 100) : 0;
-            if (pct > best) best = pct;
-          }
-          total += best; count++;
-        }
-      }
-      return count > 0 ? Math.round(total / count) : null;
-    })();
-    const label = [p.subject, p.year, p.series].filter(Boolean).join(" \u2014 ");
-    const badge = sittingAvg !== null
-      ? `<span class="dash-activity-badge ${sittingAvg >= 60 ? "good" : "low"}">${sittingAvg}%</span>`
-      : "";
-    rows.push(`
-      <div class="dash-activity-row">
-        <span class="dash-activity-icon past-paper-icon"><i class="fa-solid fa-file-circle-check"></i></span>
-        <div class="dash-activity-info">
-          <div class="dash-activity-title">${escapeHtml(label || "Past Paper")}</div>
-          <div class="dash-activity-meta">${(p.results || []).length} paper${(p.results || []).length !== 1 ? "s" : ""}</div>
-        </div>
-        ${badge}
-      </div>
-    `);
+  // Index highlights (quotes) and annotations (analysis nodes) per source,
+  // plus the latest moment any of them changed, so sources that were analysed
+  // surface as a resumable feed entry instead of just "last edited".
+  const bySource = new Map();
+  const touchSource = (sourceId, ts) => {
+    if (!sourceId) return;
+    let rec = bySource.get(sourceId);
+    if (!rec) { rec = { highlights: 0, notes: new Set(), latestTs: Number(ts || 0) }; bySource.set(sourceId, rec); }
+    if (Number(ts || 0) > rec.latestTs) rec.latestTs = Number(ts || 0);
+    return rec;
+  };
+  for (const q of allQuotes || []) {
+    if (!q?.link?.sourceId) continue;
+    const rec = touchSource(q.link.sourceId, q.updatedAt || q.createdAt);
+    rec.highlights++;
+    for (const aId of Array.isArray(q.meta?.analysisNodeIds) ? q.meta.analysisNodeIds : []) {
+      if (aId) rec.notes.add(aId);
+    }
+  }
+  for (const n of allNodes || []) {
+    if (n.type !== "analysis" || !n.id) continue;
+    for (const ref of Array.isArray(n.quoteRefs) ? n.quoteRefs : []) {
+      if (ref?.sourceId) touchSource(ref.sourceId, n.updatedAt || n.createdAt)?.notes.add(n.id);
+    }
   }
 
-  const sources = allNodes.filter(n => isSourceNode(n)).sort((a, b) => {
-    return getNodeTimestamp(b) - getNodeTimestamp(a);
-  }).slice(0, 3 - rows.length);
+  const sources = allNodes.filter(n => isSourceNode(n) && String(n.title || n.name || "").trim());
+  const events = [];
 
   for (const s of sources) {
-    rows.push(`
-      <div class="dash-activity-row">
-        <span class="dash-activity-icon"><i class="fa-solid fa-file-lines"></i></span>
-        <div class="dash-activity-info">
-          <div class="dash-activity-title">${escapeHtml(s.title || s.name || "Untitled Source")}</div>
-          <div class="dash-activity-meta">${escapeHtml(s.subject || "No subject")}</div>
-        </div>
-      </div>
-    `);
+    const writtenTs = Number(s.updatedAt || s.createdAt || 0);
+    const rec = bySource.get(s.id);
+    const analysedTs = rec ? rec.latestTs : 0;
+    const hasAnalysis = rec && (rec.highlights > 0 || rec.notes.size > 0);
+    if (hasAnalysis) {
+      events.push({
+        kind: "analysed", ts: Math.max(writtenTs, analysedTs),
+        s, highlights: rec.highlights, notes: rec.notes.size
+      });
+    } else if (writtenTs) {
+      events.push({ kind: "written", ts: writtenTs, s });
+    }
   }
 
-  list.innerHTML = rows.length > 0 ? rows.join("") : dashEmpty("No activity yet");
+  const completedPapers = allNodes.filter(n =>
+    n.type === "pastpaper" && (n.results || []).some(r => (r.attempts || []).length)
+  );
+  for (const p of completedPapers) {
+    events.push({ kind: "paper", ts: Number(p.updatedAt || p.createdAt || 0), p });
+  }
+
+  events.sort((a, b) => b.ts - a.ts);
+
+  const rows = [];
+  for (const ev of events.slice(0, 6)) {
+    if (ev.kind === "paper") {
+      const avg = paperSittingAverage(ev.p);
+      const label = [ev.p.subject, ev.p.year, ev.p.series].filter(Boolean).join(" \u2014 ");
+      const badge = avg !== null
+        ? `<span class="dash-activity-badge ${avg >= 60 ? "good" : "low"}">${avg}%</span>`
+        : "";
+      rows.push(`
+        <button type="button" class="dash-activity-row clickable" data-tool="tracker" data-subject="${escapeHtml(ev.p.subject || "")}">
+          <span class="dash-activity-icon"><i class="fa-solid fa-file-circle-check"></i></span>
+          <div class="dash-activity-info">
+            <div class="dash-activity-title">${escapeHtml(label || "Past Paper")}</div>
+            <div class="dash-activity-meta">${(ev.p.results || []).length} sitting${(ev.p.results || []).length !== 1 ? "s" : ""} \u00b7 ${escapeHtml(timeAgo(ev.ts))}</div>
+          </div>
+          ${badge}
+        </button>
+      `);
+    } else {
+      const analysed = ev.kind === "analysed";
+      const subject = String(ev.s.subject || ev.s.name || "");
+      rows.push(`
+        <button type="button" class="dash-activity-row clickable" data-tool="analysis"
+          data-subject="${escapeHtml(subject)}" data-source="${escapeHtml(ev.s.id)}" data-mode="${analysed ? "reader" : "editor"}">
+          <span class="dash-activity-icon"><i class="fa-solid ${analysed ? "fa-marker" : "fa-file-pen"}"></i></span>
+          <div class="dash-activity-info">
+            <div class="dash-activity-title">${escapeHtml(ev.s.title || ev.s.name || "Untitled Source")}</div>
+            <div class="dash-activity-meta">${escapeHtml(subject || "No subject")} \u00b7 ${analysed
+              ? `${ev.highlights} highlight${ev.highlights !== 1 ? "s" : ""} \u00b7 ${ev.notes} note${ev.notes !== 1 ? "s" : ""}`
+              : "Written"}</div>
+          </div>
+          <span class="dash-activity-time">${escapeHtml(timeAgo(ev.ts))}</span>
+        </button>
+      `);
+    }
+  }
+
+  const analysedTotal = sources.filter(s => {
+    const rec = bySource.get(s.id);
+    return rec && (rec.highlights > 0 || rec.notes.size > 0);
+  }).length;
+
+  const summary = sources.length > 0 || completedPapers.length > 0 ? `
+    <div class="dash-activity-stats">
+      <div class="dash-activity-stat" title="Past papers you completed">
+        <i class="fa-solid fa-file-circle-check"></i>
+        <span class="dash-activity-stat-num">${completedPapers.length}</span>
+        <span class="dash-activity-stat-label">paper${completedPapers.length !== 1 ? "s" : ""}</span>
+      </div>
+      <div class="dash-activity-stat" title="Sources you wrote">
+        <i class="fa-solid fa-file-pen"></i>
+        <span class="dash-activity-stat-num">${sources.length}</span>
+        <span class="dash-activity-stat-label">written</span>
+      </div>
+      <div class="dash-activity-stat" title="Sources you highlighted and annotated">
+        <i class="fa-solid fa-marker"></i>
+        <span class="dash-activity-stat-num">${analysedTotal}</span>
+        <span class="dash-activity-stat-label">analysed</span>
+      </div>
+    </div>
+  ` : "";
+
+  const statsEl = document.getElementById("dashActivityStats");
+  if (statsEl) statsEl.innerHTML = summary || "";
+
+  list.innerHTML = rows.join("") || dashEmpty("No activity yet");
+
+  list.querySelectorAll(".dash-activity-row.clickable").forEach(row => {
+    const open = () => {
+      const { tool, subject, source, mode } = row.dataset;
+      loadTool(tool, tool === "tracker"
+        ? { subject }
+        : { subject, sourceId: source, sourceMode: mode });
+    };
+    row.addEventListener("click", open);
+    row.addEventListener("keydown", e => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+    });
+  });
 }
 
 async function renderDashboard() {

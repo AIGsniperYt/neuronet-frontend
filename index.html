@@ -1048,6 +1048,15 @@ canvas { position: fixed; inset:0; z-index:-1; }
 
 /* Dashboard: Recent Activity */
 .dash-activity .kicker { display: block; margin-bottom: 10px; }
+.dash-activity-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.dash-activity-header .kicker { margin-bottom: 0; }
 .dash-activity-list { display: flex; flex-direction: column; gap: 8px; }
 .dash-activity-row {
   display: flex;
@@ -1063,12 +1072,56 @@ canvas { position: fixed; inset:0; z-index:-1; }
   flex-shrink: 0;
   width: 28px;
   text-align: center;
-}
-.dash-activity-icon.past-paper-icon {
   color: var(--accent);
 }
-.dash-activity-icon.past-paper-icon i {
+.dash-activity-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.dash-activity-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 7px 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  font-size: 0.82rem;
+}
+.dash-activity-stat i {
+  align-self: center;
+  font-size: 0.9rem;
+  color: var(--accent);
+}
+.dash-activity-stat-num {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+.dash-activity-stat-label {
+  color: rgba(230,255,245,0.55);
+}
+.dash-activity-row.clickable {
+  width: 100%;
+  font: inherit;
   color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.dash-activity-row.clickable:hover {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.14);
+}
+.dash-activity-row.clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.dash-activity-time {
+  font-size: 0.75rem;
+  color: rgba(230,255,245,0.45);
+  flex-shrink: 0;
 }
 .dash-activity-info { flex: 1; min-width: 0; }
 .dash-activity-title {
@@ -1863,7 +1916,10 @@ canvas { position: fixed; inset:0; z-index:-1; }
 
         <!-- Recent Activity -->
         <section class="panel dash-activity" id="dashActivity">
-          <span class="kicker">Recent Activity</span>
+          <div class="dash-activity-header">
+            <span class="kicker">Recent Activity</span>
+            <div id="dashActivityStats" class="dash-activity-stats"></div>
+          </div>
           <div id="dashActivityList" class="dash-activity-list"></div>
         </section>
 
