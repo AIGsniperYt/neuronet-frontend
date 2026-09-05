@@ -41,6 +41,8 @@ export function initTrackerTool(deps, context = {}) {
     formSubject: $("trackerFormSubject"),
     formQualification: $("trackerFormQualification"),
     formBoard: $("trackerFormBoard"),
+    qualRow: $("trackerQualRow"),
+    boardRow: $("trackerBoardRow"),
     boardList: $("trackerBoardList"),
     formYear: $("trackerFormYear"),
     formSeries: $("trackerFormSeries"),
@@ -217,12 +219,29 @@ export function initTrackerTool(deps, context = {}) {
       grades: hit.subject.grades || {},
       gradesInOrder: Array.isArray(hit.subject.gradesInOrder) ? hit.subject.gradesInOrder : [],
       maxMark: hit.subject.maxMark || null,
+      papers: Array.isArray(hit.subject.papers) && hit.subject.papers.length ? hit.subject.papers : [],
       board: hit.boardId,
       qual: hit.qualId,
       seriesLabel: hit.series ? hit.series.label : null,
       seriesKey: hit.series ? `${hit.series.month}-${hit.series.year}` : null,
       fresh: !!hit.fresh
     };
+  }
+
+  // Best-effort paper list for a linked subject: scan the cache across series
+  // for any entry of this course that carries a component/paper list.
+  function coursePapers(subject) {
+    const course = subject ? coursesBySubject[subject] : null;
+    if (!course) return null;
+    const cache = loadBoundaryCache();
+    for (const entry of Object.values(cache.entries || {})) {
+      if (String(entry.board || "").toLowerCase() !== String(course.board || "").toLowerCase()) continue;
+      if (String(entry.qual || "").toLowerCase() !== String(course.qual || "").toLowerCase()) continue;
+      for (const it of entry.subjects || []) {
+        if (it.code === course.code && Array.isArray(it.papers) && it.papers.length) return it.papers;
+      }
+    }
+    return null;
   }
 
   function topGradeOf(table) {
@@ -286,7 +305,8 @@ export function initTrackerTool(deps, context = {}) {
     if (sg.real) {
       return `<span class="head-grade real" title="Real subject grade (${escapeHtml(String(sg.answered))} paper(s) complete, totals ${sg.total}/${sg.maxMark})">${escapeHtml(sg.grade)}</span>`;
     }
-    const projected = `projected from ${sg.answered}${gb && gb.paperCount ? "/" + gb.paperCount : ""} paper(s) \u2014 real once all papers are done`;
+    const totalPapers = gb && Array.isArray(gb.papers) && gb.papers.length ? gb.papers.length : null;
+    const projected = `projected from ${sg.answered}${totalPapers ? "/" + totalPapers : ""} paper(s) \u2014 real once all papers are done`;
     return `<span class="head-grade proj" title="${escapeHtml(projected)}">${escapeHtml(sg.grade)} <em class="proj-label">proj</em></span>`;
   }
 
@@ -328,6 +348,21 @@ export function initTrackerTool(deps, context = {}) {
         : `<span class="tracker-course-none">Pick a subject first</span>`;
       const b = $("trackerCoursePickBtn");
       if (b && subject) b.addEventListener("click", () => openCoursePicker(subject));
+    }
+    syncBoilerplate();
+  }
+
+  // Once a subject is linked to an official course, its qualification + exam
+  // board are derived facts — hide those inputs (they are kept in sync) so the
+  // form doesn't invite conflicting boilerplate.
+  function syncBoilerplate() {
+    const subject = el.formSubject ? el.formSubject.value.trim() : "";
+    const course = subject ? coursesBySubject[subject] : null;
+    if (el.qualRow) el.qualRow.classList.toggle("tracker-auto-hidden", !!course);
+    if (el.boardRow) el.boardRow.classList.toggle("tracker-auto-hidden", !!course);
+    if (course) {
+      if (el.formQualification && !el.formQualification.value) el.formQualification.value = qualIdToName(course.qual);
+      if (el.formBoard && !el.formBoard.value) el.formBoard.value = boardIdToName(course.board);
     }
   }
 
@@ -871,7 +906,10 @@ export function initTrackerTool(deps, context = {}) {
 
     const slots = sitting ? (sitting.results || []) : [];
     el.slotList.innerHTML = "";
-    if (slots.length === 0) addSlotRow();
+    const premade = sitting ? null : coursePapers(initSubject);
+    if (premade && premade.length) {
+      premade.forEach((p) => addSlotRow(null, { paper: p.label, maxMark: p.maxMark }));
+    } else if (slots.length === 0) addSlotRow();
     else slots.forEach((r) => addSlotRow(r));
 
     el.formMsg.textContent = "";
@@ -881,7 +919,11 @@ export function initTrackerTool(deps, context = {}) {
     setTimeout(() => el.formSubject.focus(), 0);
   }
 
-  function addSlotRow(result) {
+  function todayDate() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  function addSlotRow(result, preset) {
     const idx = el.slotList.children.length;
     const row = document.createElement("div");
     row.className = "tracker-slot-editor";
@@ -889,24 +931,27 @@ export function initTrackerTool(deps, context = {}) {
 
     const att = (result && result.attempts) ? result.attempts : [];
     const base = result || {};
-    const baseScore = att.length ? att.reduce((m, a) => m + 1, -1) : 0;
+    const fresh = att.length === 0;
+    const baseMax = fresh && preset && preset.maxMark != null ? preset.maxMark : null;
 
     let attemptsHTML = "";
     const list = att.length ? att : [{ score: base.score, maxMarks: base.maxMarks, date: base.date }];
     for (let i = 0; i < list.length; i++) {
       const a = list[i];
+      const maxVal = a.maxMarks != null ? a.maxMarks : baseMax;
+      const dateVal = a.date || (fresh && i === 0 ? todayDate() : "");
       attemptsHTML +=
         `<div class="attempt-row">` +
         `<label style="flex:none;font-size:0.75rem;color:var(--text-muted);">${i === 0 ? "1st" : i === 1 ? "2nd" : (i + 1) + "th"}:</label>` +
         `<input data-att-score class="tracker-att-score" type="number" placeholder="Score" value="${a.score != null ? escapeHtml(String(a.score)) : ""}" />` +
-        `<input data-att-max class="tracker-att-max" type="number" placeholder="Max" value="${a.maxMarks != null ? escapeHtml(String(a.maxMarks)) : ""}" />` +
-        `<input data-att-date class="tracker-att-date" type="text" placeholder="Date" value="${a.date ? escapeHtml(String(a.date)) : ""}" />` +
+        `<input data-att-max class="tracker-att-max" type="number" placeholder="Max" value="${maxVal != null ? escapeHtml(String(maxVal)) : ""}" />` +
+        `<input data-att-date class="tracker-att-date" type="text" placeholder="Date" value="${dateVal ? escapeHtml(String(dateVal)) : ""}" />` +
         `<button class="tracker-att-del" type="button" title="Remove attempt">&times;</button>` +
         `</div>`;
     }
 
     const usedNames = new Set(slotSeq);
-    let paperVal = base.paper || "";
+    let paperVal = (preset && preset.paper) || base.paper || "";
     if (!paperVal) {
       let n = 1;
       while (usedNames.has("Paper " + n)) n++;
@@ -931,7 +976,7 @@ export function initTrackerTool(deps, context = {}) {
         `<label style="flex:none;font-size:0.75rem;color:var(--text-muted);">${wrap.children.length + 1}-th:</label>` +
         `<input data-att-score type="number" placeholder="Score" />` +
         `<input data-att-max type="number" placeholder="Max" />` +
-        `<input data-att-date type="text" placeholder="Date" />` +
+        `<input data-att-date type="text" placeholder="Date" value="${todayDate()}" />` +
         `<button class="tracker-att-del" type="button" title="Remove attempt">&times;</button>`;
       div.querySelector(".tracker-att-del").addEventListener("click", () => div.remove());
       wrap.appendChild(div);

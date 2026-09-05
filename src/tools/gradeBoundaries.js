@@ -134,7 +134,8 @@ export function listCachedCourses(cache) {
         qualName: QUAL_IDS[qualId],
         code,
         title: item.title,
-        maxMark: item.maxMark
+        maxMark: item.maxMark,
+        papers: Array.isArray(item.papers) && item.papers.length ? item.papers : null
       });
     }
   }

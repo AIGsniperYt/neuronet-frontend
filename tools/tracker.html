@@ -200,6 +200,7 @@
     #trackerModalClose:hover { color: var(--text-main); }
 
     .tracker-form-row { margin-bottom: 12px; display: flex; flex-direction: column; gap: 6px; }
+    .tracker-auto-hidden { display: none; }
     .tracker-form-row label { font-size: 0.8rem; color: var(--text-muted); }
     .tracker-form-row input, .tracker-form-row select, .tracker-form-row textarea {
       padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.12);
@@ -371,7 +372,7 @@
           <label>Subject</label>
           <input id="trackerFormSubject" list="trackerSubjectList" placeholder="e.g. Maths" />
         </div>
-        <div class="tracker-form-row">
+        <div class="tracker-form-row" id="trackerQualRow">
           <label>Qualification</label>
           <select id="trackerFormQualification">
             <option value="">--</option>
@@ -379,7 +380,7 @@
             <option value="A-Level">A-Level</option>
           </select>
         </div>
-        <div class="tracker-form-row">
+        <div class="tracker-form-row" id="trackerBoardRow">
           <label>Exam board (per subject)</label>
           <input id="trackerFormBoard" list="trackerBoardList" placeholder="e.g. AQA" />
           <datalist id="trackerBoardList">

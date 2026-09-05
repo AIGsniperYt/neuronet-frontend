@@ -253,6 +253,7 @@ function parseOcr(lines, qual) {
   const gradeLabels = qual === "gcse" ? OCR_GCSE_LABELS : OCR_ALEVEL_LABELS;
   let blockTitle = null;
   let blockCode = null;
+  let blockComponents = [];
   let currentGrades = gradeLabels;
 
   for (const line of lines) {
@@ -271,6 +272,7 @@ function parseOcr(lines, qual) {
     ) {
       blockTitle = toks.join(" ");
       blockCode = null;
+      blockComponents = [];
       continue;
     }
 
@@ -294,9 +296,19 @@ function parseOcr(lines, qual) {
     }
 
     const first = toks[0];
-    // Component (Raw) rows carry the code; use them to anchor the block code.
+    // Component (Raw) rows carry the code; use them to anchor the block code
+    // and to capture per-paper maxima/labels for the paper-slot editor.
     if (isCode(first) && toks.includes("Raw")) {
       blockCode = first;
+      const rawIdx = toks.indexOf("Raw");
+      if (rawIdx > 2) {
+        const id = toks[1];
+        const label = toks.slice(2, rawIdx).join(" ");
+        const compMax = parseInt(toks[rawIdx + 1], 10);
+        if (id && label && isFinite(compMax) && compMax > 0 && !blockComponents.some((p) => p.id === id)) {
+          blockComponents.push({ id, label, maxMark: compMax });
+        }
+      }
       continue;
     }
 
@@ -325,8 +337,10 @@ function parseOcr(lines, qual) {
       title,
       maxMark,
       grades,
-      gradesInOrder: currentGrades
+      gradesInOrder: currentGrades,
+      papers: blockComponents.length ? blockComponents : null
     });
+    blockComponents = [];
   }
   return subjects;
 }
