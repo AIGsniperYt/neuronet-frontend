@@ -7,6 +7,7 @@ import {
   findGradeTable,
   boardIdToName,
   qualIdToName,
+  normalizeTitle,
   scoreToGrade
 } from "./gradeBoundaries.js";
 
@@ -24,9 +25,8 @@ export function initTrackerTool(deps, context = {}) {
     papers: $("trackerPapers"),
     stats: $("trackerStats"),
 
-    scope: $("trackerScope"),
+    
     subjectList: $("trackerSubjectList"),
-    resultCount: $("trackerResultCount"),
     addBtn: $("trackerAddBtn"),
     dropBtn: $("trackerDropBtn"),
     collapseBtn: $("trackerCollapseBtn"),
@@ -39,27 +39,29 @@ export function initTrackerTool(deps, context = {}) {
     modalClose: $("trackerModalClose"),
     modalTitle: $("trackerModalTitle"),
     formSubject: $("trackerFormSubject"),
-    formQualification: $("trackerFormQualification"),
-    formBoard: $("trackerFormBoard"),
-    qualRow: $("trackerQualRow"),
-    boardRow: $("trackerBoardRow"),
-    boardList: $("trackerBoardList"),
     formYear: $("trackerFormYear"),
     formSeries: $("trackerFormSeries"),
-    boundaryGrid: $("trackerBoundaryGrid"),
-    boundaryHint: $("trackerBoundaryHint"),
-    gradeLive: $("trackerGradeLive"),
-    courseState: $("trackerCourseState"),
-    coursePicker: $("trackerCoursePicker"),
-    courseFilter: $("trackerCourseFilter"),
-    courseFilters: $("trackerCourseFilters"),
-    courseList: $("trackerCourseList"),
-    slotList: $("trackerSlotList"),
-    addSlotBtn: $("trackerAddSlotBtn"),
     formNotes: $("trackerFormNotes"),
     saveBtn: $("trackerSaveBtn"),
     cancelBtn: $("trackerCancelBtn"),
-    formMsg: $("trackerFormMsg")
+    formMsg: $("trackerFormMsg"),
+
+    colsBtn: $("trackerCustomiseBtn"),
+    colsPop: $("trackerCustomisePop"),
+    tableInfo: $("trackerTableInfo"),
+    boundaryChips: $("trackerBoundaryChips"),
+    boundaryNote: $("trackerBoundaryNote"),
+    colList: $("trackerColList"),
+    cusReset: $("trackerCusReset"),
+    linkArea: $("trackerLinkArea"),
+    linkPop: $("trackerLinkPop"),
+    linkFilter: $("trackerLinkFilter"),
+    linkFilters: $("trackerLinkFilters"),
+    linkList: $("trackerLinkList"),
+    unlinkBtn: $("trackerUnlinkBtn"),
+
+    slotList: $("trackerSlotList"),
+    addSlotBtn: $("trackerAddSlotBtn")
   };
 
   // ---- state ----
@@ -67,16 +69,46 @@ export function initTrackerTool(deps, context = {}) {
   let allSubjects = [];
   let subjectNodes = [];
   let boardsBySubject = {}; // subject -> examBoard (from subject nodes)
-  let coursesBySubject = {}; // subject -> linked official course { board, code, title, qual }
-  let subjectBoundaries = {}; // subject -> remembered editable boundary profile { grades, gradesInOrder, maxMark }
-  let boundaryDirty = false; // user has edited the boundary grid this session
-  let lastBoundary = null; // table last loaded into the grid (cache / sitting snapshot)
-  let currentBoundarySource = null; // human label for where the grid came from
-  let chipTokens = new Set(); // toggled quick-filter chips — level + board coexist
+  let coursesBySubject = {}; // subject -> officially linked course { board, code, title, qual }
+  let subjectMeta = {}; // subject -> { examBoard, qualification, code } for auto resolution
+  const COL_DEFS = [
+    { id: "boundary", label: "Boundary" },
+    { id: "sitting", label: "Sitting" },
+    { id: "avg", label: "Average" }
+  ];
+  const COL_DEFAULTS = { boundary: true, sitting: true, avg: true };
+  let cols = loadCols(); // visible table columns, persisted in localStorage
+  let aimGrades = loadAim(); // subject -> boundary grade labels shown as thresholds in the Boundary column
+  let chipTokens = new Set(); // toggled quick-filter chips in the link picker — level + board coexist
+  let linkHint = null; // auto-suggested official course for the scoped subject (one-click link)
   let focusedSubject = context.subject || null;
   let editingId = null;
   let slotSeq = 0;
   const expandedNotes = new Set();
+
+  function loadCols() {
+    try {
+      const raw = JSON.parse(localStorage.getItem("neuronet:trackerCols") || "{}");
+      const out = { ...COL_DEFAULTS };
+      for (const k of Object.keys(COL_DEFAULTS)) if (typeof raw[k] === "boolean") out[k] = raw[k];
+      return out;
+    } catch (e) { return { ...COL_DEFAULTS }; }
+  }
+  function saveCols() {
+    try { localStorage.setItem("neuronet:trackerCols", JSON.stringify(cols)); } catch (e) {}
+  }
+  function loadAim() {
+    try { return JSON.parse(localStorage.getItem("neuronet:trackerAim") || "{}"); }
+    catch (e) { return {}; }
+  }
+  function saveAimGrades() {
+    try { localStorage.setItem("neuronet:trackerAim", JSON.stringify(aimGrades)); } catch (e) {}
+  }
+  // The grade thresholds shown for a subject in the Boundary column. Labels are
+  // picked from the fetched pack; empty = use the top grade only.
+  function aimFor(subject) {
+    return (subject && Array.isArray(aimGrades[subject])) ? aimGrades[subject] : [];
+  }
 
   function nowISO() { return new Date().toISOString(); }
   function pct(score, max) {
@@ -100,6 +132,7 @@ export function initTrackerTool(deps, context = {}) {
     }
     boardsBySubject = {};
     coursesBySubject = {};
+    subjectMeta = {};
     subjectNodes = [];
     try {
       const all = (await getAllNodes()) || [];
@@ -109,7 +142,11 @@ export function initTrackerTool(deps, context = {}) {
           const name = n.name || n.subject;
           if (name && n.examBoard) boardsBySubject[name] = n.examBoard;
           if (name && n.officialCourse && n.officialCourse.code) coursesBySubject[name] = n.officialCourse;
-          if (name && n.boundaries && n.boundaries.gradesInOrder && n.boundaries.gradesInOrder.length) subjectBoundaries[name] = n.boundaries;
+          if (name) subjectMeta[name] = {
+            examBoard: n.examBoard || "",
+            qualification: n.qualification || "",
+            code: (n.officialCourse && n.officialCourse.code) || ""
+          };
         }
       }
     } catch (e) { /* ignore */ }
@@ -209,16 +246,33 @@ export function initTrackerTool(deps, context = {}) {
     renderPapers();
   }
 
-  // ---- official subject linking + auto grade boundaries ----
-  function courseSummary(course) {
-    if (!course) return "";
-    return `${boardIdToName(course.board)} ${qualIdToName(course.qual)} — ${course.code} ${course.title}`.trim();
+  // ---- auto grade boundaries ----
+  // The official cached subject for a tracker subject. Never requires manual
+  // linking: an explicit stored link wins, else we resolve it automatically
+  // from the subject's meta (board/qualification/code) or by exact title match.
+  function resolveCourse(cache, name) {
+    if (!name) return null;
+    const linked = coursesBySubject[name];
+    if (linked && linked.code) return linked;
+    const meta = subjectMeta[name] || {};
+    if (meta.examBoard || meta.qualification) {
+      const hit = matchOfficialCourse(cache, {
+        board: meta.examBoard,
+        qual: meta.qualification,
+        title: name,
+        code: meta.code
+      });
+      if (hit) return hit;
+    }
+    const norm = normalizeTitle(name);
+    return listCachedCourses(cache).find((c) => c.title && normalizeTitle(c.title) === norm) || null;
   }
 
   function resolveBoundaryTable(subject, year, series, cacheSrc) {
-    const course = subject ? coursesBySubject[subject] : null;
+    const cache = cacheSrc || loadBoundaryCache();
+    const course = subject ? resolveCourse(cache, subject) : null;
     if (!course) return null;
-    const hit = findGradeTable(cacheSrc || loadBoundaryCache(), course, year, series);
+    const hit = findGradeTable(cache, course, year, series);
     if (!hit || !hit.subject) return null;
     return {
       grades: hit.subject.grades || {},
@@ -233,10 +287,10 @@ export function initTrackerTool(deps, context = {}) {
     };
   }
 
-  // Best-effort paper list for a linked subject: scan the cache across series
-  // for any entry of this course that carries a component/paper list.
+  // Best-effort paper list for a subject: scan the cache across series for any
+  // entry of this course that carries a component/paper list.
   function coursePapers(subject) {
-    const course = subject ? coursesBySubject[subject] : null;
+    const course = subject ? resolveCourse(loadBoundaryCache(), subject) : null;
     if (!course) return null;
     const cache = loadBoundaryCache();
     for (const entry of Object.values(cache.entries || {})) {
@@ -310,68 +364,114 @@ export function initTrackerTool(deps, context = {}) {
     return `<span class="head-grade proj" title="${escapeHtml(projected)}">${escapeHtml(sg.grade)} <em class="proj-label">proj</em></span>`;
   }
 
-  // Render the link/unlink + quick-suggestion controls for the modal's subject.
-  function renderCourseState() {
-    if (!el.courseState) return;
-    const subject = el.formSubject.value.trim();
-    const course = subject ? coursesBySubject[subject] : null;
-    const hint = subject && !course ? matchOfficialCourse(loadBoundaryCache(), {
-      board: el.formBoard.value || boardFor(subject),
-      qual: el.formQualification.value || qualFor(subject),
-      title: subject,
-      code: ""
-    }) : null;
+  // ---- table customise (persistent popover above the table) ----
+  // The Boundary column shows the grade thresholds YOU want to aim for — picked
+  // per subject from the fetched pack (the source of truth — the pack itself is
+  // never edited here). Any number of grades: 9, 9+7, 9+4, 9+8+7, whatever.
+  // Nothing picked = the top grade only, which is the default.
+  function aimTable(subject) {
+    return resolveBoundaryTable(subject, null, null, loadBoundaryCache());
+  }
+  // Target grades are a fixed 9->3 toggle line. Marks are NOT shown here because
+  // the threshold for a grade differs per year/series — the Boundary column
+  // resolves the mark per sitting.
+  const PICKABLE_GRADES = ["9", "8", "7", "6", "5", "4", "3"];
+  function pickableGrades(subject) {
+    const table = aimTable(subject);
+    const known = table && Array.isArray(table.gradesInOrder) ? table.gradesInOrder : [];
+    if (known.length) {
+      const set = new Set(known);
+      return PICKABLE_GRADES.filter((g) => set.has(g));
+    }
+    return known.length ? known : [];
+  }
+  function renderBoundaryChips() {
+    if (el.boundaryChips) el.boundaryChips.innerHTML = "";
+    if (el.boundaryNote) el.boundaryNote.textContent = "";
+    if (!focusedSubject) {
+      if (el.boundaryChips) el.boundaryChips.innerHTML = `<div class="tracker-cus-empty">Scope to one subject (sidebar) to pick the grades it aims for.</div>`;
+      return;
+    }
+    const options = pickableGrades(focusedSubject);
+    if (!options.length) {
+      if (el.boundaryChips) el.boundaryChips.innerHTML = `<div class="tracker-cus-empty">No fetched boundaries for ${escapeHtml(focusedSubject)} yet &mdash; fetch them in the Scraper tool (or link the official subject).</div>`;
+      return;
+    }
+    const selected = aimFor(focusedSubject);
+    el.boundaryChips.innerHTML = options.map((g) =>
+      `<button type="button" class="tracker-chip tracker-grade-chip ${selected.includes(g) ? "active" : ""}" data-g="${escapeHtml(g)}" title="Toggle grade ${escapeHtml(g)}${selected.includes(g) ? " (shown)" : ""}">` +
+      `<span class="bmark">${escapeHtml(g)}</span>` +
+      `</button>`
+    ).join("");
+    if (el.boundaryNote) el.boundaryNote.textContent = selected.length
+      ? `Showing grades: ${selected.join(" / ")}`
+      : "Nothing picked &mdash; the Boundary column shows the top grade.";
+  }
 
+  function renderColList() {
+    if (!el.colList) return;
+    el.colList.innerHTML = COL_DEFS.map((c) =>
+      `<button type="button" class="tracker-col-toggle ${cols[c.id] ? "" : "off"}" data-col="${c.id}">` +
+      `<span class="check">&#10003;</span><span>${c.label}</span></button>`
+    ).join("");
+  }
+
+  function toggleAim(subject, label) {
+    if (!subject) return;
+    aimGrades = loadAim();
+    let list = (aimGrades[subject] || []).slice();
+    const idx = list.indexOf(label);
+    if (idx >= 0) list.splice(idx, 1);
+    else list.push(label);
+    aimGrades[subject] = list;
+    saveAimGrades();
+    renderPapers();
+  }
+
+  // ---- link subject to an official course ----
+  // Bound to the table bar's "Link subject" pill. Boundaries then auto-load from
+  // the fetched pack; the auto-resolver also links by name when not explicit.
+  function courseSummary(course) {
+    if (!course) return "";
+    const parts = [boardIdToName(course.board), qualIdToName(course.qual), course.code];
+    return `${parts.filter(Boolean).join(" · ")}${course.title ? " — " + course.title : ""}`.trim();
+  }
+
+  function renderLinkArea() {
+    if (!el.linkArea) return;
+    const subject = focusedSubject;
+    const course = subject ? coursesBySubject[subject] : null;
+    linkHint = null;
     if (course) {
-      el.courseState.innerHTML =
-        `<span class="tracker-course-linked"><i class="fa-solid fa-link"></i> ${escapeHtml(courseSummary(course))}</span>` +
-        `<button type="button" class="tracker-btn" id="trackerCourseChangeBtn" style="font-size:0.78rem;padding:4px 10px;">Change</button>` +
-        `<button type="button" class="tracker-btn danger" id="trackerCourseUnlinkBtn" style="font-size:0.78rem;padding:4px 10px;">Unlink</button>`;
-      $("trackerCourseChangeBtn").addEventListener("click", () => openCoursePicker(subject));
-      $("trackerCourseUnlinkBtn").addEventListener("click", async () => {
-        await unlinkOfficialCourse(subject);
-        renderCourseState();
-        refreshBoundary();
-        flash(`Unlinked ${subject}.`, true);
-      });
-    } else if (hint) {
-      el.courseState.innerHTML =
-        `<span class="tracker-course-none">Not linked</span>` +
-        `<button type="button" class="tracker-btn primary" id="trackerCourseLinkBtn" style="font-size:0.78rem;padding:4px 10px;">Link: ${escapeHtml(courseSummary(hint))}</button>` +
-        `<button type="button" class="tracker-btn" id="trackerCoursePickBtn" style="font-size:0.78rem;padding:4px 10px;">Choose&hellip;</button>`;
-      $("trackerCourseLinkBtn").addEventListener("click", async () => { await applyOfficialCourse(subject, hint); });
-      $("trackerCoursePickBtn").addEventListener("click", () => openCoursePicker(subject));
+      el.linkArea.innerHTML = `<button type="button" class="tracker-link-pill linked" data-act="open" title="${escapeHtml(courseSummary(course))}"><i class="fa-solid fa-link"></i> ${escapeHtml(courseSummary(course))}</button>`;
     } else {
-      el.courseState.innerHTML = subject
-        ? `<span class="tracker-course-none">Not linked</span>` +
-          `<button type="button" class="tracker-btn" id="trackerCoursePickBtn" style="font-size:0.78rem;padding:4px 10px;">Choose linked subject&hellip;</button>`
-        : `<span class="tracker-course-none">Pick a subject first</span>`;
-      const b = $("trackerCoursePickBtn");
-      if (b && subject) b.addEventListener("click", () => openCoursePicker(subject));
+      linkHint = subject ? matchOfficialCourse(loadBoundaryCache(), {
+        board: boardFor(subject),
+        qual: qualFor(subject),
+        title: subject,
+        code: ""
+      }) : null;
+      if (linkHint) {
+        el.linkArea.innerHTML = `<button type="button" class="tracker-link-pill suggest" data-act="suggest" title="Automatically linked from your fetched pack. Click to confirm.">Link: ${escapeHtml(courseSummary(linkHint))}</button>`;
+      } else {
+        el.linkArea.innerHTML = `<button type="button" class="tracker-link-pill" data-act="open"><i class="fa-solid fa-link"></i> Link subject</button>`;
+      }
     }
-    syncBoilerplate();
+    if (el.linkPop) el.linkPop.hidden = true;
   }
 
-  // Once a subject is linked to an official course, its qualification + exam
-  // board are derived facts — hide those inputs (they are kept in sync) so the
-  // form doesn't invite conflicting boilerplate.
-  function syncBoilerplate() {
-    const subject = el.formSubject ? el.formSubject.value.trim() : "";
-    const course = subject ? coursesBySubject[subject] : null;
-    if (el.qualRow) el.qualRow.classList.toggle("tracker-auto-hidden", !!course);
-    if (el.boardRow) el.boardRow.classList.toggle("tracker-auto-hidden", !!course);
-    if (course) {
-      if (el.formQualification && !el.formQualification.value) el.formQualification.value = qualIdToName(course.qual);
-      if (el.formBoard && !el.formBoard.value) el.formBoard.value = boardIdToName(course.board);
-    }
-  }
-
-  function openCoursePicker(subject) {
+  function openLinkPicker(subject) {
     if (!subject) { flash("Pick a subject first.", false); return; }
-    el.coursePicker.hidden = false;
-    if (el.courseFilter) el.courseFilter.value = "";
+    if (el.colsPop) el.colsPop.hidden = true;
+    el.linkFilter.value = "";
     chipTokens.clear();
     renderCourseList();
+    el.unlinkBtn.hidden = !coursesBySubject[subject];
+    el.linkPop.hidden = false;
+  }
+
+  function closeLinkPicker() {
+    if (el.linkPop) el.linkPop.hidden = true;
   }
 
   // Search strengthening: every whitespace token must match (order-independent),
@@ -405,23 +505,18 @@ export function initTrackerTool(deps, context = {}) {
     return set;
   }
 
-  // Match a course only if every token is present somewhere in it (AND, order
-  // independent). Level and board tokens coexist — "alevel" + "aqa" both apply.
   function matchesTokens(c, tokens) {
     if (tokens.length === 0) return true;
     const hay = courseTerms(c);
     return tokens.every((tok) => [...hay].some((h) => h.includes(tok)));
   }
 
-  // The live query = toggled chips + whatever is typed, de-duplicated.
   function queryTokens() {
-    const typed = normalizeSearch(el.courseFilter ? el.courseFilter.value : "");
+    const typed = normalizeSearch(el.linkFilter ? el.linkFilter.value : "");
     const t = typed ? typed.split(/\s+/).filter(Boolean) : [];
     return [...new Set([...chipTokens, ...t])];
   }
 
-  // Which quick-filter pill a token would light up (board and level are
-  // separate categories, so both can be lit at once).
   function chipForToken(tok) {
     if (tok === "alevel") return "alevel";
     if (tok === "as") return "as";
@@ -433,11 +528,11 @@ export function initTrackerTool(deps, context = {}) {
   }
 
   function updateChipLighting() {
-    if (!el.courseFilters) return;
+    if (!el.linkFilters) return;
     const tokens = queryTokens();
     const lit = new Set(tokens.map(chipForToken).filter(Boolean));
     if (tokens.length === 0) lit.add("");
-    el.courseFilters.querySelectorAll(".tracker-chip").forEach((ch) =>
+    el.linkFilters.querySelectorAll(".tracker-chip").forEach((ch) =>
       ch.classList.toggle("active", lit.has(ch.dataset.f || ""))
     );
   }
@@ -447,12 +542,13 @@ export function initTrackerTool(deps, context = {}) {
     const tokens = queryTokens();
     const visible = courses.filter((c) => matchesTokens(c, tokens));
     updateChipLighting();
-    const subject = el.formSubject.value.trim();
+    const subject = focusedSubject;
     const current = subject ? coursesBySubject[subject] : null;
 
+    if (!el.linkList) return;
     if (visible.length === 0) {
-      el.courseList.innerHTML = courses.length === 0
-        ? `<div class="tracker-course-empty">No subjects cached yet.<br>Open the <b>Scraper</b> tool, pick a board / qualification / series and fetch boundaries, then link here.</div>`
+      el.linkList.innerHTML = courses.length === 0
+        ? `<div class="tracker-course-empty">No subjects cached yet.<br>Open the <b>Scraper</b> tool, pick a board / qualification / series and fetch boundaries &mdash; then link here.</div>`
         : `<div class="tracker-course-empty">No subjects match those filters.</div>`;
       return;
     }
@@ -462,7 +558,7 @@ export function initTrackerTool(deps, context = {}) {
     for (const c of visible) {
       if (c.boardName !== lastBoard) {
         if (lastBoard !== "") html += "</div>";
-        html += `<div class="tracker-course-group"><div class="tracker-course-board">${escapeHtml(c.boardName)}</div>`;
+        html += `<div class="tracker-course-board">${escapeHtml(c.boardName)}</div>`;
         lastBoard = c.boardName;
       }
       const isSel = !!current && c.board === current.board && c.code === current.code && c.qual === current.qual;
@@ -473,13 +569,7 @@ export function initTrackerTool(deps, context = {}) {
         `</button>`;
     }
     html += "</div>";
-    el.courseList.innerHTML = html;
-    el.courseList.querySelectorAll(".tracker-course-item").forEach((btn) =>
-      btn.addEventListener("click", () => {
-        const c = visible.find((x) => x.board === btn.dataset.board && x.qual === btn.dataset.qual && x.code === btn.dataset.code);
-        if (c) applyOfficialCourse(subject, c);
-      })
-    );
+    el.linkList.innerHTML = html;
   }
 
   async function applyOfficialCourse(subject, candidate) {
@@ -507,17 +597,15 @@ export function initTrackerTool(deps, context = {}) {
       });
     }
     await loadSubjects();
+    closeLinkPicker();
     renderPapers();
-    if (!el.formBoard.value.trim()) el.formBoard.value = candidate.boardName;
-    if (!el.formQualification.value) el.formQualification.value = candidate.qualName;
-    el.coursePicker.hidden = true;
-    renderCourseState();
-    refreshBoundary();
-    flash(`Linked ${subject} to ${courseSummary(course)}.`, true);
+    flash(`Linked ${subject} to ${courseSummary(course)}. Boundaries auto-load from the fetched pack.`, true);
   }
 
   async function unlinkOfficialCourse(subject) {
     if (!subject) return;
+    const confirmed = await dialog.confirm(`Unlink ${subject} from its official course?`, "Unlink", "danger");
+    if (!confirmed) return;
     const nodes = (await getAllNodes()) || [];
     const existing = nodes.find((n) => n.type === "subject" && (n.subject === subject || n.name === subject));
     if (existing) {
@@ -530,206 +618,9 @@ export function initTrackerTool(deps, context = {}) {
       });
     }
     await loadSubjects();
-    el.coursePicker.hidden = true;
-    renderCourseState();
-    refreshBoundary();
+    closeLinkPicker();
     renderPapers();
-  }
-
-  // Auto-fill the boundary field (and show the resolved table) whenever the
-  // modal's subject is linked to an official course and a cached series is near
-  // the sitting's year/series. Manual input is never clobbered — once the user
-  // edits a cell, nothing re-populates it.
-  function refreshBoundary() {
-    if (boundaryDirty) { renderBoundaryControls(); return; }
-    const subject = el.formSubject.value.trim();
-
-    // 1) remembered profile for the subject beats everything else — explicit choice
-    const profile = subject ? subjectBoundaries[subject] : null;
-    if (profile) {
-      currentBoundarySource = "Saved for this subject";
-      lastBoundary = profile;
-      populateBoundaryGrid(profile);
-      renderBoundaryControls();
-      updateLiveGrade();
-      return;
-    }
-
-    // 2) live cache match for the sitting's series
-    const year = numberEq(el.formYear.value.trim());
-    const series = el.formSeries.value;
-    const table = resolveBoundaryTable(subject, year, series);
-    if (table) {
-      currentBoundarySource = `${boardIdToName(table.board)} ${qualIdToName(table.qual)}${table.seriesLabel ? " " + escapeHtml(table.seriesLabel) : ""}`;
-      if (!table.fresh) currentBoundarySource += " &middot; older cached series";
-      lastBoundary = table;
-      populateBoundaryGrid(table);
-      renderBoundaryControls();
-      updateLiveGrade();
-      return;
-    }
-
-    // 3) whatever was loaded before (e.g. this sitting's own snapshot)
-    if (lastBoundary) {
-      currentBoundarySource = null;
-      populateBoundaryGrid(lastBoundary);
-      renderBoundaryControls();
-      updateLiveGrade();
-      return;
-    }
-
-    // 4) nothing known — show an empty editable shape (default grade labels)
-    currentBoundarySource = null;
-    if (!readBoundaryGrid()) populateBoundaryGrid(null);
-    renderBoundaryControls();
-    updateLiveGrade();
-  }
-
-  // Default grade labels shown for an empty grid, by qualification.
-  function defaultBoundaryLabels() {
-    const q = el.formQualification ? el.formQualification.value : "";
-    if (String(q).toLowerCase().includes("a-level")) return ["A*", "A", "B", "C", "D", "E", "U"];
-    return ["9", "8", "7", "6", "5", "4", "3", "2", "1", "U"];
-  }
-
-  function populateBoundaryGrid(source) {
-    if (!el.boundaryGrid) return;
-    const labels = source && source.gradesInOrder && source.gradesInOrder.length
-      ? source.gradesInOrder
-      : defaultBoundaryLabels();
-    const maxVal = source && source.maxMark != null ? String(source.maxMark) : "";
-    let html =
-      `<div class="tracker-bnd-cell tracker-bnd-max"><span class="tracker-bnd-cap">Max</span>` +
-      `<input class="tracker-bnd-max-input" type="number" value="${escapeHtml(maxVal)}" placeholder="–" /></div>`;
-    for (const label of labels) {
-      const mark = source && source.grades && source.grades[label] != null ? String(source.grades[label]) : "";
-      html +=
-        `<div class="tracker-bnd-cell">` +
-        `<input class="tracker-bnd-label" value="${escapeHtml(label)}" />` +
-        `<input class="tracker-bnd-mark" type="number" value="${escapeHtml(mark)}" placeholder="–" />` +
-        `</div>`;
-    }
-    el.boundaryGrid.innerHTML = html;
-  }
-
-  // Reads the grid into a boundary profile; null when nothing usable is entered.
-  function readBoundaryGrid() {
-    if (!el.boundaryGrid) return null;
-    const maxInput = el.boundaryGrid.querySelector(".tracker-bnd-max-input");
-    const maxMark = maxInput ? numberEq(maxInput.value) : null;
-    const grades = {};
-    const gradesInOrder = [];
-    el.boundaryGrid.querySelectorAll(".tracker-bnd-cell:not(.tracker-bnd-max)").forEach((cell) => {
-      const label = cell.querySelector(".tracker-bnd-label").value.trim();
-      const mark = numberEq(cell.querySelector(".tracker-bnd-mark").value);
-      if (!label || mark === null) return;
-      if (!grades[label]) { grades[label] = mark; gradesInOrder.push(label); }
-    });
-    if (gradesInOrder.length === 0 && (maxMark === null || maxMark === 0)) return null;
-    return { grades, gradesInOrder, maxMark };
-  }
-
-  // Puts the "where did this come from" line + remember / copy buttons under the grid.
-  function renderBoundaryControls() {
-    if (!el.boundaryHint) return;
-    const subject = el.formSubject ? el.formSubject.value.trim() : "";
-    const saved = subject ? subjectBoundaries[subject] : null;
-    const grid = readBoundaryGrid();
-    let html = currentBoundarySource
-      ? `<span class="bnd-auto">${currentBoundarySource}</span>`
-      : (subject ? `<span class="tracker-muted-hint">Type max + per-grade marks — or link a subject to auto-load from the cache.</span>` : "");
-    if (subject && grid) {
-      if (saved) {
-        html += ` <button type="button" class="tracker-btn" data-bnd="forget" style="font-size:0.75rem;padding:3px 9px;">Forget saved</button>`;
-      } else {
-        html += ` <button type="button" class="tracker-btn primary" data-bnd="remember" style="font-size:0.75rem;padding:3px 9px;">Remember for ${escapeHtml(subject)}</button>`;
-      }
-      html += ` <button type="button" class="tracker-btn" data-bnd="copy" style="font-size:0.75rem;padding:3px 9px;" title="Copy from the most recent sitting of this subject">Copy last</button>`;
-    }
-    el.boundaryHint.innerHTML = html || "";
-    const rm = el.boundaryHint.querySelector('[data-bnd="remember"]');
-    const fg = el.boundaryHint.querySelector('[data-bnd="forget"]');
-    const cp = el.boundaryHint.querySelector('[data-bnd="copy"]');
-    if (rm) rm.addEventListener("click", () => rememberBoundary(subject));
-    if (fg) fg.addEventListener("click", () => forgetBoundary(subject));
-    if (cp) cp.addEventListener("click", () => copyLastBoundary(subject));
-  }
-
-  async function rememberBoundary(subject) {
-    if (!subject) return;
-    const profile = readBoundaryGrid();
-    if (!profile) { flash("Enter max and at least one grade mark first.", false); return; }
-    await saveSubjectMeta(subject, { boundaries: profile });
-    subjectBoundaries[subject] = profile;
-    currentBoundarySource = "Saved for this subject";
-    flash(`Boundaries remembered for ${subject}.`, true);
-    renderBoundaryControls();
-  }
-
-  async function forgetBoundary(subject) {
-    if (!subject) return;
-    await saveSubjectMeta(subject, { boundaries: null });
-    delete subjectBoundaries[subject];
-    currentBoundarySource = null;
-    lastBoundary = null;
-    flash(`Saved boundaries removed for ${subject}.`, true);
-    refreshBoundary();
-  }
-
-  function copyLastBoundary(subject) {
-    if (!subject) return;
-    const recent = papers
-      .filter((p) => p.subject === subject && p.gradeBoundaries && p.gradeBoundaries.gradesInOrder && p.gradeBoundaries.gradesInOrder.length)
-      .sort(compareSorted)[0];
-    if (!recent) { flash(`No earlier boundaries for ${subject}.`, false); return; }
-    boundaryDirty = true;
-    currentBoundarySource = "Copied from a previous sitting";
-    lastBoundary = recent.gradeBoundaries;
-    populateBoundaryGrid(recent.gradeBoundaries);
-    renderBoundaryControls();
-    updateLiveGrade();
-    flash("Copied boundaries from a previous sitting.", true);
-  }
-
-  // Persist a patch on the subject node (create it on the fly if it doesn't exist).
-  async function saveSubjectMeta(subject, patch) {
-    const nodes = (await getAllNodes()) || [];
-    const existing = nodes.find((n) => n.type === "subject" && (n.subject === subject || n.name === subject));
-    const base = existing || { type: "subject", subject, name: subject, customized: false, createdAt: Date.now() };
-    await addNode({ ...base, ...patch, updatedAt: Date.now() });
-  }
-
-  // Live "grade for the scores entered so far" readout against the grid.
-  function updateLiveGrade() {
-    if (!el.gradeLive) return;
-    const profile = readBoundaryGrid();
-    if (!profile) { el.gradeLive.innerHTML = ""; return; }
-    const sg = subjectGrade(pseudoSitting(), profile);
-    el.gradeLive.innerHTML = sg
-      ? `Grade with these scores: <b>${escapeHtml(String(sg.grade))}</b>` +
-        (sg.projected ? ` <em class="proj-label">proj · ${escapeHtml(String(sg.answered))}/${profile.gradesInOrder.length ? profile.gradesInOrder.length : "?"} papers</em>` : "")
-      : "";
-  }
-
-  function pseudoSitting() {
-    const results = [];
-    for (const row of el.slotList.querySelectorAll(".tracker-slot-editor")) {
-      const paper = row.querySelector(".tracker-slot-paper").value.trim();
-      if (!paper) continue;
-      const attempts = [];
-      for (const ar of row.querySelectorAll(".attempt-row")) {
-        const score = ar.querySelector("[data-att-score]").value.trim();
-        const max = ar.querySelector("[data-att-max]").value.trim();
-        if (score === "" && max === "") continue;
-        if (score === "" || max === "") continue;
-        const nScore = Number(score), nMax = Number(max);
-        if (!Number.isFinite(nScore) || !Number.isFinite(nMax)) continue;
-        attempts.push({ score: nScore, maxMarks: nMax, date: "" });
-      }
-      if (!attempts.length) continue;
-      results.push({ paper, score: attempts[attempts.length - 1].score, maxMarks: attempts[attempts.length - 1].maxMarks, date: "", attempts });
-    }
-    return { results };
+    flash(`Unlinked ${subject}.`, true);
   }
 
   // ---- view switching ----
@@ -809,23 +700,20 @@ export function initTrackerTool(deps, context = {}) {
     const showAll = !focusedSubject;
     const visible = visiblePapers();
 
-    el.resultCount.textContent = `${visible.length} sitting${visible.length === 1 ? "" : "s"}`;
+    if (el.tableInfo) {
+      el.tableInfo.innerHTML = showAll
+        ? `All subjects`
+        : `<b>${escapeHtml(focusedSubject)}</b> &middot; ${visible.length} sitting${visible.length === 1 ? "" : "s"}`;
+    }
 
     const anyNotes = visible.some((s) => !!s.notes);
     el.dropBtn.disabled = !anyNotes;
     el.collapseBtn.disabled = !anyNotes;
 
     if (showAll) {
-      el.scope.innerHTML = `<span class="tracker-scope">Scope: <b>All subjects</b></span>`;
+      if (el.linkArea) el.linkArea.innerHTML = "";
     } else {
-      const q = qualFor(focusedSubject);
-      const b = boardFor(focusedSubject);
-      const course = coursesBySubject[focusedSubject] || null;
-      el.scope.innerHTML = `<span class="tracker-scope">Scope: <b>${escapeHtml(focusedSubject)}</b>` +
-        (q ? ` <span class="tracker-sitting-badge">${escapeHtml(q)}</span>` : "") +
-        (b ? ` <span class="tracker-sitting-badge">${escapeHtml(b)}</span>` : "") +
-        (course ? ` <span class="tracker-sitting-badge bnd" title="${escapeHtml(courseSummary(course))}"><i class="fa-solid fa-link"></i> linked</span>` : "") +
-        `</span>`;
+      renderLinkArea();
     }
 
     el.paperGroups.innerHTML = "";
@@ -846,15 +734,13 @@ export function initTrackerTool(deps, context = {}) {
     const table = document.createElement("table");
     table.className = "sit-table";
     const thead = document.createElement("thead");
-    thead.innerHTML =
-      `<tr>` +
-      (showAll ? `<th class="col-subject">Subject</th>` : "") +
-      `<th class="col-session">Sitting</th>` +
-      `<th class="col-papers">Papers</th>` +
-      `<th class="col-boundary">Boundary</th>` +
-      `<th class="col-avg">Avg</th>` +
-      `<th class="col-actions"></th>` +
-      `</tr>`;
+    let header = `<tr>` + (showAll ? `<th class="col-subject">Subject</th>` : "");
+    if (cols.sitting) header += `<th class="col-session">Sitting</th>`;
+    header += `<th class="col-papers">Papers</th>`;
+    if (cols.boundary) header += `<th class="col-boundary">Boundary</th>`;
+    if (cols.avg) header += `<th class="col-avg">Avg</th>`;
+    header += `<th class="col-actions"></th></tr>`;
+    thead.innerHTML = header;
     table.appendChild(thead);
 
     const tbody = document.createElement("tbody");
@@ -936,7 +822,7 @@ export function initTrackerTool(deps, context = {}) {
     if (missing.length === 1) {
       answer = await dialog.prompt(`Is ${missing[0]} GCSE or A-Level?`, "GCSE");
     } else {
-      answer = await dialog.prompt(`What level are these subjects: ${missing.join(", ")}?\n(GCSE or A-Level - stored per subject, editable later)`, "GCSE");
+      answer = await dialog.prompt(`What level are these subjects: ${missing.join(", ")}?\n(GCSE or A-Level - drives the grade labels)`, "GCSE");
     }
     if (answer === null) return; // user declined
     const qual = (answer || "").trim();
@@ -954,19 +840,6 @@ export function initTrackerTool(deps, context = {}) {
     const alive = resolveBoundaryTable(sitting.subject, numberEq(sitting.year), sitting.series, cacheSrc) || sitting.gradeBoundaries || null;
     const gb = alive;
     const hasG = !!(gb && Array.isArray(gb.gradesInOrder) && gb.gradesInOrder.length && gb.grades && typeof gb.grades === "object");
-    let boundaryEl;
-    if (boundary !== null || hasG) {
-      const topLabel = escapeHtml(highestGradeLabel(sitting.subject));
-      const shownMark = hasG ? topGradeOf(gb) : boundary;
-      const tip = hasG ? boundsTooltip(gb) : null;
-      const badge =
-        `<span class="tracker-sitting-badge bnd"${tip !== null ? ` title="${escapeHtml(tip)}"` : ""}>` +
-        `${topLabel}${shownMark !== null ? ` &ge; ${shownMark}` : ""}` +
-        `</span>`;
-      boundaryEl = badge;
-    } else {
-      boundaryEl = `<span class="tracker-sitting-badge">&ndash;</span>`;
-    }
 
     const avg = sittingAverage(sitting);
     const avgEl = avg !== null
@@ -980,10 +853,16 @@ export function initTrackerTool(deps, context = {}) {
     if (showSubject) {
       cells.push(td(`<span class="sit-subject">${escapeHtml(sitting.subject || "Unassigned")}</span>`, "col-subject"));
     }
-    cells.push(td(`<span class="sit-session">${sessionTitle(sitting)}</span>`, "col-session"));
+    if (cols.sitting) {
+      cells.push(td(`<span class="sit-session">${sessionTitle(sitting)}</span>`, "col-session"));
+    }
     cells.push(td(`<div class="sit-papers">${scoreSummary(sitting)}${subjectGradeChip(sitting, gb)}</div>`, "col-papers"));
-    cells.push(td(boundaryEl, "col-boundary"));
-    cells.push(td(avgEl, "col-avg"));
+    if (cols.boundary) {
+      cells.push(td(boundaryBadges(sitting.subject, gb, hasG, boundary), "col-boundary"));
+    }
+    if (cols.avg) {
+      cells.push(td(avgEl, "col-avg"));
+    }
 
     const hasNote = !!sitting.notes;
     const actionsCell = document.createElement("td");
@@ -1016,6 +895,31 @@ export function initTrackerTool(deps, context = {}) {
     return { main: tr, note };
   }
 
+  // Boundary column content. Default: the top grade's threshold (from the fetched
+  // pack — the source of truth). When the user picked aim grades for the subject,
+  // show those thresholds instead so they see hit/miss against their target.
+  function boundaryBadges(subject, gb, hasG, boundary) {
+    const aim = hasG ? aimFor(subject) : [];
+    const tip = hasG ? boundsTooltip(gb) : null;
+    if (hasG && aim.length) {
+      const items = aim.map((label) => ({
+        label,
+        mark: gb.grades && gb.grades[label] != null ? gb.grades[label] : null
+      }));
+      if (items.length) {
+        return items.map((x) =>
+          `<span class="tracker-sitting-badge bnd" title="${escapeHtml(tip)}">${escapeHtml(x.label)} &ge; ${x.mark != null ? escapeHtml(String(x.mark)) : "&ndash;"}</span>`
+        ).join("");
+      }
+    }
+    if (boundary !== null || hasG) {
+      const topLabel = escapeHtml(highestGradeLabel(subject));
+      const shownMark = hasG ? topGradeOf(gb) : boundary;
+      return `<span class="tracker-sitting-badge bnd"${tip !== null ? ` title="${escapeHtml(tip)}"` : ""}>${topLabel}${shownMark !== null ? ` &ge; ${shownMark}` : ""}</span>`;
+    }
+    return `<span class="tracker-sitting-badge">&ndash;</span>`;
+  }
+
   function td(html, cls) {
     const c = document.createElement("td");
     if (cls) c.className = cls;
@@ -1033,55 +937,14 @@ export function initTrackerTool(deps, context = {}) {
   // ---- modal (add / edit a sitting) ----
   function openModal(sitting) {
     editingId = sitting ? sitting.id : null;
-    boundaryDirty = false;
-    currentBoundarySource = null;
-    lastBoundary = (sitting && sitting.gradeBoundaries) ? sitting.gradeBoundaries : null;
     slotSeq = (sitting && sitting.results) ? sitting.results.map((r) => r.paper || "").filter(Boolean) : [];
     el.modalTitle.textContent = editingId ? "Edit sitting" : "Add sitting";
 
     const initSubject = sitting ? (sitting.subject || "") : (focusedSubject || "");
     el.formSubject.value = initSubject;
-    el.formBoard.value = sitting ? boardFor(sitting.subject) : boardFor(initSubject);
-    el.formQualification.value = sitting ? (qualFor(sitting.subject) || "") : (qualFor(initSubject) || "");
     el.formYear.value = sitting ? (sitting.year ?? "") : "";
     el.formSeries.value = sitting ? (sitting.series || "") : "";
     el.formNotes.value = sitting ? (sitting.notes || "") : "";
-    el.courseState.innerHTML = "";
-    el.boundaryHint.innerHTML = "";
-    if (el.coursePicker) el.coursePicker.hidden = true;
-
-    // keep board + qualification in sync with subject selection
-    el.formSubject.oninput = () => {
-      boundaryDirty = false;
-      const b = boardFor(el.formSubject.value);
-      if (b) el.formBoard.value = b;
-      const q = qualFor(el.formSubject.value);
-      if (q) el.formQualification.value = q;
-      renderCourseState();
-      refreshBoundary();
-    };
-    el.formYear.oninput = () => refreshBoundary();
-    el.formSeries.onchange = () => refreshBoundary();
-    el.formQualification.onchange = () => renderCourseState();
-    el.formBoard.oninput = () => renderCourseState();
-    if (el.courseFilter) {
-      el.courseFilter.oninput = () => renderCourseList();
-    }
-
-    // live grade readout as papers/boundaries are edited
-    if (!el.modal._liveBound) {
-      el.modal._liveBound = true;
-      el.modal.addEventListener("input", (e) => {
-        if (!e.target) return;
-        if (e.target.closest && (e.target.closest("#trackerSlotList") || e.target.closest("#trackerBoundaryGrid"))) {
-          updateLiveGrade();
-          if (e.target.closest("#trackerBoundaryGrid")) {
-            boundaryDirty = true;
-            renderBoundaryControls();
-          }
-        }
-      });
-    }
 
     const slots = sitting ? (sitting.results || []) : [];
     el.slotList.innerHTML = "";
@@ -1093,8 +956,6 @@ export function initTrackerTool(deps, context = {}) {
 
     el.formMsg.textContent = "";
     el.modal.classList.add("open");
-    renderCourseState();
-    refreshBoundary();
     setTimeout(() => el.formSubject.focus(), 0);
   }
 
@@ -1181,13 +1042,11 @@ export function initTrackerTool(deps, context = {}) {
     const yearRaw = el.formYear.value.trim();
     const year = yearRaw === "" ? null : Number(yearRaw);
     const series = el.formSeries.value;
-    const gridBoundaries = readBoundaryGrid();
-    const boundary = gridBoundaries ? topGradeOf(gridBoundaries) : null;
+    const gradeBoundaries = resolveBoundaryTable(subject, year, series) || null;
+    const boundary = gradeBoundaries ? topGradeOf(gradeBoundaries) : null;
     const notes = el.formNotes.value.trim();
-    const examBoard = el.formBoard.value.trim() || boardFor(subject);
-    const qualification = el.formQualification.value.trim() || qualFor(subject);
-
-    const gradeBoundaries = gridBoundaries || resolveBoundaryTable(subject, year, series) || null;
+    const examBoard = boardFor(subject);
+    const qualification = qualFor(subject);
 
     if (!subject) { flash("Subject is required.", false); return null; }
     if ((year !== null && !Number.isFinite(year))) { flash("Enter a valid year.", false); return null; }
@@ -1316,14 +1175,6 @@ export function initTrackerTool(deps, context = {}) {
     }
   }
 
-  // ---- prompt for board (per subject) ----
-  async function promptBoard(subject) {
-    const current = boardFor(subject);
-    const val = await dialog.prompt(`Exam board for ${subject}:`, current || "");
-    if (val === null) return;
-    await setSubjectBoard(subject, val);
-  }
-
   // ---- export / import ----
   function exportData() {
     const data = {
@@ -1336,7 +1187,6 @@ export function initTrackerTool(deps, context = {}) {
         qualification: n.qualification || "",
         customized: n.customized || false,
         officialCourse: n.officialCourse ?? null,
-        boundaries: n.boundaries ?? null,
         createdAt: n.createdAt, updatedAt: n.updatedAt
       })),
       sittings: papers.map((p) => ({
@@ -1431,7 +1281,6 @@ export function initTrackerTool(deps, context = {}) {
           qualification: meta.qualification || "",
           customized: meta.customized || false,
           officialCourse: meta.officialCourse ?? null,
-          boundaries: meta.boundaries ?? null,
           createdAt: Date.now(), updatedAt: Date.now()
         });
       } else if (meta.examBoard || meta.qualification || meta.customized || meta.officialCourse) {
@@ -1456,7 +1305,6 @@ export function initTrackerTool(deps, context = {}) {
         qualification: meta.qualification || "",
         customized: meta.customized || false,
         officialCourse: meta.officialCourse ?? null,
-        boundaries: meta.boundaries ?? null,
         createdAt: Date.now(), updatedAt: Date.now()
       });
     } else {
@@ -1488,32 +1336,99 @@ export function initTrackerTool(deps, context = {}) {
     el.cancelBtn.addEventListener("click", () => closeModal());
     el.modalClose.addEventListener("click", () => closeModal());
     el.modalOverlay.addEventListener("click", () => closeModal());
+
+    // ---- link-to-official-subject picker (persistent popover) ----
+    el.linkArea.addEventListener("click", (e) => {
+      const pill = e.target.closest("button");
+      if (!pill) return;
+      e.stopPropagation();
+      if (pill.dataset.act === "suggest") {
+        if (linkHint) applyOfficialCourse(focusedSubject, linkHint);
+      } else {
+        openLinkPicker(focusedSubject);
+      }
+    });
+    el.linkFilter.addEventListener("input", () => renderCourseList());
+    el.linkFilters.addEventListener("click", (e) => {
+      const ch = e.target.closest(".tracker-chip");
+      if (!ch) return;
+      const f = ch.dataset.f || "";
+      if (f === "") {
+        chipTokens.clear();
+        el.linkFilter.value = "";
+      } else {
+        const typed = normalizeSearch(el.linkFilter.value);
+        const typedTokens = typed ? typed.split(/\s+/).filter(Boolean) : [];
+        const inTyped = typedTokens.includes(f) || (f === "pearson" && typedTokens.some((t) => t.includes("edexcel")));
+        if (chipTokens.has(f) || inTyped) {
+          chipTokens.delete(f);
+          const keep = typedTokens.filter((t) => t !== f && !(f === "pearson" && t.includes("edexcel")));
+          el.linkFilter.value = keep.join(" ");
+        } else {
+          chipTokens.add(f);
+        }
+      }
+      renderCourseList();
+    });
+    el.linkList.addEventListener("click", (e) => {
+      const item = e.target.closest(".tracker-course-item");
+      if (!item) return;
+      const c = listCachedCourses(loadBoundaryCache()).find(
+        (x) => x.board === item.dataset.board && x.qual === item.dataset.qual && x.code === item.dataset.code
+      );
+      if (c) applyOfficialCourse(focusedSubject, c);
+    });
+    el.unlinkBtn.addEventListener("click", () => unlinkOfficialCourse(focusedSubject));
     el.addSlotBtn.addEventListener("click", () => addSlotRow(null));
     el.exportBtn.addEventListener("click", exportData);
     el.importBtn.addEventListener("click", () => el.importFile.click());
-    if (el.courseFilters) {
-      el.courseFilters.querySelectorAll(".tracker-chip").forEach((ch) =>
-        ch.addEventListener("click", () => {
-          const f = ch.dataset.f || "";
-          if (f === "") {
-            chipTokens.clear();
-            el.courseFilter.value = "";
-          } else {
-            const typed = normalizeSearch(el.courseFilter.value);
-            const typedTokens = typed ? typed.split(/\s+/).filter(Boolean) : [];
-            const inTyped = typedTokens.includes(f) || (f === "pearson" && typedTokens.some((t) => t.includes("edexcel")));
-            if (chipTokens.has(f) || inTyped) {
-              chipTokens.delete(f);
-              const keep = typedTokens.filter((t) => t !== f && !(f === "pearson" && t.includes("edexcel")));
-              el.courseFilter.value = keep.join(" ");
-            } else {
-              chipTokens.add(f);
-            }
-          }
-          renderCourseList();
-        })
-      );
-    }
+
+    // ---- table customise popover (persistent element, bound once) ----
+    el.colsBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeLinkPicker();
+      if (el.colsPop.hidden) {
+        renderBoundaryChips();
+        renderColList();
+        el.colsPop.hidden = false;
+      } else {
+        el.colsPop.hidden = true;
+      }
+    });
+    el.colsPop.addEventListener("click", (e) => {
+      const chip = e.target.closest(".tracker-grade-chip");
+      if (chip) {
+        toggleAim(focusedSubject, chip.dataset.g);
+        renderBoundaryChips();
+        return;
+      }
+      const colBtn = e.target.closest(".tracker-col-toggle");
+      if (colBtn) {
+        cols = loadCols();
+        cols[colBtn.dataset.col] = !cols[colBtn.dataset.col];
+        saveCols();
+        renderColList();
+        renderPapers();
+      }
+    });
+    el.cusReset.addEventListener("click", () => {
+      cols = { ...COL_DEFAULTS };
+      saveCols();
+      aimGrades = {};
+      saveAimGrades();
+      renderColList();
+      renderBoundaryChips();
+      renderPapers();
+    });
+    document.addEventListener("click", (e) => {
+      if (el.colsPop && !el.colsPop.hidden && !e.target.closest(".tracker-cus-wrap")) el.colsPop.hidden = true;
+      if (el.linkPop && !el.linkPop.hidden && !e.target.closest(".tracker-link-area")) el.linkPop.hidden = true;
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      if (el.colsPop) el.colsPop.hidden = true;
+      if (el.linkPop) el.linkPop.hidden = true;
+    });
     el.importFile.addEventListener("change", async () => {
       if (el.importFile.files[0]) await importDataFile(el.importFile.files[0]);
       el.importFile.value = "";

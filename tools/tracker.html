@@ -61,10 +61,10 @@
     .tracker-page-head p { margin: 0 0 16px; color: var(--text-muted); font-size: 0.85rem; }
 
     #trackerToolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 18px; flex-wrap: wrap; }
-    #trackerToolbar > #trackerScope:first-child,
-    #trackerToolbar > #trackerScope { margin-right: auto; }
-    #trackerScope { white-space: nowrap; }
-    .tracker-add-pill { margin-left: 14px; order: 99; }
+    #trackerToolbar #trackerTableInfo { font-size: 0.88rem; color: var(--text-muted); white-space: nowrap; }
+    #trackerToolbar #trackerTableInfo b { color: var(--accent); }
+    .tracker-add-pill { order: 99; }
+    #trackerDropBtn { margin-left: auto; }
     #trackerToolbar input[type="text"] {
       flex: 1; min-width: 200px; padding: 10px 12px; border-radius: 10px;
       border: 1px solid rgba(255,255,255,0.12); font: inherit; font-size: 0.85rem;
@@ -84,11 +84,6 @@
       background: rgba(44,255,179,0.1); border: 1px solid rgba(44,255,179,0.25);
       border-radius: 999px; padding: 2px 8px;
     }
-    .tracker-subject-group .board-edit {
-      font-size: 0.78rem; color: var(--text-muted); margin-left: auto; cursor: pointer;
-      border: 1px dashed rgba(255,255,255,0.18); border-radius: 999px; padding: 2px 10px;
-    }
-    .tracker-subject-group .board-edit:hover { border-color: var(--accent-soft); color: var(--accent); }
 
     .tracker-sitting {
       background: linear-gradient(135deg, var(--panel-strong), var(--panel-bg));
@@ -168,10 +163,6 @@
       padding: 0; border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(255,255,255,0.025);
     }
     .note-inner { padding: 9px 16px 11px; font-size: 0.82rem; color: var(--text-muted); white-space: pre-line; line-height: 1.5; }
-    .tracker-scope {
-      font-size: 0.85rem; color: var(--text-muted); font-weight: 600;
-    }
-    .tracker-scope b { color: var(--text-main); }
 
     .tracker-empty { color: var(--text-muted); border: 1px dashed rgba(255,255,255,0.15); border-radius: 16px; padding: 32px; text-align: center; }
     .tracker-empty button { margin-top: 12px; }
@@ -199,9 +190,81 @@
     #trackerModalTitle { margin: 0 0 16px; font-size: 1.15rem; font-weight: 600; color: var(--accent); }
     #trackerModalClose { position: absolute; top: 14px; right: 16px; background: none; border: none; color: var(--text-muted); font-size: 1.3rem; cursor: pointer; }
     #trackerModalClose:hover { color: var(--text-main); }
+    #trackerModalClose:hover { color: var(--text-main); }
+
+    .tracker-cus-wrap { position: relative; }
+    #trackerCustomiseBtn {
+      display: inline-flex; align-items: center; gap: 7px;
+      background: linear-gradient(130deg, rgba(44,255,179,0.26), rgba(44,255,179,0.12));
+      border: 1px solid rgba(44,255,179,0.5); color: #eafff5;
+      border-radius: 10px; padding: 8px 15px; font: inherit; font-size: 0.85rem; font-weight: 600;
+      cursor: pointer; transition: all 0.2s ease;
+    }
+    #trackerCustomiseBtn:hover { background: linear-gradient(130deg, rgba(44,255,179,0.4), rgba(44,255,179,0.2)); transform: translateY(-1px); }
+    #trackerCustomisePop {
+      position: absolute; top: calc(100% + 8px); right: 0; z-index: 30;
+      width: 280px; max-width: calc(100vw - 32px); background: #1c1c1e;
+      border: 1px solid var(--glass-border); border-radius: 14px; padding: 14px;
+      box-shadow: 0 14px 36px rgba(0,0,0,0.5); box-sizing: border-box;
+    }
+    #trackerCustomisePop[hidden] { display: none; }
+    .tracker-cus-sec { margin-bottom: 14px; }
+    .tracker-cus-sec:last-of-type { margin-bottom: 0; }
+    .tracker-cus-title { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin: 0 0 8px; }
+    .tracker-grade-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .tracker-chip.tracker-grade-chip { min-width: 36px; padding: 5px 0; text-align: center; justify-content: center; }
+    .tracker-chip.tracker-grade-chip .bmark { font-weight: 700; font-size: 0.8rem; }
+    .tracker-cus-note { font-size: 0.7rem; color: var(--text-muted); margin-top: 8px; line-height: 1.45; }
+    .tracker-cus-empty { font-size: 0.78rem; color: var(--text-muted); line-height: 1.5; }
+    .tracker-col-toggle {
+      display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+      background: none; border: none; color: var(--text-main); font: inherit; font-size: 0.86rem;
+      padding: 6px 8px; border-radius: 8px; cursor: pointer;
+    }
+    .tracker-col-toggle:hover { background: rgba(255,255,255,0.05); }
+    .tracker-col-toggle .check { width: 15px; color: var(--accent); font-weight: 700; }
+    .tracker-col-toggle.off .check { color: transparent; }
+    .tracker-cus-reset { margin-top: 12px; background: none; border: none; color: var(--text-muted); font-size: 0.76rem; cursor: pointer; padding: 2px 0; }
+    .tracker-cus-reset:hover { color: var(--accent); }
+
+    /* link-to-official-subject control */
+    .tracker-link-area { position: relative; display: inline-flex; align-items: center; margin-left: 10px; }
+    .tracker-link-pill {
+      display: inline-flex; align-items: center; gap: 6px; max-width: 300px;
+      background: none; border: 1px dashed rgba(255,255,255,0.22); color: var(--text-muted);
+      border-radius: 999px; padding: 4px 11px; font: inherit; font-size: 0.76rem; cursor: pointer;
+      transition: all 0.15s ease; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .tracker-link-pill:hover { border-color: var(--accent-soft); color: var(--accent); }
+    .tracker-link-pill.linked { border-style: solid; border-color: rgba(44,255,179,0.4); color: var(--accent); background: rgba(44,255,179,0.08); }
+    .tracker-link-pill.suggest { border-style: solid; border-color: rgba(255,196,0,0.4); color: #ffd166; background: rgba(255,196,0,0.08); }
+    #trackerLinkPop {
+      position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
+      width: 300px; max-width: calc(100vw - 32px); background: #1c1c1e;
+      border: 1px solid var(--glass-border); border-radius: 14px; padding: 12px;
+      box-shadow: 0 14px 36px rgba(0,0,0,0.5); box-sizing: border-box;
+    }
+    #trackerLinkPop[hidden] { display: none; }
+    #trackerLinkFilter {
+      padding: 9px 11px; border-radius: 9px; border: 1px solid rgba(255,255,255,0.12);
+      font: inherit; font-size: 0.84rem; background: rgba(255,255,255,0.05); color: var(--text-main);
+      width: 100%; box-sizing: border-box;
+    }
+    #trackerLinkFilter:focus { outline: 2px solid var(--accent-soft); }
+    .tracker-course-filters { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .tracker-course-list { max-height: 230px; overflow: auto; margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+    .tracker-course-board { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin: 8px 0 2px; }
+    .tracker-course-item {
+      text-align: left; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+      color: var(--text-main); border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 0.82rem; cursor: pointer;
+    }
+    .tracker-course-item:hover { border-color: var(--accent-soft); background: rgba(44,255,179,0.07); }
+    .tracker-course-item.sel { border-color: var(--accent); color: var(--accent); }
+    .tracker-course-item .course-qual { color: var(--text-muted); font-size: 0.75rem; }
+    .tracker-course-item .course-code { color: var(--accent); font-weight: 600; }
+    .tracker-course-empty { font-size: 0.8rem; color: var(--text-muted); padding: 8px 4px; line-height: 1.5; }
 
     .tracker-form-row { margin-bottom: 12px; display: flex; flex-direction: column; gap: 6px; }
-    .tracker-auto-hidden { display: none; }
     .tracker-form-row label { font-size: 0.8rem; color: var(--text-muted); }
     .tracker-form-row input, .tracker-form-row select, .tracker-form-row textarea {
       padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.12);
@@ -242,14 +305,6 @@
     .tracker-form-msg.err { color: #ff8c8c; }
 
     /* linked subject + auto grade boundaries */
-    .tracker-muted-hint { font-weight: 400; opacity: 0.75; font-size: 0.75rem; }
-    .tracker-course-state { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 30px; }
-    .tracker-course-linked { font-size: 0.82rem; color: var(--accent); }
-    .tracker-course-none { font-size: 0.82rem; color: var(--text-muted); }
-    .tracker-course-picker { border: 1px solid var(--glass-border); border-radius: 12px; padding: 10px; margin-top: 8px; }
-    .tracker-course-picker input { padding: 9px 11px; border-radius: 9px; border: 1px solid rgba(255,255,255,0.12); font: inherit; font-size: 0.86rem; background: rgba(255,255,255,0.05); color: var(--text-main); width: 100%; box-sizing: border-box; }
-    .tracker-course-picker input:focus { outline: 2px solid var(--accent-soft); }
-    .tracker-course-filters { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
     .tracker-chip {
       background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12);
       color: var(--text-muted); border-radius: 999px; padding: 4px 12px;
@@ -292,30 +347,6 @@
       transition: all 0.15s ease;
     }
     .tracker-slot-add:hover { background: rgba(44,255,179,0.14); border-color: var(--accent); }
-    .tracker-course-list { max-height: 230px; overflow: auto; margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
-    .tracker-course-board { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin: 8px 0 2px; }
-    .tracker-course-item {
-      text-align: left; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
-      color: var(--text-main); border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 0.82rem; cursor: pointer;
-    }
-    .tracker-course-item:hover { border-color: var(--accent-soft); background: rgba(44,255,179,0.07); }
-    .tracker-course-item.sel { border-color: var(--accent); color: var(--accent); }
-    .tracker-course-item .course-qual { color: var(--text-muted); font-size: 0.75rem; }
-    .tracker-course-item .course-code { color: var(--accent); font-weight: 600; }
-    .tracker-course-empty { font-size: 0.8rem; color: var(--text-muted); padding: 8px 4px; line-height: 1.5; }
-    .tracker-boundary-hint { font-size: 0.72rem; color: var(--text-muted); line-height: 1.5; display: block; }
-    .tracker-boundary-hint .bnd-auto { color: var(--accent); font-weight: 600; }
-    .tracker-boundary-field { grid-column: 1 / -1; }
-    .tracker-boundary-grid { display: flex; flex-wrap: wrap; gap: 7px; }
-    .tracker-bnd-cell { display: flex; flex-direction: column; gap: 3px; width: 52px; }
-    .tracker-bnd-cell .tracker-bnd-cap { font-size: 0.62rem; text-align: center; color: var(--text-muted); letter-spacing: 0.04em; }
-    .tracker-bnd-cell input { padding: 5px 4px; border-radius: 9px; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.05); color: var(--text-main); text-align: center; font-size: 0.82rem; min-width: 0; }
-    .tracker-bnd-cell .tracker-bnd-label { font-weight: 600; color: var(--accent-soft); }
-    .tracker-bnd-cell.tracker-bnd-max { width: 56px; }
-    .tracker-bnd-cell.tracker-bnd-max input { color: var(--text-main); font-weight: 700; }
-    .tracker-bnd-cell input:focus { outline: 1px solid var(--accent); }
-    .tracker-grade-live { font-size: 0.78rem; color: var(--text-main); min-height: 1.1em; }
-    .tracker-grade-live .proj-label { color: var(--accent); font-style: normal; font-weight: 600; }
 
     @media (max-width: 700px), (pointer: coarse) and (hover: none) {
       #trackerTool,
@@ -325,7 +356,6 @@
       #trackerPapers, #trackerStats { padding: 14px 12px; }
       #trackerToolbar input[type="text"] { min-width: 0; flex-basis: 100%; }
       #trackerToolbar button, #trackerToolbar .tracker-btn { flex: 1 1 auto; }
-      #trackerScope, #trackerResultCount { width: 100%; }
       .tracker-sitting-head { flex-wrap: wrap; padding: 11px 12px; }
       .head-scores { width: 100%; }
       .sit-table { min-width: 620px; }
@@ -350,16 +380,49 @@
     <div id="trackerPapers">
       <div class="tracker-page-head">
         <h2>Papers</h2>
-        <p>Each entry is one sitting (a paper taken in a given year &amp; series), with per-paper scores and retakes. Set the exam board once per subject.</p>
+        <p>Each entry is one sitting (a paper taken in a given year &amp; series), with per-paper scores and retakes. Grade boundaries come straight from the fetched subject pack.</p>
       </div>
       <div id="trackerToolbar">
         <datalist id="trackerSubjectList"></datalist>
-        <span id="trackerScope"></span>
-        <span id="trackerResultCount"></span>
+        <span id="trackerTableInfo"></span>
+        <span id="trackerLinkArea" class="tracker-link-area"></span>
         <button id="trackerDropBtn" class="tracker-btn" title="Expand all sitting notes">Expand all</button>
         <button id="trackerCollapseBtn" class="tracker-btn" title="Collapse all sitting notes">Collapse all</button>
         <button id="trackerAddBtn" class="tracker-btn primary tracker-add-pill">+ Add sitting</button>
+        <div class="tracker-cus-wrap">
+          <button type="button" id="trackerCustomiseBtn" title="Choose the target grades the boundary column shows, and which columns appear">
+            <i class="fa-solid fa-sliders" aria-hidden="true"></i> Customise
+          </button>
+          <div id="trackerCustomisePop" hidden>
+            <div class="tracker-cus-sec">
+              <div class="tracker-cus-title">Target grades</div>
+              <div id="trackerBoundaryChips" class="tracker-grade-chips"></div>
+              <div id="trackerBoundaryNote" class="tracker-cus-note"></div>
+            </div>
+            <div class="tracker-cus-sec">
+              <div class="tracker-cus-title">Columns</div>
+              <div id="trackerColList"></div>
+            </div>
+            <button type="button" id="trackerCusReset" class="tracker-cus-reset">Reset defaults</button>
+          </div>
+        </div>
       </div>
+
+      <div id="trackerLinkPop" hidden>
+        <div class="tracker-cus-title" style="margin-bottom:8px;">Link to official subject</div>
+        <input id="trackerLinkFilter" type="text" placeholder="Search subjects, codes, AQA/OCR/Pearson, GCSE/A-Level..." />
+        <div id="trackerLinkFilters" class="tracker-course-filters">
+          <button type="button" class="tracker-chip active" data-f="">All</button>
+          <button type="button" class="tracker-chip" data-f="gcse">GCSE</button>
+          <button type="button" class="tracker-chip" data-f="alevel">A-Level</button>
+          <button type="button" class="tracker-chip" data-f="aqa">AQA</button>
+          <button type="button" class="tracker-chip" data-f="ocr">OCR</button>
+          <button type="button" class="tracker-chip" data-f="pearson">Pearson</button>
+        </div>
+        <div id="trackerLinkList" class="tracker-course-list"></div>
+        <button type="button" id="trackerUnlinkBtn" class="tracker-cus-reset" hidden>Unlink subject</button>
+      </div>
+
       <div id="trackerPaperGroups"></div>
     </div>
 
@@ -382,22 +445,6 @@
           <label>Subject</label>
           <input id="trackerFormSubject" list="trackerSubjectList" placeholder="e.g. Maths" />
         </div>
-        <div class="tracker-form-row" id="trackerQualRow">
-          <label>Qualification</label>
-          <select id="trackerFormQualification">
-            <option value="">--</option>
-            <option value="GCSE">GCSE</option>
-            <option value="A-Level">A-Level</option>
-          </select>
-        </div>
-        <div class="tracker-form-row" id="trackerBoardRow">
-          <label>Exam board (per subject)</label>
-          <input id="trackerFormBoard" list="trackerBoardList" placeholder="e.g. AQA" />
-          <datalist id="trackerBoardList">
-            <option value="AQA"></option><option value="Edexcel"></option><option value="OCR"></option>
-            <option value="WJEC"></option><option value="CCEA"></option><option value="Cambridge"></option>
-          </datalist>
-        </div>
         <div class="tracker-form-row">
           <label>Year</label>
           <input id="trackerFormYear" type="number" placeholder="2024" />
@@ -414,28 +461,6 @@
             <option value="Mock">Mock</option>
             <option value="Specimen">Specimen</option>
           </select>
-        </div>
-        <div class="tracker-form-row tracker-boundary-field">
-          <label>Grade boundaries <span class="tracker-muted-hint">— max + per-grade marks, editable</span></label>
-          <div id="trackerBoundaryGrid" class="tracker-boundary-grid"></div>
-          <div id="trackerBoundaryHint" class="tracker-boundary-hint"></div>
-          <div id="trackerGradeLive" class="tracker-grade-live"></div>
-        </div>
-      </div>
-      <div class="tracker-form-row">
-        <label>Linked subject <span class="tracker-muted-hint">— auto grade boundaries when cached</span></label>
-        <div id="trackerCourseState" class="tracker-course-state"></div>
-        <div id="trackerCoursePicker" class="tracker-course-picker" hidden>
-          <input id="trackerCourseFilter" type="text" placeholder="Search subjects, codes, AQA/OCR/Pearson, GCSE/A-Level..." />
-          <div id="trackerCourseFilters" class="tracker-course-filters">
-            <button type="button" class="tracker-chip active" data-f="">All</button>
-            <button type="button" class="tracker-chip" data-f="gcse">GCSE</button>
-            <button type="button" class="tracker-chip" data-f="alevel">A-Level</button>
-            <button type="button" class="tracker-chip" data-f="aqa">AQA</button>
-            <button type="button" class="tracker-chip" data-f="ocr">OCR</button>
-            <button type="button" class="tracker-chip" data-f="pearson">Pearson</button>
-          </div>
-          <div id="trackerCourseList" class="tracker-course-list"></div>
         </div>
       </div>
       <div class="tracker-form-row">

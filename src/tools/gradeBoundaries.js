@@ -171,11 +171,10 @@ function numberEq(v) {
 
 function seriesProximity(series, year, monthAbbr) {
   const y = numberEq(year);
-  const d = (y === null || series == null || series.year == null)
-    ? 0
-    : Math.abs(Number(series.year) - y);
-  const sameMonth = !monthAbbr || (series && series.month === monthAbbr);
-  return d * 4 + (sameMonth ? 0 : 1);
+  if (y === null || series == null || series.year == null) return { d: 0, exactYear: false, exactMonth: false };
+  const d = Math.abs(Number(series.year) - y);
+  const sameMonth = monthAbbr ? series.month === monthAbbr : true;
+  return { d, exactYear: d === 0, exactMonth: sameMonth };
 }
 
 // Resolve the per-grade boundary table for a linked official course and a
@@ -193,15 +192,27 @@ export function findGradeTable(cache, course, year, seriesWord) {
     if (String(entry.qual || "").toLowerCase() !== qualId) continue;
     const subject = findSubjectInEntry(entry, course);
     if (!subject) continue;
+    const p = seriesProximity(entry.series, year, monthAbbr);
     candidates.push({
       subject,
       series: entry.series || null,
       fetchedAt: entry.fetchedAt || 0,
-      score: seriesProximity(entry.series, year, monthAbbr)
+      prox: p
     });
   }
   if (candidates.length === 0) return null;
-  candidates.sort((a, b) => a.score - b.score || b.fetchedAt - a.fetchedAt);
+  // Prefer the sitting's exact year+month, then the exact year, then the
+  // closest year, then the most recent fetch. Never lets a different-year row
+  // silently share the latest fetched table.
+  candidates.sort((a, b) => {
+    const ea = a.prox.exactYear && a.prox.exactMonth;
+    const eb = b.prox.exactYear && b.prox.exactMonth;
+    if (ea !== eb) return ea ? -1 : 1;
+    if (a.prox.exactYear !== b.prox.exactYear) return a.prox.exactYear ? -1 : 1;
+    if (a.prox.d !== b.prox.d) return a.prox.d - b.prox.d;
+    if (a.prox.exactMonth !== b.prox.exactMonth) return a.prox.exactMonth ? -1 : 1;
+    return b.fetchedAt - a.fetchedAt;
+  });
   const best = candidates[0];
   return {
     subject: best.subject,
