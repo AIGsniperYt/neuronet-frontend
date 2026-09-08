@@ -781,7 +781,7 @@ export function initTrackerTool(deps, context = {}) {
       const isSel = !!current && c.board === current.board && c.code === current.code && c.qual === current.qual && normalizeTitle(c.title) === normalizeTitle(current.title);
       const codeTxt = c.code ? `<span class="course-code">${escapeHtml(c.code)}</span> ` : "";
       html +=
-        `<button type="button" class="tracker-course-item${isSel ? " sel" : ""}" data-board="${escapeHtml(c.board)}" data-qual="${escapeHtml(c.qual)}" data-code="${escapeHtml(c.code)}">` +
+        `<button type="button" class="tracker-course-item${isSel ? " sel" : ""}" data-board="${escapeHtml(c.board)}" data-qual="${escapeHtml(c.qual)}" data-code="${escapeHtml(c.code)}" data-title="${escapeHtml(c.title || "")}">` +
         `${codeTxt}${escapeHtml(c.title)} <span class="course-qual">${escapeHtml(c.qualName)}${c.maxMark ? ` &middot; max ${escapeHtml(String(c.maxMark))}` : ""}</span>` +
         `</button>`;
     }
@@ -1696,7 +1696,7 @@ export function initTrackerTool(deps, context = {}) {
       const item = e.target.closest(".tracker-course-item");
       if (!item) return;
       const c = listCachedCourses(loadBoundaryCache()).find(
-        (x) => x.board === item.dataset.board && x.qual === item.dataset.qual && x.code === item.dataset.code
+        (x) => x.board === item.dataset.board && x.qual === item.dataset.qual && x.code === item.dataset.code && normalizeTitle(x.title) === normalizeTitle(item.dataset.title)
       );
       if (c) applyOfficialCourse(focusedSubject, c);
     });
