@@ -536,6 +536,7 @@ export function initTrackerTool(deps, context = {}) {
 
   function closeLinkPicker() {
     if (el.linkPop) el.linkPop.hidden = true;
+    clearLinkScratch();
   }
 
   // Populate the link picker with official subjects for EVERY exam board —
@@ -556,15 +557,15 @@ export function initTrackerTool(deps, context = {}) {
     }
     linkSeedBusy = true;
     renderCourseList();
+    linkScratch("Scanning AQA, OCR and Pearson for grade boundaries...");
     try {
       // Best-effort discovery for OCR (no baseline list) and hashed URLs for
       // AQA/Pearson. Deterministic fallback URLs still work on failure.
       try {
-        await discoverBoundarySeries(() => {});
+        await discoverBoundarySeries((m) => linkScratch(m));
       } catch {
         /* keep going with baseline series + fallback URLs */
       }
-      const cache = loadBoundaryCache();
       const boards = ["aqa", "ocr", "pearson"];
       const quals = ["gcse", "aLevel", "as"];
       const shownBusy = el.linkList && listCachedCourses(loadBoundaryCache()).length === 0;
@@ -575,6 +576,7 @@ export function initTrackerTool(deps, context = {}) {
       for (const board of boards) {
         const list = boundarySeriesList(board);
         if (list.length === 0) continue;
+        const boardName = boardIdToName(board);
         const jobs = [];
         for (const series of list) {
           for (const qualId of quals) {
@@ -589,16 +591,26 @@ export function initTrackerTool(deps, context = {}) {
         // the skeleton animation / spinner actually repaint between files.
         for (const job of jobs) {
           await sleep(0);
+          const qualName = qualIdToName(job.qualId);
+          const label = `${job.series.label} ${boardName} ${qualName}`;
+          linkScratch(`Fetching ${label}...`);
           try {
-            await ensureBoundarySeries(job.board, { id: job.qualId }, job.series, () => {});
+            await ensureBoundarySeries(job.board, { id: job.qualId }, job.series, (m) =>
+              linkScratch(`${label}: ${m}`)
+            );
           } catch {
             /* best-effort; that board/qual/series just stays uncached */
           }
         }
         // Let partial results appear as soon as each board's series finish, so
         // the picker fills live instead of hanging until the whole pass ends.
+        const boardCount = listCachedCourses(loadBoundaryCache())
+          .filter((c) => c.board === board).length;
+        linkScratch(`${boardCount} ${boardName} subjects indexed so far...`);
         renderCourseList();
       }
+      const total = listCachedCourses(loadBoundaryCache()).length;
+      linkScratchDone(`${total} official subjects ready — search to link.`);
     } finally {
       linkSeedBusy = false;
       renderCourseList();
@@ -672,20 +684,61 @@ export function initTrackerTool(deps, context = {}) {
     );
   }
 
+  // Scraper-style "scratch buffer": one overwriting log line that sweeps a
+  // green gradient while work is in progress, fills on completion, then
+  // breathes softly. It never accumulates history — the most recent message
+  // replaces the previous one.
+  let linkScratchLine = null;
+  let linkCompletionTimer = null;
+
+  function linkScratch(message, shimmer = linkSeedBusy) {
+    if (!el.linkStatus) return;
+    el.linkStatus.hidden = false;
+    if (!linkScratchLine) {
+      linkScratchLine = document.createElement("div");
+      linkScratchLine.className = "tracker-log-line";
+      linkScratchLine.innerHTML = `<span class="tracker-log-text"></span>`;
+      el.linkStatus.appendChild(linkScratchLine);
+    }
+    const text = linkScratchLine.querySelector(".tracker-log-text");
+    if (text) text.textContent = message;
+    if (linkCompletionTimer) clearTimeout(linkCompletionTimer);
+    linkCompletionTimer = null;
+    linkScratchLine.classList.remove("idle", "tracker-log-done", "tracker-log-glow");
+    linkScratchLine.classList.toggle("tracker-log-shimmer", !!shimmer);
+  }
+
+  function linkScratchDone(message) {
+    linkScratch(message, false);
+    if (!linkScratchLine) return;
+    if (linkCompletionTimer) clearTimeout(linkCompletionTimer);
+    linkScratchLine.classList.remove("tracker-log-shimmer", "tracker-log-done", "tracker-log-glow");
+    linkScratchLine.classList.add("tracker-log-done");
+    linkCompletionTimer = setTimeout(() => {
+      linkScratchLine.classList.remove("tracker-log-done");
+      linkScratchLine.classList.add("tracker-log-glow");
+      linkCompletionTimer = null;
+    }, 2000);
+  }
+
+  function clearLinkScratch() {
+    if (linkCompletionTimer) clearTimeout(linkCompletionTimer);
+    linkCompletionTimer = null;
+    linkScratchLine = null;
+    if (el.linkStatus) {
+      el.linkStatus.innerHTML = "";
+      el.linkStatus.hidden = true;
+    }
+  }
+
   function renderLinkStatus() {
     if (!el.linkStatus) return;
     if (!linkSeedBusy) {
-      el.linkStatus.hidden = true;
-      el.linkStatus.innerHTML = "";
       if (el.linkFilter) el.linkFilter.classList.remove("tracker-input-skeleton");
       return;
     }
     if (el.linkFilter) el.linkFilter.classList.add("tracker-input-skeleton");
-    const count = listCachedCourses(loadBoundaryCache()).length;
-    el.linkStatus.hidden = false;
-    el.linkStatus.innerHTML =
-      `<span class="tracker-track-spinner" aria-hidden="true"></span>` +
-      `<span>Fetching official subjects from AQA, OCR and Pearson... <b>${count}</b> loaded so far</span>`;
+    if (!linkScratchLine) linkScratch("Fetching official subjects from AQA, OCR and Pearson...");
   }
 
   const TRACKER_SKELETON_ROWS = 6;
