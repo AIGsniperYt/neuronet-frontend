@@ -10,7 +10,17 @@ import * as XLSX from "../vendor/xlsx/index.js";
 import { extractPdfLayoutLines, parsePdfBoundaries } from "./pdfBoundaries.js";
 
 export const BOUNDARY_CACHE_KEY = "neuronet:gradeBoundaries";
+export const BOUNDARY_STATUS_KEY = "neuronet:boundaryStatus";
 export const BOUNDARY_CACHE_VERSION = 2;
+
+// How long a completed sweep stays "fresh" before we re-scan for new series
+// (so the tracker's subject picker never fires a fetch set the first time it
+// opens, but still picks up newly-released series every so often).
+const SWEEP_FRESH_MS = 8 * 60 * 60 * 1000;
+// Don't retry a series that just failed (dead legacy URLs) within this window —
+// previously every open of the picker retried every dead series, stalling the
+// modal on a full fetch pass each time.
+const RETRY_WINDOW_MS = 60 * 60 * 1000;
 
 const RESULTS_WINDOW_MS = 60 * 24 * 60 * 60 * 1000; // ~60 days, results-day policy
 
@@ -69,6 +79,172 @@ export function flushBoundaryCache() {
     persistTimer = null;
   }
   persistNow();
+}
+
+// Drop the in-memory mirror so the next read comes from localStorage — used by
+// tools that learned (via the change bus below) that ANOTHER tab rewrote the
+// cache. Never called from inside this module where the mirror is canonical.
+export function reloadBoundaryCache() {
+  memCache = null;
+  return loadBoundaryCache();
+}
+
+// ---------- shared fetch status + cross-tool coordination ----------
+// Every boundary fetch in the app funnels through this module, so there is ONE
+// status blob every part of the app reads. The tracker's customise popover and
+// subject picker subscribe and show "fetching… (waiting on the scraper)" live,
+// instead of dead-ending with "no boundaries here — go use another tool".
+// Status persists to localStorage and is broadcast to other tabs, so a fetch
+// started in the scraper tab shows up in the tracker tab beside it.
+
+let boundaryStatus = null;
+let statusListeners = new Set();
+let cacheListeners = new Set();
+let statusChannel = null;
+let cacheChannel = null;
+let lastLocalStatusPost = 0;
+let lastLocalCachePost = 0;
+
+function defaultBoundaryStatus() {
+  return {
+    version: 1,
+    phase: "idle", // idle | discovering | fetching | ready
+    jobsTotal: 0,
+    jobsDone: 0,
+    jobsFailed: 0,
+    current: null, // { board, qual, seriesLabel, message }
+    sweepFinishedAt: null,
+    attemptedFailed: {}, // sweep "key" -> last try ts (skip retries for RETRY_WINDOW)
+    updatedAt: 0
+  };
+}
+
+export function getBoundaryStatus() {
+  if (boundaryStatus) {
+    // Rehydrate if the stored copy changed since we last read it (another tab,
+    // a devtools edit, a cache reset) — keeps this in-sync cache authoritative.
+    try {
+      const stored = localStorage.getItem(BOUNDARY_STATUS_KEY);
+      if (stored !== null && stored !== JSON.stringify(boundaryStatus)) {
+        const parsed = JSON.parse(stored);
+        if (parsed && parsed.version === 1) boundaryStatus = parsed;
+      }
+    } catch {
+      /* keep in-memory copy */
+    }
+    return boundaryStatus;
+  }
+  try {
+    const raw = JSON.parse(localStorage.getItem(BOUNDARY_STATUS_KEY) || "null");
+    if (raw && raw.version === 1) boundaryStatus = raw;
+  } catch {
+    /* none */
+  }
+  return boundaryStatus || defaultBoundaryStatus();
+}
+
+function publishBoundaryStatus(patch) {
+  const prev = getBoundaryStatus();
+  const next = { ...prev, ...patch, updatedAt: Date.now() };
+  // Skip when nothing the app actually reacts to changed (identical phase,
+  // counters, current job, attempts) — otherwise a long sweep resprays
+  // localStorage and re-fires every listener for every sub-message.
+  try {
+    const { updatedAt: a, ...prevRest } = prev;
+    const { updatedAt: b, ...nextRest } = next;
+    if (JSON.stringify(prevRest) === JSON.stringify(nextRest)) return;
+  } catch {
+    /* keep publishing on any doubt */
+  }
+  boundaryStatus = next;
+  try {
+    localStorage.setItem(BOUNDARY_STATUS_KEY, JSON.stringify(next));
+  } catch {
+    /* degrade to memory-only */
+  }
+  const postId = Date.now();
+  lastLocalStatusPost = postId;
+  for (const fn of statusListeners) {
+    try { fn(next); } catch { /* listener fault */ }
+  }
+  if (typeof BroadcastChannel !== "undefined") {
+    try {
+      if (!statusChannel) statusChannel = new BroadcastChannel("neuronet:boundaryStatus");
+      statusChannel.postMessage({ ...next, _origin: postId });
+    } catch { /* unavailable */ }
+  }
+}
+
+// Subscribe to boundary status. The callback fires immediately with the current
+// status and then on every change (local OR from another tab via BroadcastChannel /
+// a storage event when the channel is unavailable). Returns an unsubscribe fn.
+export function subscribeBoundaryStatus(fn) {
+  statusListeners.add(fn);
+  try { fn(getBoundaryStatus()); } catch { /* ignore */ }
+  return () => statusListeners.delete(fn);
+}
+
+// Fired whenever a series is written into the cache (local or other tab) so
+// UI that renders from the cache can refresh live. Same shape as the status bus.
+function publishBoundaryCacheChanged() {
+  const postId = Date.now();
+  lastLocalCachePost = postId;
+  for (const fn of cacheListeners) {
+    try { fn(); } catch { /* listener fault */ }
+  }
+  const hasChannel = typeof BroadcastChannel !== "undefined";
+  if (hasChannel) {
+    try {
+      if (!cacheChannel) cacheChannel = new BroadcastChannel("neuronet:boundaryCache");
+      cacheChannel.postMessage({ at: postId, origin: postId });
+    } catch {
+      /* fall through to the storage tick below */
+      localStorage.setItem(`${BOUNDARY_CACHE_KEY}_tick`, String(postId));
+    }
+  } else {
+    localStorage.setItem(`${BOUNDARY_CACHE_KEY}_tick`, String(postId));
+  }
+}
+
+export function subscribeBoundaryCacheChanged(fn) {
+  cacheListeners.add(fn);
+  return () => cacheListeners.delete(fn);
+}
+
+// Wire the cross-tab channel when running in a browser.
+if (typeof window !== "undefined") {
+  if (typeof BroadcastChannel !== "undefined") {
+    try {
+      statusChannel = new BroadcastChannel("neuronet:boundaryStatus");
+      statusChannel.onmessage = (ev) => {
+        if (!ev.data) return;
+        if (ev.data._origin && ev.data._origin === lastLocalStatusPost) return; // own echo
+        boundaryStatus = { ...defaultBoundaryStatus(), ...ev.data };
+        for (const fn of statusListeners) { try { fn(boundaryStatus); } catch { /* ignore */ } }
+      };
+      cacheChannel = new BroadcastChannel("neuronet:boundaryCache");
+      cacheChannel.onmessage = (ev) => {
+        if (!ev.data) return;
+        if (ev.data.origin && ev.data.origin === lastLocalCachePost) return; // own echo
+        for (const fn of cacheListeners) { try { fn(); } catch { /* ignore */ } }
+      };
+    } catch {
+      /* channel unavailable — fall back to storage events below */
+    }
+  } else {
+    window.addEventListener("storage", (e) => {
+      if (e.key === BOUNDARY_STATUS_KEY && e.newValue) {
+        try {
+          boundaryStatus = JSON.parse(e.newValue);
+          for (const fn of statusListeners) { try { fn(boundaryStatus); } catch { /* ignore */ } }
+        } catch { /* ignore */ }
+      }
+      if (e.key === `${BOUNDARY_CACHE_KEY}_tick`) {
+        try { localStorage.setItem(`${BOUNDARY_CACHE_KEY}_tick`, String(Date.now())); } catch { /* ignore */ }
+        for (const fn of cacheListeners) { try { fn(); } catch { /* ignore */ } }
+      }
+    });
+  }
 }
 
 // Mutable cache handle used by the scraper. Keeps the raw entry lookup + the
@@ -1084,24 +1260,173 @@ export async function fetchBoundarySubjects(board, qual, series, onProgress) {
 
 // Idempotently make sure a board/qual/series is cached under the canonical
 // board:MONTH-YEAR:qual key. Skips if an entry already exists. Returns the
-// cached subjects (or null if the fetch produced nothing).
+// cached subjects (or null if the fetch produced nothing). Concurrent callers
+// (tracker picker, auto-warm, scraper) share ONE fetch via an in-flight map,
+// and every write/attempt publishes to the shared status + cache buses.
 export async function ensureBoundarySeries(board, qual, series, onProgress) {
   const bId = boardToId(board) || String(board || "").toLowerCase();
   const qualObj = boundaryQualification(bId, qual && (qual.id || qual));
   if (!qualObj || !series || !series.month || !series.year) return null;
-  const cache = loadBoundaryCache();
   const key = `${bId}:${series.month}-${series.year}:${qualObj.id}`;
-  const existing = cache.entries[key];
-  if (existing && existing.subjects && existing.subjects.length) return existing.subjects;
-  const subjects = await fetchBoundarySubjects(bId, qualObj, series, onProgress);
-  if (!subjects || subjects.length === 0) return null;
-  cache.entries[key] = {
-    series: { month: series.month, year: series.year, label: series.label },
-    qual: qualObj.id,
-    board: bId,
-    fetchedAt: Date.now(),
-    subjects
-  };
-  saveBoundaryCache(cache);
-  return subjects;
+  const running = sweepInflight.get(key);
+  if (running) return running;
+  publishBoundaryStatus({
+    phase: "fetching",
+    current: { board: bId, qual: qualObj.id, seriesLabel: series.label }
+  });
+  const task = (async () => {
+    const cache = loadBoundaryCache();
+    const existing = cache.entries[key];
+    if (existing && existing.subjects && existing.subjects.length) {
+      return existing.subjects;
+    }
+    try {
+      const subjects = await fetchBoundarySubjects(bId, qualObj, series, onProgress);
+      if (!subjects || subjects.length === 0) {
+        sweepMarkFailed(key);
+        return null;
+      }
+      cache.entries[key] = {
+        series: { month: series.month, year: series.year, label: series.label },
+        qual: qualObj.id,
+        board: bId,
+        fetchedAt: Date.now(),
+        subjects
+      };
+      saveBoundaryCache(cache);
+      sweepClearFailed(key);
+      publishBoundaryCacheChanged();
+      return subjects;
+    } catch (e) {
+      sweepMarkFailed(key);
+      throw e;
+    }
+  })();
+  sweepInflight.set(key, task);
+  try {
+    return await task;
+  } finally {
+    if (sweepInflight.get(key) === task) sweepInflight.delete(key);
+  }
+}
+
+// ---------- the one sweep runner ----------
+// Fetches EVERY board × qual × series that isn't already cached (the union the
+// subject picker shows and the per-row boundary tables resolve from). This is
+// THE only place the app decides "what should we have fetched by now", so
+// opening the link picker never re-fires a fetch set again: what's cached is
+// served from cache, what failed is not retried within the retry window, and a
+// recently-completed sweep is treated as fresh. Concurrent sweeps (picker +
+// auto-warm) collapse into one run.
+const sweepInflight = new Map(); // series fetch key -> in-flight promise
+let sweepBusy = false;
+let sweepQueued = false;
+
+export function runBoundarySweep(opts = {}) {
+  const { onStatus } = opts;
+  if (sweepBusy) {
+    sweepQueued = true;
+    return Promise.resolve();
+  }
+  sweepBusy = true;
+  const run = (async () => {
+    const status = getBoundaryStatus();
+    const now = Date.now();
+    // A sweep completed recently (this tab or another) -> everything's already
+    // cached/attempted; don't re-fire.
+    if (status.sweepFinishedAt && now - status.sweepFinishedAt < SWEEP_FRESH_MS) {
+      publishBoundaryStatus({ phase: "ready" });
+      if (onStatus) onStatus(getBoundaryStatus());
+      return;
+    }
+    publishBoundaryStatus({
+      phase: "discovering",
+      sweepFinishedAt: null,
+      current: { message: "Scanning AQA, OCR and Pearson..." }
+    });
+    if (onStatus) onStatus(getBoundaryStatus());
+    try {
+      await discoverBoundarySeries((msg) =>
+        publishBoundaryStatus({ current: { ...(getBoundaryStatus().current || {}), message: msg } })
+      );
+    } catch {
+      /* deterministic fallback URLs still work */
+    }
+    const boards = ["aqa", "ocr", "pearson"];
+    const quals = ["gcse", "aLevel", "as"];
+    const jobs = [];
+    const cache = loadBoundaryCache();
+    for (const board of boards) {
+      for (const series of boundarySeriesList(board)) {
+        for (const qualId of quals) {
+          const qualObj = boundaryQualification(board, qualId);
+          if (!qualObj || !series || !series.month || !series.year) continue;
+          const key = `${board}:${series.month}-${series.year}:${qualObj.id}`;
+          const entry = cache.entries[key];
+          if (entry && entry.subjects && entry.subjects.length) continue; // cached
+          if (sweepReentryOld(key, now)) continue; // just failed
+          jobs.push({ board, qual: qualObj, series, key });
+        }
+      }
+    }
+    const total = jobs.length;
+    publishBoundaryStatus({ phase: "fetching", jobsTotal: total, jobsDone: 0, jobsFailed: 0, current: null, sweepFinishedAt: null });
+    let done = 0;
+    let failed = 0;
+    for (const job of jobs) {
+      publishBoundaryStatus({ current: { board: job.board, qual: job.qual.id, seriesLabel: job.series.label } });
+      try {
+        await ensureBoundarySeries(job.board, job.qual, job.series, (msg) =>
+          publishBoundaryStatus({ current: { board: job.board, qual: job.qual.id, seriesLabel: job.series.label, message: msg } })
+        );
+        done++;
+      } catch {
+        failed++;
+      }
+      publishBoundaryStatus({ jobsDone: done, jobsFailed: failed });
+      if (onStatus) onStatus(getBoundaryStatus());
+      // Yield on the macrotask queue so spinners/scratch buffers actually paint
+      // between sequential (synchronous-ish) parses.
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    publishBoundaryStatus({ phase: "ready", jobsTotal: total, jobsDone: done, jobsFailed: failed, current: null, sweepFinishedAt: Date.now() });
+    if (onStatus) onStatus(getBoundaryStatus());
+  })();
+  return run
+    .catch(() => {
+      publishBoundaryStatus({ phase: "ready", current: null, sweepFinishedAt: Date.now() });
+    })
+    .finally(() => {
+      sweepBusy = false;
+      if (sweepQueued) {
+        sweepQueued = false;
+        runBoundarySweep();
+      }
+    });
+}
+
+// Failure bookkeeping: series key -> last try ts. Keys use the canonical
+// "board:MONTH-YEAR:qual" form (same as cache entries). The sweep skips keys
+// attempted within the retry window, so a dead legacy URL is not re-fetched
+// every single time the subject picker opens.
+function sweepMarkFailed(seriesKey) {
+  const status = getBoundaryStatus();
+  const attemptedFailed = { ...(status.attemptedFailed || {}) };
+  attemptedFailed[seriesKey] = Date.now();
+  publishBoundaryStatus({ attemptedFailed });
+}
+
+function sweepClearFailed(seriesKey) {
+  const status = getBoundaryStatus();
+  if (!status.attemptedFailed || !status.attemptedFailed[seriesKey]) return;
+  const attemptedFailed = { ...status.attemptedFailed };
+  delete attemptedFailed[seriesKey];
+  publishBoundaryStatus({ attemptedFailed });
+}
+
+function sweepReentryOld(seriesKey, now) {
+  const status = getBoundaryStatus();
+  const ts = status.attemptedFailed && status.attemptedFailed[seriesKey];
+  if (!ts) return false;
+  return now - ts < RETRY_WINDOW_MS;
 }

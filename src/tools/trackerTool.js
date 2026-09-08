@@ -2,26 +2,26 @@ import { transformRows } from "./trackerImport.js";
 import { dialog } from "./dialog.js";
 import {
   loadBoundaryCache,
+  reloadBoundaryCache,
   listCachedCourses,
   matchOfficialCourse,
   reconcileCourse,
+  getBoundaryStatus,
+  subscribeBoundaryStatus,
+  subscribeBoundaryCacheChanged,
+  runBoundarySweep,
   findGradeTable,
   boardIdToName,
   qualIdToName,
   boardToId,
   qualToId,
-  trackerSeriesToMonth,
   normalizeTitle,
   scoreToGrade,
   canonicalGradeKey,
   normalizeBoundaryTable,
   findGradeMark,
   courseGradeLabels,
-  tierFromName,
-  boundarySeriesList,
-  bestSeriesForYear,
-  discoverBoundarySeries,
-  ensureBoundarySeries
+  tierFromName
 } from "./gradeBoundaries.js";
 
 export function initTrackerTool(deps, context = {}) {
@@ -63,6 +63,7 @@ export function initTrackerTool(deps, context = {}) {
     colsPop: $("trackerCustomisePop"),
     tableInfo: $("trackerTableInfo"),
     boundaryChips: $("trackerBoundaryChips"),
+    boundaryPreview: $("trackerBoundaryPreview"),
     boundaryNote: $("trackerBoundaryNote"),
     colList: $("trackerColList"),
     cusReset: $("trackerCusReset"),
@@ -445,16 +446,47 @@ export function initTrackerTool(deps, context = {}) {
     }
     return out;
   }
+
+  // Best-effort threshold for an aim grade: PER-SERIES tables first (so the
+  // badge matches the sitting's actual year), falling back to the subject's
+  // best other table so a picked grade never silently shows a dash just because
+  // one year's pack lacks it.
+  function aimMarkFor(subject, gb, label) {
+    if (gb) {
+      const mark = markForGrade(gb, label);
+      if (mark != null) return mark;
+    }
+    const union = aimTable(subject);
+    if (union) {
+      const mark = markForGrade(union, label);
+      if (mark != null) return mark;
+    }
+    return null;
+  }
+
   function renderBoundaryChips() {
     if (el.boundaryChips) el.boundaryChips.innerHTML = "";
+    if (el.boundaryPreview) el.boundaryPreview.innerHTML = "";
     if (el.boundaryNote) el.boundaryNote.textContent = "";
+    const s = getBoundaryStatus();
+    const busy = s && (s.phase === "discovering" || s.phase === "fetching");
     if (!focusedSubject) {
       if (el.boundaryChips) el.boundaryChips.innerHTML = `<div class="tracker-cus-empty">Scope to one subject (sidebar) to pick the grades it aims for.</div>`;
       return;
     }
     const options = pickableGrades(focusedSubject);
     if (!options.length) {
-      if (el.boundaryChips) el.boundaryChips.innerHTML = `<div class="tracker-cus-empty">No fetched boundaries for ${escapeHtml(focusedSubject)} yet &mdash; fetch them in the Scraper tool (or link the official subject).</div>`;
+      // No usable boundaries for this subject yet. If the shared sweep (this
+      // page's picker, the auto-warm, or the scraper tab) is running, tell the
+      // user to wait instead of dead-ending with "go use another tool".
+      if (busy) {
+        const msg = sweepMessage(s) || "Fetching grade boundaries...";
+        if (el.boundaryChips) el.boundaryChips.innerHTML = `<div class="tracker-cus-empty"><span class="tracker-cus-busy"></span>${escapeHtml(msg)}</div>`;
+      } else {
+        if (el.boundaryChips) el.boundaryChips.innerHTML = `<div class="tracker-cus-empty">Fetching grade boundaries for ${escapeHtml(focusedSubject)} in the background (<i>retry in a moment</i>).</div>`;
+        // Ask the shared engine to fill this subject if the cache is thin.
+        maybeWarmBoundaries();
+      }
       return;
     }
     const selected = aimFor(focusedSubject);
@@ -463,7 +495,42 @@ export function initTrackerTool(deps, context = {}) {
       `<span class="bmark">${escapeHtml(g)}</span>` +
       `</button>`
     ).join("");
+    renderBoundaryPreview(options, selected);
     if (el.boundaryNote) el.boundaryNote.textContent = "";
+  }
+
+  // Live thresholds for the aimed grades — the direct, visible response to a
+  // chip click even when the table has no rows yet. Falls back to the subject's
+  // best table for any grade the per-row pack lacks.
+  function renderBoundaryPreview(options, selected) {
+    if (!el.boundaryPreview) return;
+    const cache = loadBoundaryCache();
+    const course = focusedSubject ? resolveCourse(cache, focusedSubject) : null;
+    const table = focusedSubject ? aimTable(focusedSubject) : null;
+    if (!course || !table) return;
+    const grades = selected.length ? selected : [options[0] || null];
+    if (!grades.length) return;
+    const pairs = grades.map((label) => {
+      const mark = aimMarkFor(focusedSubject, table, label);
+      return mark != null ? `${escapeHtml(label)} &ge; <b>${escapeHtml(String(mark))}</b>` : null;
+    }).filter(Boolean);
+    if (!pairs.length) return;
+    const tip = boundsTooltip(table);
+    const title = selected.length
+      ? `Aimed grades shown as thresholds in the Boundary column`
+      : `Top grade (default) threshold shown in the Boundary column`;
+    el.boundaryPreview.innerHTML =
+      `<div class="tracker-cus-preview-title" title="${escapeHtml(tip)}">${escapeHtml(title)}</div>` +
+      `<div class="tracker-cus-preview-row">${pairs.join('<span class="tracker-cus-preview-sep">·</span>')}` +
+      (selected.length ? `<span class="tracker-cus-preview-clear"><button type="button" class="tracker-cus-reset-mini" data-clear-aim>clear</button></span>` : "") +
+      `</div>`;
+    const clear = el.boundaryPreview.querySelector("[data-clear-aim]");
+    if (clear) clear.addEventListener("click", () => {
+      aimGrades = {};
+      saveAimGrades();
+      renderBoundaryChips();
+      renderPapers();
+    });
   }
 
   function renderColList() {
@@ -545,86 +612,55 @@ export function initTrackerTool(deps, context = {}) {
     clearLinkScratch();
   }
 
-  // Populate the link picker with official subjects for EVERY exam board —
-  // AQA, OCR and Pearson — using the exact discovery + fetch engine the scraper
-  // uses (gradeBoundaries.js). OCR keeps no baseline series list (discovery-only)
-  // and Pearson's newest series is frequently unpublished/broken, so we iterate
-  // EVERY series in every board's list for every qual — exactly like the
-  // scraper's autoFetchLatest — not just the newest. The cache dedupes by
-  // board:qual:code, so the union of all successfully-fetched series fills the
-  // picker completely and survives any single bad file.
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  let linkSeedBusy = false;
-  let linkSeedQueued = false;
+  // Populate the link picker with official subjects for EVERY exam board.
+  // This is just the TRACKER's view onto the one shared sweep in
+  // gradeBoundaries.js — the same engine the scraper and the auto-warm use.
+  // Cached series never re-fetch, dead series aren't retried within the retry
+  // window, and a recently-completed sweep is served as-is, so opening the
+  // picker never triggers a fresh fetch set. Concurrent opens/queues collapse
+  // into one run.
   async function seedLinkCourses() {
-    if (linkSeedBusy) {
-      linkSeedQueued = true;
-      return;
-    }
-    linkSeedBusy = true;
     renderCourseList();
-    linkScratch("Scanning AQA, OCR and Pearson for grade boundaries...");
-    try {
-      // Best-effort discovery for OCR (no baseline list) and hashed URLs for
-      // AQA/Pearson. Deterministic fallback URLs still work on failure.
-      try {
-        await discoverBoundarySeries((m) => linkScratch(m));
-      } catch {
-        /* keep going with baseline series + fallback URLs */
-      }
-      const boards = ["aqa", "ocr", "pearson"];
-      const quals = ["gcse", "aLevel", "as"];
-      const shownBusy = el.linkList && listCachedCourses(loadBoundaryCache()).length === 0;
-      if (shownBusy) {
-        el.linkList.innerHTML = `<div class="tracker-course-empty">Fetching official subjects from AQA, OCR and Pearson...</div>`;
-      }
-      const withCache = () => loadBoundaryCache();
-      for (const board of boards) {
-        const list = boundarySeriesList(board);
-        if (list.length === 0) continue;
-        const boardName = boardIdToName(board);
-        const jobs = [];
-        for (const series of list) {
-          for (const qualId of quals) {
-            const key = `${board}:${series.month}-${series.year}:${qualId}`;
-            const entry = withCache().entries[key];
-            if (entry && entry.subjects && entry.subjects.length) continue;
-            jobs.push({ board, qualId, series });
-          }
-        }
-        // Parse each file one at a time, yielding between jobs: pdf/xlsx
-        // parsing is synchronous on the main thread, so a macrotask break lets
-        // the skeleton animation / spinner actually repaint between files.
-        for (const job of jobs) {
-          await sleep(0);
-          const qualName = qualIdToName(job.qualId);
-          const label = `${job.series.label} ${boardName} ${qualName}`;
-          linkScratch(`Fetching ${label}...`);
-          try {
-            await ensureBoundarySeries(job.board, { id: job.qualId }, job.series, (m) =>
-              linkScratch(`${label}: ${m}`)
-            );
-          } catch {
-            /* best-effort; that board/qual/series just stays uncached */
-          }
-        }
-        // Let partial results appear as soon as each board's series finish, so
-        // the picker fills live instead of hanging until the whole pass ends.
-        const boardCount = listCachedCourses(loadBoundaryCache())
-          .filter((c) => c.board === board).length;
-        linkScratch(`${boardCount} ${boardName} subjects indexed so far...`);
-        renderCourseList();
-      }
-      const total = listCachedCourses(loadBoundaryCache()).length;
-      linkScratchDone(`${total} official subjects ready — search to link.`);
-    } finally {
-      linkSeedBusy = false;
+    linkScratch("Checking AQA, OCR and Pearson grade-boundaries cache...");
+    const total = listCachedCourses(loadBoundaryCache()).length;
+    if (total === 0) {
+      if (el.linkList) el.linkList.innerHTML = `<div class="tracker-course-empty">Fetching official subjects from AQA, OCR and Pearson...</div>`;
+    } else {
       renderCourseList();
-      if (linkSeedQueued) {
-        linkSeedQueued = false;
-        seedLinkCourses();
-      }
     }
+    await runBoundarySweep({
+      onStatus: (s) => linkScratch(sweepMessage(s))
+    });
+    if (el.linkList) renderCourseList();
+    linkScratchDone(`${listCachedCourses(loadBoundaryCache()).length} official subjects ready — search to link.`);
+  }
+
+  // A human-readable line from the shared sweep status ("Fetching OCR GCSE June
+  // 2025…", "3/12 series done, 1 failed…"), shown in the picker + customise.
+  function sweepMessage(s) {
+    if (!s) return "Waiting on grade-boundaries fetch...";
+    if (s.phase === "discovering") return s.current && s.current.message
+      ? `Scanning exam boards: ${s.current.message}`
+      : "Scanning AQA, OCR and Pearson for the latest grade boundaries...";
+    if (s.phase === "fetching") {
+      const cur = s.current || {};
+      const label = [boardIdToName(cur.board), quadLabel(cur.qual), cur.seriesLabel].filter(Boolean).join(" ");
+      const base = label ? `Fetching ${label}...` : "Fetching grade boundaries...";
+      if (cur.message && !/^\s*fetching\s*/i.test(cur.message)) return `${base} ${cur.message}`;
+      if (s.jobsTotal > 0) return `${base} (${s.jobsDone + s.jobsFailed}/${s.jobsTotal} series done)`;
+      return base;
+    }
+    if (s.phase === "ready") {
+      const failed = s.jobsFailed || 0;
+      const note = failed ? ` — ${failed} series unavailable (will retry later)` : "";
+      return `Grade-boundary cache ready${note}.`;
+    }
+    return "Checking grade-boundary cache...";
+  }
+
+  function quadLabel(qualId) {
+    const m = { gcse: "GCSE", alevel: "A-Level", as: "AS" };
+    return m[String(qualId || "").toLowerCase()] || String(qualId || "");
   }
 
   // Search strengthening: every whitespace token must match (order-independent),
@@ -697,7 +733,7 @@ export function initTrackerTool(deps, context = {}) {
   let linkScratchLine = null;
   let linkCompletionTimer = null;
 
-  function linkScratch(message, shimmer = linkSeedBusy) {
+  function linkScratch(message, shimmer = true) {
     if (!el.linkStatus) return;
     el.linkStatus.hidden = false;
     if (!linkScratchLine) {
@@ -737,9 +773,15 @@ export function initTrackerTool(deps, context = {}) {
     }
   }
 
+  function sweepBusyNow() {
+    const s = getBoundaryStatus();
+    return !!(s && (s.phase === "discovering" || s.phase === "fetching"));
+  }
+
   function renderLinkStatus() {
     if (!el.linkStatus) return;
-    if (!linkSeedBusy) {
+    const busy = sweepBusyNow();
+    if (!busy) {
       if (el.linkFilter) el.linkFilter.classList.remove("tracker-input-skeleton");
       return;
     }
@@ -760,7 +802,8 @@ export function initTrackerTool(deps, context = {}) {
 
     if (!el.linkList) return;
     if (visible.length === 0) {
-      if (linkSeedBusy && courses.length === 0) {
+      const busy = sweepBusyNow();
+      if (busy && courses.length === 0) {
         // Loading placeholder: shimmer rows until the first subjects land so
         // the popover shows instant, tangible progress instead of a plain text
         // line while the fetch pass runs.
@@ -956,6 +999,7 @@ export function initTrackerTool(deps, context = {}) {
         '<br><button id="trackerEmptyAddBtn" class="tracker-btn primary">Add a sitting</button></div>';
       const b = $("trackerEmptyAddBtn");
       if (b) b.addEventListener("click", () => openModal(null));
+      renderBoundaryChips();
       return;
     }
 
@@ -990,6 +1034,7 @@ export function initTrackerTool(deps, context = {}) {
     table.appendChild(tbody);
     scroll.appendChild(table);
     el.paperGroups.appendChild(scroll);
+    renderBoundaryChips();
     maybeWarmBoundaries();
   }
 
@@ -999,6 +1044,10 @@ export function initTrackerTool(deps, context = {}) {
   // automatically — the user never has to "warm" anything by hand.
   let warmBusy = false;
   let warmQueued = false;
+  // Auto-ensure boundary packs for dated rows. This used to re-derive the
+  // needed series and fetch them here — now it's just this tracker joining the
+  // ONE shared sweep (cache-fill for what's cached, new series fetched once,
+  // dead series skipped for the retry window, concurrent runs collapsed).
   async function maybeWarmBoundaries() {
     if (warmBusy) {
       warmQueued = true;
@@ -1007,11 +1056,10 @@ export function initTrackerTool(deps, context = {}) {
     warmBusy = true;
     try {
       const cache = loadBoundaryCache();
-      const jobs = new Map();
+      let needs = false;
       for (const sitting of papers || []) {
         if (!sitting || !sitting.subject) continue;
-        const seriesWord = sitting.series;
-        if (/^(mock|specimen)$/i.test(String(seriesWord || "").trim())) continue;
+        if (/^(mock|specimen)$/i.test(String(sitting.series || "").trim())) continue;
         const year = numberEq(sitting.year);
         if (year === null) continue;
         const course = resolveCourse(cache, sitting.subject);
@@ -1019,32 +1067,11 @@ export function initTrackerTool(deps, context = {}) {
         const board = boardToId(course && course.board);
         const qualId = qualToId(course && course.qual);
         if (!board || !qualId) continue;
-        // Already resolvable from the cache — nothing to do for this row.
-        if (findGradeTable(cache, course, year, seriesWord)) continue;
-        const target = bestSeriesForYear(board, year, trackerSeriesToMonth(seriesWord));
-        if (!target) continue;
-        const key = `${board}|${qualId}|${target.month}-${target.year}`;
-        if (!jobs.has(key)) jobs.set(key, { board, qualId, series: target });
+        if (!findGradeTable(cache, course, year, sitting.series)) { needs = true; break; }
       }
-      if (jobs.size === 0) return;
-      // Discovery improves URL accuracy (hashed 2024+ AQA files); best-effort.
-      try {
-        await discoverBoundarySeries(() => {});
-      } catch {
-        /* keep going with deterministic fallback URLs */
-      }
-      let fetchedAny = false;
-      const list = [...jobs.values()];
-      for (const { board, qualId, series } of list) {
-        await sleep(0);
-        try {
-          const subjects = await ensureBoundarySeries(board, qualId, series, () => {});
-          if (subjects && subjects.length) fetchedAny = true;
-        } catch (e) {
-          /* best-effort; a failure just leaves that series uncached */
-        }
-      }
-      if (fetchedAny) renderPapers();
+      if (!needs) return;
+      await runBoundarySweep({});
+      renderPapers();
     } finally {
       warmBusy = false;
       if (warmQueued) {
@@ -1199,13 +1226,16 @@ export function initTrackerTool(deps, context = {}) {
   // default top-grade badge just because one year's pack is unfetchable.
   function boundaryBadges(subject, gb, hasG, boundary) {
     const aim = aimFor(subject);
+    // Per-series table first, falling back to the subject's best other table so
+    // an aimed grade is never a silent dash just because one year's pack lacks
+    // it.
     const pickTable = (aim.length && gb && Array.isArray(gb.gradesInOrder))
       ? gb
       : (aim.length ? aimTable(subject) : null);
     const tip = pickTable && Array.isArray(pickTable.gradesInOrder) ? boundsTooltip(pickTable) : null;
     if (aim.length && pickTable && Array.isArray(pickTable.gradesInOrder)) {
       const items = aim.map((label) => {
-        const mark = markForGrade(pickTable, label);
+        const mark = aimMarkFor(subject, gb, label);
         return { label, mark };
       });
       if (items.length) {
@@ -1761,6 +1791,35 @@ export function initTrackerTool(deps, context = {}) {
       if (el.importFile.files[0]) await importDataFile(el.importFile.files[0]);
       el.importFile.value = "";
     });
+
+    // ---- join the ONE shared grade-boundaries fetch model ----
+    // The customise popover bails out with "fetching… wait" if the shared sweep
+    // (this page's picker, the auto-warm, or a fetch running in the scraper tab
+    // in another browser tab) is mid-flight, and both modals re-render live as
+    // series land in the cache. Throttled so a long sweep doesn't repaint the
+    // whole table per job.
+    let bsPending = false;
+    let bsTimer = null;
+    subscribeBoundaryStatus(() => {
+      if (bsPending) return;
+      bsPending = true;
+      bsTimer = setTimeout(() => {
+        bsPending = false;
+        renderBoundaryChips();
+        if (el.linkPop && !el.linkPop.hidden) linkScratch(sweepMessage(getBoundaryStatus()));
+      }, 150);
+    });
+    let bcPending = false;
+    let bcTimer = null;
+    subscribeBoundaryCacheChanged(() => {
+      if (bcPending) return;
+      bcPending = true;
+      bcTimer = setTimeout(() => {
+        bcPending = false;
+        renderCourseList();
+        renderPapers();
+      }, 150);
+    });
   }
 
   // ---- init ----
@@ -1770,6 +1829,9 @@ export function initTrackerTool(deps, context = {}) {
     await loadSubjects();
     await ensureQualifications();
     renderPapers();
+    // Background warm of the shared boundary cache (no-op when fresh/served).
+    // Concurrent calls collapse into one sweep inside gradeBoundaries.js.
+    try { await runBoundarySweep({}); } catch { /* best-effort */ }
   }
 
   if (typeof context.onload === "function") {

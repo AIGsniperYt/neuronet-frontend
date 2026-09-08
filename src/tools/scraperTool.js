@@ -4,7 +4,8 @@ import {
   createBoundaryCacheStore,
   boardToId,
   qualToId,
-  trackerSeriesToMonth
+  trackerSeriesToMonth,
+  ensureBoundarySeries
 } from "./gradeBoundaries.js";
 
 export function initScraperTool(deps, context = {}) {
@@ -967,6 +968,23 @@ export function initScraperTool(deps, context = {}) {
     setFieldShimmer(true);
 
     try {
+      // Route the download + parse through the ONE shared boundary engine
+      // (gradeBoundaries.js) so the tracker's modals in this or any other tab
+      // see this fetch live on the status bus and get a cache-change event when
+      // the series lands. If the shared engine can't fulfil it — e.g. an OCR
+      // URL this tool found during its own site scan but the shared engine
+      // hasn't discovered — fall back to this tool's local engine untouched.
+      try {
+        const shared = await ensureBoundarySeries(board, qual, series, (m) => scratch(m));
+        if (shared && shared.length) {
+          subjects = shared.map((s) => ({ ...s, board, qual: qual.id }));
+          finishFetch(qual, series, true);
+          return;
+        }
+        appendLog("Shared engine produced no subjects; trying this tool's local engine.");
+      } catch (e) {
+        appendLog(`Shared engine unavailable (${e.message || String(e)}); using local engine.`);
+      }
       if (fileType === "xlsx") {
         await fetchAqaXlsx(url, board, qual, series, (m) => scratch(m));
       } else {
