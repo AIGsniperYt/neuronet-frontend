@@ -4,6 +4,7 @@ import {
   loadBoundaryCache,
   listCachedCourses,
   matchOfficialCourse,
+  reconcileCourse,
   findGradeTable,
   boardIdToName,
   qualIdToName,
@@ -16,6 +17,7 @@ import {
   normalizeBoundaryTable,
   findGradeMark,
   courseGradeLabels,
+  tierFromName,
   boundarySeriesList,
   bestSeriesForYear,
   discoverBoundarySeries,
@@ -262,12 +264,16 @@ export function initTrackerTool(deps, context = {}) {
 
   // ---- auto grade boundaries ----
   // The official cached subject for a tracker subject. Never requires manual
-  // linking: an explicit stored link wins, else we resolve it automatically
-  // from the subject's meta (board/qualification/code) or by exact title match.
+  // linking: an explicit stored link wins (reconciled against the live cache
+  // so stale/pre-fix Foundation links heal to the tier the course really is),
+  // else we resolve it automatically from the subject's meta
+  // (board/qualification/code) or by exact title match.
   function resolveCourse(cache, name) {
     if (!name) return null;
     const linked = coursesBySubject[name];
     if (linked && linked.code) {
+      const healed = reconcileCourse(cache, linked, tierFromName(name));
+      if (healed) return healed;
       return linked;
     }
     const meta = subjectMeta[name] || {};

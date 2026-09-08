@@ -172,6 +172,16 @@ function tierFromTitle(title) {
   return null;
 }
 
+// AQA subject codes embed the tier (8300F / 8300H); OCR/Pearson rows carry it
+// in the title. Keep tier resolution on the parsed row so gradeBoundaries.js
+// courseTierOf can rely on the explicit `tier` field across every board.
+function tierFromCodeOrTitle(code, title) {
+  const c = String(code || "").trim().toUpperCase();
+  if (/H$/.test(c)) return "H";
+  if (/F$/.test(c)) return "F";
+  return tierFromTitle(title);
+}
+
 // Map OCR lowercase grade labels to display labels.
 const LABEL_RE = /^(9|8|7|6|5|4|3|2|1|u|A\*|a\*|A|B|C|D|E)$/i;
 
@@ -276,11 +286,15 @@ function parseAqaPdf(lines, qual) {
     if (!title) continue;
 
     const grades = {};
+    const marksOrder = [];
     for (let g = 0; g < currentGrades.length && gradesStart + g < toks.length; g++) {
       const raw = toks[gradesStart + g];
       if (raw === "-") continue;
       const v = Number(raw);
-      if (isFinite(v)) grades[currentGrades[g]] = v;
+      if (isFinite(v)) {
+        grades[currentGrades[g]] = v;
+        marksOrder.push(currentGrades[g]);
+      }
     }
 
     subjects.push({
@@ -288,9 +302,10 @@ function parseAqaPdf(lines, qual) {
       qual,
       code: toks[0],
       title,
+      tier: tierFromCodeOrTitle(toks[0], title),
       maxMark,
       grades,
-      gradesInOrder: currentGrades
+      gradesInOrder: marksOrder
     });
 
     // Skip the continuation row (component sub-rows) if present.

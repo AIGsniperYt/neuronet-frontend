@@ -672,20 +672,35 @@ export function initScraperTool(deps, context = {}) {
       if (!Number.isFinite(maxMark)) continue;
 
       const grades = {};
+      const marksOrder = [];
       for (let g = 0; g < gradeLabels.length; g++) {
         const v = Number(r[3 + g]);
-        if (Number.isFinite(v)) grades[gradeLabels[g]] = v;
+        if (Number.isFinite(v)) {
+          grades[gradeLabels[g]] = v;
+          marksOrder.push(gradeLabels[g]);
+        }
       }
 
       subjects.push({
         code: String(code).trim(),
         title: String(title || "").trim(),
+        tier: tierFromCode(String(code).trim()),
         maxMark,
         grades,
-        gradesInOrder: gradeLabels
+        gradesInOrder: marksOrder
       });
     }
     return subjects;
+  }
+
+  // AQA xlsx subject codes embed the tier (8300F / 8300H); the PDF parsers
+  // carry the same fields, so every board's rows funnels through the shared
+  // courseTierOf in gradeBoundaries.js.
+  function tierFromCode(code) {
+    const c = String(code || "").trim().toUpperCase();
+    if (/H$/.test(c)) return "H";
+    if (/F$/.test(c)) return "F";
+    return null;
   }
 
   // ---------- subject picker ----------

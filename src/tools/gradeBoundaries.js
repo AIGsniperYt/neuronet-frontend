@@ -148,12 +148,28 @@ function baseCourseCode(code) {
   return singleCode(code).toUpperCase().replace(/[FH]$/, "");
 }
 
+// Tier is the ONE place all tools learn a course's tier from. Order of
+// authority: the explicit parsed `tier` field the board parsers emit
+// (OCR/Pearson), then the title words, then a trailing H/F on the code
+// (AQA xlsx stores "8300F"/"8300H"). Everything funnels through this.
 function courseTierOf(item) {
+  if (!item) return null;
+  const parsed = String(item.tier || "").trim().toUpperCase();
+  if (parsed === "H" || parsed === "F") return parsed;
   const t = String(item.title || "");
   if (/\b(?:higher|h)\b/i.test(t)) return "H";
   if (/\bfoundation\b/i.test(t)) return "F";
-  if (String(item.code || "").toUpperCase().endsWith("H")) return "H";
-  if (String(item.code || "").toUpperCase().endsWith("F")) return "F";
+  const code = String(item.code || "").toUpperCase().trim();
+  if (/H$/.test(code)) return "H";
+  if (/F$/.test(code)) return "F";
+  return null;
+}
+
+// Best-guess tier from a free-text subject name (e.g. "Maths (Higher)").
+export function tierFromName(name) {
+  const t = String(name || "");
+  if (/\b(?:higher|h)\b/i.test(t)) return "H";
+  if (/\bfoundation\b/i.test(t)) return "F";
   return null;
 }
 
@@ -163,15 +179,22 @@ function findSubjectInEntry(entry, course) {
   const baseCode = baseCourseCode(course.code);
   const subjects = entry.subjects || [];
   // Exact-code match: when both tiers share a code (e.g. Pearson 1MA1, OCR
-  // J560), keep the tier implied by the course title/code.
+  // J560), keep the tier implied by the course title/code. A tier-unknown
+  // course prefers the Higher row so a bare "1MA1" link maps to 9-1, never
+  // silently to the alphabetically-first Foundation row.
   const codeMatches = subjects.filter((item) =>
     code && singleCode(item.code).toUpperCase() === code
   );
   if (codeMatches.length) {
     if (codeMatches.length > 1) {
       const want = courseTierOf(course);
-      const same = codeMatches.filter((item) => courseTierOf(item) === want);
-      if (same.length === 1) return same[0];
+      if (want) {
+        const same = codeMatches.filter((item) => courseTierOf(item) === want);
+        if (same.length === 1) return same[0];
+        return null; // explicit tier the cache doesn't carry — don't guess
+      }
+      const higher = codeMatches.filter((item) => courseTierOf(item) === "H");
+      if (higher.length === 1) return higher[0];
     }
     return codeMatches[0];
   }
@@ -221,6 +244,7 @@ export function listCachedCourses(cache) {
         qual: qualId,
         qualName: QUAL_IDS[qualId],
         code,
+        tier,
         title: item.title,
         maxMark: item.maxMark,
         papers: Array.isArray(item.papers) && item.papers.length ? item.papers : null
@@ -246,17 +270,77 @@ export function matchOfficialCourse(cache, { board, qual, title, code } = {}) {
   const matches = listCachedCourses(cache).filter((c) => {
     if (c.board !== b || c.qual !== q) return false;
     if (normCode && singleCode(c.code) === normCode) return true;
+    // Bare code (8300) must find its tier-suffixed cached rows (8300F/8300H).
+    if (normCode && baseCourseCode(c.code) === baseCourseCode(normCode) && singleCode(c.code) !== normCode) return true;
     if (normTitle && c.title && normalizeTitle(c.title) === normTitle) return true;
     return false;
   });
   if (matches.length === 1) return matches[0];
   // Multiple same-code rows (e.g. Foundation + Higher): prefer the tier named
-  // by the title, otherwise treat as ambiguous.
+  // by the title; otherwise prefer the Higher row (9-1) instead of treating
+  // the query as ambiguous — Foundation-only matches still survive below.
   if (matches.length > 1 && normTitle) {
     const tiered = matches.filter((c) => normalizeTitle(c.title) === normTitle);
     if (tiered.length === 1) return tiered[0];
   }
+  if (matches.length > 1) {
+    const higher = matches.filter((c) => courseTierOf(c) === "H");
+    if (higher.length === 1) return higher[0];
+  }
   return null;
+}
+
+// Reconcile a stored officialCourse (possibly stale / tier-less / pre-picker-fix)
+// against the live cache so a linked subject always resolves to the exact row
+// the cache actually carries for its board+qual+code. Heals old Foundation
+// links saved before the tier-aware picker fix.
+//
+// The stored course's own title/code tier is NOT trusted: pre-fix links carry
+// the alphabetically-first (Foundation) row, so relying on them re-breaks the
+// exact bug being healed. Authority order is:
+//   1. the subject's own tier (from its name, e.g. "Maths (Higher)"), then
+//   2. the Higher row when the code is shared, else the only cached row.
+// This mirrors matchOfficialCourse/findSubjectInEntry so every funnel entry
+// point picks the same tier. Returns null only when the linked course can't
+// be found anywhere in the cache.
+export function reconcileCourse(cache, course, preferredTier) {
+  if (!course || !cache) return null;
+  const b = boardToId(course.board);
+  const q = qualToId(course.qual);
+  if (!b || !q) return null;
+  const normCode = singleCode(course.code).toUpperCase();
+  if (!normCode) return null;
+  const normBase = baseCourseCode(course.code);
+  const rows = [];
+  for (const entry of Object.values((cache && cache.entries) || {})) {
+    if (boardToId(entry.board) !== b) continue;
+    if (qualToId(entry.qual) !== q) continue;
+    for (const item of entry.subjects || []) {
+      const code = String(item.code || "").toUpperCase();
+      const base = baseCourseCode(item.code);
+      // Match either the stored code exactly (8300F) or its tier-stripped base
+      // (8300), so a suffix-carrying stored link finds both shared tiers.
+      if (code === normCode || base === normBase || base === normCode || code === normBase) rows.push(item);
+    }
+  }
+  if (rows.length === 0) return null;
+  // Surface the tier on the chosen row; tags rows that are genuinely tiered
+  // (vs tier-less series like legacy AQA) so downstream discrete maths works.
+  const toCourse = (pick, tier) => ({
+    board: b, qual: q, code: singleCode(pick.code), tier: tier || "",
+    title: pick.title, maxMark: pick.maxMark,
+    papers: Array.isArray(pick.papers) && pick.papers.length ? pick.papers : null
+  });
+  const uni = (rows.length === 1) || !rows.some((item) => courseTierOf(item));
+  if (preferredTier) {
+    const same = rows.filter((item) => courseTierOf(item) === preferredTier);
+    if (same.length) return toCourse(same[0], preferredTier);
+    if (!uni) return null; // asked for a tier this series doesn't carry
+  } else if (!uni) {
+    const higher = rows.filter((item) => courseTierOf(item) === "H");
+    if (higher.length) return toCourse(higher[0], "H");
+  }
+  return toCourse(rows[0], courseTierOf(rows[0]));
 }
 
 function numberEq(v) {
@@ -404,20 +488,30 @@ export function findGradeMark(table, label) {
 
 // Union of canonical grade labels for a course across EVERY cached series for
 // that board+qual — so the target-grade picker reflects all usable data, not
-// just whichever series is "most recent". Sorted numeric-desc, then letters.
+// just whichever series is "most recent". Only labels that actually carry a
+// mark in the tier's row are included (AQA Foundation rows list 9..1 in the
+// header but only hold 5..1 marks, so an F course must NOT offer 9-6 chips).
+// Sorted numeric-desc, then letters.
 export function courseGradeLabels(cache, course) {
   const boardId = boardToId(course && course.board);
   const qualId = qualToId(course && course.qual);
   if (!boardId || !qualId) return [];
   const labels = [];
   const seen = new Set();
-  const push = (list) => {
-    for (const value of list || []) {
+  const push = (subject) => {
+    const marks = subject.grades && typeof subject.grades === "object" ? subject.grades : {};
+    const order = Array.isArray(subject.gradesInOrder) && subject.gradesInOrder.length
+      ? subject.gradesInOrder
+      : Object.keys(marks);
+    for (const value of order) {
       const key = canonicalGradeKey(value);
-      if (key && key !== "U" && !seen.has(key)) {
-        seen.add(key);
-        labels.push(key);
-      }
+      if (!key || key === "U" || seen.has(key)) continue;
+      const present =
+        marks[value] != null || marks[key] != null ||
+        Object.keys(marks).some((k) => canonicalGradeKey(k) === key);
+      if (!present) continue;
+      seen.add(key);
+      labels.push(key);
     }
   };
   for (const entry of Object.values((cache && cache.entries) || {})) {
@@ -425,10 +519,7 @@ export function courseGradeLabels(cache, course) {
     if (String(entry.qual || "").toLowerCase() !== qualId) continue;
     const subject = findSubjectInEntry(entry, course);
     if (!subject) continue;
-    push(subject.gradesInOrder);
-    if (subject.grades && typeof subject.grades === "object" && !Array.isArray(subject.gradesInOrder)) {
-      push(Object.keys(subject.grades));
-    }
+    push(subject);
   }
   labels.sort((a, b) => {
     const na = Number(a);
