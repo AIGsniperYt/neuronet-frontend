@@ -15,6 +15,9 @@ import {
   qualIdToName,
   boardToId,
   qualToId,
+  trackerSeriesToMonth,
+  bestSeriesForYear,
+  ensureBoundarySeries,
   normalizeTitle,
   scoreToGrade,
   canonicalGradeKey,
@@ -483,9 +486,7 @@ export function initTrackerTool(deps, context = {}) {
         const msg = sweepMessage(s) || "Fetching grade boundaries...";
         if (el.boundaryChips) el.boundaryChips.innerHTML = `<div class="tracker-cus-empty"><span class="tracker-cus-busy"></span>${escapeHtml(msg)}</div>`;
       } else {
-        if (el.boundaryChips) el.boundaryChips.innerHTML = `<div class="tracker-cus-empty">Fetching grade boundaries for ${escapeHtml(focusedSubject)} in the background (<i>retry in a moment</i>).</div>`;
-        // Ask the shared engine to fill this subject if the cache is thin.
-        maybeWarmBoundaries();
+        if (el.boundaryChips) el.boundaryChips.innerHTML = `<div class="tracker-cus-empty">No grade boundaries fetched for ${escapeHtml(focusedSubject)} yet &mdash; they'll be fetched in the background (or open the <b>Scraper</b> tool / link the official subject).</div>`;
       }
       return;
     }
@@ -1039,15 +1040,14 @@ export function initTrackerTool(deps, context = {}) {
   }
 
   // Auto-ensure boundary packs for every dated row that has no cached table
-  // yet. The scraper's own fetch engine (discovery + download + parse) lives in
-  // gradeBoundaries.js and is reused here, so per-year boundaries are populated
-  // automatically — the user never has to "warm" anything by hand.
+  // yet, so per-year boundaries are populated without the user having to open
+  // the Scraper. Runs TARGETED (only the series each row actually needs, via
+  // the shared engine) and NEVER renders from inside itself — a previous
+  // version called a full sweep + renderPapers() from here, which made
+  // focus-subject spin render -> warm -> render -> ... forever with no idle
+  // between microtasks: the whole app froze with no clicks.
   let warmBusy = false;
   let warmQueued = false;
-  // Auto-ensure boundary packs for dated rows. This used to re-derive the
-  // needed series and fetch them here — now it's just this tracker joining the
-  // ONE shared sweep (cache-fill for what's cached, new series fetched once,
-  // dead series skipped for the retry window, concurrent runs collapsed).
   async function maybeWarmBoundaries() {
     if (warmBusy) {
       warmQueued = true;
@@ -1056,7 +1056,7 @@ export function initTrackerTool(deps, context = {}) {
     warmBusy = true;
     try {
       const cache = loadBoundaryCache();
-      let needs = false;
+      const jobs = new Map();
       for (const sitting of papers || []) {
         if (!sitting || !sitting.subject) continue;
         if (/^(mock|specimen)$/i.test(String(sitting.series || "").trim())) continue;
@@ -1067,11 +1067,26 @@ export function initTrackerTool(deps, context = {}) {
         const board = boardToId(course && course.board);
         const qualId = qualToId(course && course.qual);
         if (!board || !qualId) continue;
-        if (!findGradeTable(cache, course, year, sitting.series)) { needs = true; break; }
+        // Already resolvable from the cache — nothing to do for this row.
+        if (findGradeTable(cache, course, year, sitting.series)) continue;
+        const target = bestSeriesForYear(board, year, trackerSeriesToMonth(sitting.series));
+        if (!target) continue;
+        const key = `${board}|${qualId}|${target.month}-${target.year}`;
+        if (!jobs.has(key)) jobs.set(key, { board, qualId, series: target });
       }
-      if (!needs) return;
-      await runBoundarySweep({});
-      renderPapers();
+      if (jobs.size === 0) return;
+      // Best-effort; a failure just leaves that series uncached. Concurrent
+      // runs share one in-flight fetch inside ensureBoundarySeries.
+      for (const { board, qualId, series } of jobs.values()) {
+        await new Promise((r) => setTimeout(r, 0));
+        try {
+          await ensureBoundarySeries(board, { id: qualId }, series, () => {});
+        } catch (e) {
+          /* best-effort */
+        }
+      }
+      // No renderPapers() here. The cache-change bus re-renders the table the
+      // moment any series lands; a render call here is what trapped the loop.
     } finally {
       warmBusy = false;
       if (warmQueued) {
@@ -1829,9 +1844,12 @@ export function initTrackerTool(deps, context = {}) {
     await loadSubjects();
     await ensureQualifications();
     renderPapers();
-    // Background warm of the shared boundary cache (no-op when fresh/served).
-    // Concurrent calls collapse into one sweep inside gradeBoundaries.js.
-    try { await runBoundarySweep({}); } catch { /* best-effort */ }
+    // Background fill of the shared boundary cache. Deferred off the first
+    // render and never wired into a click path, so first paint + focus always
+    // stay interactive; cached series / a fresh sweep make this a no-op.
+    setTimeout(() => {
+      runBoundarySweep({}).catch(() => { /* best-effort background */ });
+    }, 0);
   }
 
   if (typeof context.onload === "function") {
