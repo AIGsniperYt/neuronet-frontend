@@ -7,8 +7,19 @@ import {
   findGradeTable,
   boardIdToName,
   qualIdToName,
+  boardToId,
+  qualToId,
+  trackerSeriesToMonth,
   normalizeTitle,
-  scoreToGrade
+  scoreToGrade,
+  canonicalGradeKey,
+  normalizeBoundaryTable,
+  findGradeMark,
+  courseGradeLabels,
+  boundarySeriesList,
+  bestSeriesForYear,
+  discoverBoundarySeries,
+  ensureBoundarySeries
 } from "./gradeBoundaries.js";
 
 export function initTrackerTool(deps, context = {}) {
@@ -54,10 +65,12 @@ export function initTrackerTool(deps, context = {}) {
     colList: $("trackerColList"),
     cusReset: $("trackerCusReset"),
     linkArea: $("trackerLinkArea"),
+    linkPill: $("trackerLinkPill"),
     linkPop: $("trackerLinkPop"),
     linkFilter: $("trackerLinkFilter"),
     linkFilters: $("trackerLinkFilters"),
     linkList: $("trackerLinkList"),
+    linkStatus: $("trackerLinkStatus"),
     unlinkBtn: $("trackerUnlinkBtn"),
 
     slotList: $("trackerSlotList"),
@@ -107,7 +120,8 @@ export function initTrackerTool(deps, context = {}) {
   // The grade thresholds shown for a subject in the Boundary column. Labels are
   // picked from the fetched pack; empty = use the top grade only.
   function aimFor(subject) {
-    return (subject && Array.isArray(aimGrades[subject])) ? aimGrades[subject] : [];
+    const raw = (subject && Array.isArray(aimGrades[subject])) ? aimGrades[subject] : [];
+    return Array.from(new Set(raw.map((label) => canonicalGradeKey(label)).filter(Boolean)));
   }
 
   function nowISO() { return new Date().toISOString(); }
@@ -253,7 +267,9 @@ export function initTrackerTool(deps, context = {}) {
   function resolveCourse(cache, name) {
     if (!name) return null;
     const linked = coursesBySubject[name];
-    if (linked && linked.code) return linked;
+    if (linked && linked.code) {
+      return linked;
+    }
     const meta = subjectMeta[name] || {};
     if (meta.examBoard || meta.qualification) {
       const hit = matchOfficialCourse(cache, {
@@ -262,19 +278,23 @@ export function initTrackerTool(deps, context = {}) {
         title: name,
         code: meta.code
       });
-      if (hit) return hit;
+      if (hit) {
+        return hit;
+      }
     }
     const norm = normalizeTitle(name);
-    return listCachedCourses(cache).find((c) => c.title && normalizeTitle(c.title) === norm) || null;
+    const hit2 = listCachedCourses(cache).find((c) => c.title && normalizeTitle(c.title) === norm) || null;
+    return hit2;
   }
 
   function resolveBoundaryTable(subject, year, series, cacheSrc) {
+    if (/^(mock|specimen)$/i.test(String(series || "").trim())) return null;
     const cache = cacheSrc || loadBoundaryCache();
     const course = subject ? resolveCourse(cache, subject) : null;
     if (!course) return null;
     const hit = findGradeTable(cache, course, year, series);
     if (!hit || !hit.subject) return null;
-    return {
+    return normalizeBoundaryTable({
       grades: hit.subject.grades || {},
       gradesInOrder: Array.isArray(hit.subject.gradesInOrder) ? hit.subject.gradesInOrder : [],
       maxMark: hit.subject.maxMark || null,
@@ -284,7 +304,19 @@ export function initTrackerTool(deps, context = {}) {
       seriesLabel: hit.series ? hit.series.label : null,
       seriesKey: hit.series ? `${hit.series.month}-${hit.series.year}` : null,
       fresh: !!hit.fresh
-    };
+    });
+  }
+
+  // The ONE table a row renders from: live per-year cache resolution, else the
+  // sitting's stored snapshot — both run through the canonical normalizer so
+  // every consumer reads canonical grade keys.
+  function effectiveTable(sitting, cacheSrc) {
+    const live = resolveBoundaryTable(sitting.subject, numberEq(sitting.year), sitting.series, cacheSrc);
+    if (live) {
+      return live;
+    }
+    const snapshot = normalizeBoundaryTable(sitting && sitting.gradeBoundaries);
+    return snapshot;
   }
 
   // Best-effort paper list for a subject: scan the cache across series for any
@@ -304,14 +336,19 @@ export function initTrackerTool(deps, context = {}) {
   }
 
   function topGradeOf(table) {
-    const top = table && table.gradesInOrder && table.gradesInOrder[0];
-    const mark = table && top && table.grades && table.grades[top];
-    return Number.isFinite(mark) ? mark : null;
+    const normalized = normalizeBoundaryTable(table);
+    const top = normalized && Array.isArray(normalized.gradesInOrder) ? normalized.gradesInOrder[0] : null;
+    return top == null ? null : findGradeMark(normalized, top);
   }
 
   function boundsTooltip(gb) {
-    const lines = gb.gradesInOrder.filter((g) => Number.isFinite(gb.grades[g])).map((g) => `${g}: ${gb.grades[g]}`);
+    const normalized = normalizeBoundaryTable(gb);
+    const lines = normalized.gradesInOrder.filter((g) => Number.isFinite(normalized.grades[g])).map((g) => `${g}: ${normalized.grades[g]}`);
     return `${gb.seriesLabel || "Grade boundaries"}` + (lines.length ? " · " + lines.join(", ") : "");
+  }
+
+  function markForGrade(gb, label) {
+    return findGradeMark(gb, label);
   }
 
   // Subject-level grade, NOT per-paper. Sums each paper's best-attempt raw total
@@ -370,20 +407,37 @@ export function initTrackerTool(deps, context = {}) {
   // never edited here). Any number of grades: 9, 9+7, 9+4, 9+8+7, whatever.
   // Nothing picked = the top grade only, which is the default.
   function aimTable(subject) {
-    return resolveBoundaryTable(subject, null, null, loadBoundaryCache());
+    const cache = loadBoundaryCache();
+    const direct = resolveBoundaryTable(subject, null, null, cache);
+    if (direct) return direct;
+    const sitting = papers.find((p) => p.subject === subject && p.year != null);
+    const resolved = sitting
+      ? resolveBoundaryTable(subject, numberEq(sitting.year), sitting.series, cache)
+      : null;
+    if (resolved) return resolved;
+    const stored = papers.find((p) => p.subject === subject && p.gradeBoundaries);
+    return stored ? normalizeBoundaryTable(stored.gradeBoundaries) : null;
   }
-  // Target grades are a fixed 9->3 toggle line. Marks are NOT shown here because
-  // the threshold for a grade differs per year/series — the Boundary column
-  // resolves the mark per sitting.
-  const PICKABLE_GRADES = ["9", "8", "7", "6", "5", "4", "3"];
   function pickableGrades(subject) {
-    const table = aimTable(subject);
-    const known = table && Array.isArray(table.gradesInOrder) ? table.gradesInOrder : [];
-    if (known.length) {
-      const set = new Set(known);
-      return PICKABLE_GRADES.filter((g) => set.has(g));
+    const cache = loadBoundaryCache();
+    const course = subject ? resolveCourse(cache, subject) : null;
+    const union = course ? courseGradeLabels(cache, course) : [];
+    const tableLabels = (() => {
+      const t = aimTable(subject);
+      if (!t) return [];
+      const raw = Array.isArray(t.gradesInOrder) && t.gradesInOrder.length
+        ? t.gradesInOrder
+        : t.grades && typeof t.grades === "object" ? Object.keys(t.grades) : [];
+      return raw.map((g) => canonicalGradeKey(g)).filter((g) => g && g !== "U");
+    })();
+    const seen = new Set();
+    const out = [];
+    for (const label of [...union, ...tableLabels]) {
+      if (!label || label === "U" || seen.has(label)) continue;
+      seen.add(label);
+      out.push(label);
     }
-    return known.length ? known : [];
+    return out;
   }
   function renderBoundaryChips() {
     if (el.boundaryChips) el.boundaryChips.innerHTML = "";
@@ -403,9 +457,7 @@ export function initTrackerTool(deps, context = {}) {
       `<span class="bmark">${escapeHtml(g)}</span>` +
       `</button>`
     ).join("");
-    if (el.boundaryNote) el.boundaryNote.textContent = selected.length
-      ? `Showing grades: ${selected.join(" / ")}`
-      : "Nothing picked &mdash; the Boundary column shows the top grade.";
+    if (el.boundaryNote) el.boundaryNote.textContent = "";
   }
 
   function renderColList() {
@@ -419,11 +471,12 @@ export function initTrackerTool(deps, context = {}) {
   function toggleAim(subject, label) {
     if (!subject) return;
     aimGrades = loadAim();
-    let list = (aimGrades[subject] || []).slice();
-    const idx = list.indexOf(label);
+    const canonical = canonicalGradeKey(label);
+    let list = (aimGrades[subject] || []).slice().map((item) => canonicalGradeKey(item)).filter(Boolean);
+    const idx = list.indexOf(canonical);
     if (idx >= 0) list.splice(idx, 1);
-    else list.push(label);
-    aimGrades[subject] = list;
+    else list.push(canonical);
+    aimGrades[subject] = Array.from(new Set(list));
     saveAimGrades();
     renderPapers();
   }
@@ -438,12 +491,12 @@ export function initTrackerTool(deps, context = {}) {
   }
 
   function renderLinkArea() {
-    if (!el.linkArea) return;
+    if (!el.linkPill) return;
     const subject = focusedSubject;
     const course = subject ? coursesBySubject[subject] : null;
     linkHint = null;
     if (course) {
-      el.linkArea.innerHTML = `<button type="button" class="tracker-link-pill linked" data-act="open" title="${escapeHtml(courseSummary(course))}"><i class="fa-solid fa-link"></i> ${escapeHtml(courseSummary(course))}</button>`;
+      el.linkPill.innerHTML = `<button type="button" class="tracker-link-pill linked" data-act="open" title="${escapeHtml(courseSummary(course))}"><i class="fa-solid fa-link"></i> ${escapeHtml(courseSummary(course))}</button>`;
     } else {
       linkHint = subject ? matchOfficialCourse(loadBoundaryCache(), {
         board: boardFor(subject),
@@ -452,26 +505,108 @@ export function initTrackerTool(deps, context = {}) {
         code: ""
       }) : null;
       if (linkHint) {
-        el.linkArea.innerHTML = `<button type="button" class="tracker-link-pill suggest" data-act="suggest" title="Automatically linked from your fetched pack. Click to confirm.">Link: ${escapeHtml(courseSummary(linkHint))}</button>`;
+        el.linkPill.innerHTML = `<button type="button" class="tracker-link-pill suggest" data-act="suggest" title="Automatically linked from your fetched pack. Click to confirm.">Link: ${escapeHtml(courseSummary(linkHint))}</button>`;
       } else {
-        el.linkArea.innerHTML = `<button type="button" class="tracker-link-pill" data-act="open"><i class="fa-solid fa-link"></i> Link subject</button>`;
+        el.linkPill.innerHTML = `<button type="button" class="tracker-link-pill" data-act="open"><i class="fa-solid fa-link"></i> Link subject</button>`;
       }
     }
-    if (el.linkPop) el.linkPop.hidden = true;
+    const pill = el.linkPill.querySelector(".tracker-link-pill");
+    if (pill) {
+      pill.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (pill.dataset.act === "suggest") {
+          if (linkHint) applyOfficialCourse(subject, linkHint);
+        } else {
+          openLinkPicker(subject);
+        }
+      });
+    }
   }
 
   function openLinkPicker(subject) {
-    if (!subject) { flash("Pick a subject first.", false); return; }
     if (el.colsPop) el.colsPop.hidden = true;
-    el.linkFilter.value = "";
+    if (el.linkFilter) el.linkFilter.value = "";
     chipTokens.clear();
     renderCourseList();
-    el.unlinkBtn.hidden = !coursesBySubject[subject];
-    el.linkPop.hidden = false;
+    seedLinkCourses();
+    if (el.unlinkBtn) el.unlinkBtn.hidden = !(subject && coursesBySubject[subject]);
+    if (el.linkPop) el.linkPop.hidden = false;
   }
 
   function closeLinkPicker() {
     if (el.linkPop) el.linkPop.hidden = true;
+  }
+
+  // Populate the link picker with official subjects for EVERY exam board —
+  // AQA, OCR and Pearson — using the exact discovery + fetch engine the scraper
+  // uses (gradeBoundaries.js). OCR keeps no baseline series list (discovery-only)
+  // and Pearson's newest series is frequently unpublished/broken, so we iterate
+  // EVERY series in every board's list for every qual — exactly like the
+  // scraper's autoFetchLatest — not just the newest. The cache dedupes by
+  // board:qual:code, so the union of all successfully-fetched series fills the
+  // picker completely and survives any single bad file.
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  let linkSeedBusy = false;
+  let linkSeedQueued = false;
+  async function seedLinkCourses() {
+    if (linkSeedBusy) {
+      linkSeedQueued = true;
+      return;
+    }
+    linkSeedBusy = true;
+    renderCourseList();
+    try {
+      // Best-effort discovery for OCR (no baseline list) and hashed URLs for
+      // AQA/Pearson. Deterministic fallback URLs still work on failure.
+      try {
+        await discoverBoundarySeries(() => {});
+      } catch {
+        /* keep going with baseline series + fallback URLs */
+      }
+      const cache = loadBoundaryCache();
+      const boards = ["aqa", "ocr", "pearson"];
+      const quals = ["gcse", "aLevel", "as"];
+      const shownBusy = el.linkList && listCachedCourses(loadBoundaryCache()).length === 0;
+      if (shownBusy) {
+        el.linkList.innerHTML = `<div class="tracker-course-empty">Fetching official subjects from AQA, OCR and Pearson...</div>`;
+      }
+      const withCache = () => loadBoundaryCache();
+      for (const board of boards) {
+        const list = boundarySeriesList(board);
+        if (list.length === 0) continue;
+        const jobs = [];
+        for (const series of list) {
+          for (const qualId of quals) {
+            const key = `${board}:${series.month}-${series.year}:${qualId}`;
+            const entry = withCache().entries[key];
+            if (entry && entry.subjects && entry.subjects.length) continue;
+            jobs.push({ board, qualId, series });
+          }
+        }
+        // Parse each file one at a time, yielding between jobs: pdf/xlsx
+        // parsing is synchronous on the main thread, so a macrotask break lets
+        // the skeleton animation / spinner actually repaint between files.
+        for (const job of jobs) {
+          await sleep(0);
+          try {
+            await ensureBoundarySeries(job.board, { id: job.qualId }, job.series, () => {});
+          } catch {
+            /* best-effort; that board/qual/series just stays uncached */
+          }
+        }
+        // Let partial results appear as soon as each board's series finish, so
+        // the picker fills live instead of hanging until the whole pass ends.
+        renderCourseList();
+      }
+    } finally {
+      linkSeedBusy = false;
+      renderCourseList();
+      if (linkSeedQueued) {
+        linkSeedQueued = false;
+        seedLinkCourses();
+      }
+    }
   }
 
   // Search strengthening: every whitespace token must match (order-independent),
@@ -537,18 +672,47 @@ export function initTrackerTool(deps, context = {}) {
     );
   }
 
+  function renderLinkStatus() {
+    if (!el.linkStatus) return;
+    if (!linkSeedBusy) {
+      el.linkStatus.hidden = true;
+      el.linkStatus.innerHTML = "";
+      if (el.linkFilter) el.linkFilter.classList.remove("tracker-input-skeleton");
+      return;
+    }
+    if (el.linkFilter) el.linkFilter.classList.add("tracker-input-skeleton");
+    const count = listCachedCourses(loadBoundaryCache()).length;
+    el.linkStatus.hidden = false;
+    el.linkStatus.innerHTML =
+      `<span class="tracker-track-spinner" aria-hidden="true"></span>` +
+      `<span>Fetching official subjects from AQA, OCR and Pearson... <b>${count}</b> loaded so far</span>`;
+  }
+
+  const TRACKER_SKELETON_ROWS = 6;
+
   function renderCourseList() {
     const courses = listCachedCourses(loadBoundaryCache());
     const tokens = queryTokens();
     const visible = courses.filter((c) => matchesTokens(c, tokens));
     updateChipLighting();
+    renderLinkStatus();
     const subject = focusedSubject;
     const current = subject ? coursesBySubject[subject] : null;
 
     if (!el.linkList) return;
     if (visible.length === 0) {
+      if (linkSeedBusy && courses.length === 0) {
+        // Loading placeholder: shimmer rows until the first subjects land so
+        // the popover shows instant, tangible progress instead of a plain text
+        // line while the fetch pass runs.
+        el.linkList.innerHTML =
+          `<div class="tracker-track-skel">` +
+          Array.from({ length: TRACKER_SKELETON_ROWS }, () => `<div class="tracker-track-skel-row"></div>`).join("") +
+          `</div>`;
+        return;
+      }
       el.linkList.innerHTML = courses.length === 0
-        ? `<div class="tracker-course-empty">No subjects cached yet.<br>Open the <b>Scraper</b> tool, pick a board / qualification / series and fetch boundaries &mdash; then link here.</div>`
+        ? `<div class="tracker-course-empty">No subjects available yet &mdash; fetching from AQA, OCR and Pearson failed, or there's no cached data. Open the <b>Scraper</b> tool to fetch boundaries manually.</div>`
         : `<div class="tracker-course-empty">No subjects match those filters.</div>`;
       return;
     }
@@ -561,7 +725,7 @@ export function initTrackerTool(deps, context = {}) {
         html += `<div class="tracker-course-board">${escapeHtml(c.boardName)}</div>`;
         lastBoard = c.boardName;
       }
-      const isSel = !!current && c.board === current.board && c.code === current.code && c.qual === current.qual;
+      const isSel = !!current && c.board === current.board && c.code === current.code && c.qual === current.qual && normalizeTitle(c.title) === normalizeTitle(current.title);
       const codeTxt = c.code ? `<span class="course-code">${escapeHtml(c.code)}</span> ` : "";
       html +=
         `<button type="button" class="tracker-course-item${isSel ? " sel" : ""}" data-board="${escapeHtml(c.board)}" data-qual="${escapeHtml(c.qual)}" data-code="${escapeHtml(c.code)}">` +
@@ -574,53 +738,63 @@ export function initTrackerTool(deps, context = {}) {
 
   async function applyOfficialCourse(subject, candidate) {
     if (!subject || !candidate) return;
-    const nodes = (await getAllNodes()) || [];
-    const existing = nodes.find((n) => n.type === "subject" && (n.subject === subject || n.name === subject));
-    const course = { board: candidate.board, code: candidate.code, title: candidate.title, qual: candidate.qual };
-    if (existing) {
-      await addNode({
-        ...existing,
-        officialCourse: course,
-        customized: false,
-        examBoard: existing.examBoard || candidate.boardName,
-        qualification: existing.qualification || candidate.qualName,
-        updatedAt: Date.now()
-      });
-    } else {
-      await addNode({
-        type: "subject", subject, name: subject,
-        examBoard: candidate.boardName,
-        qualification: candidate.qualName,
-        customized: false,
-        officialCourse: course,
-        createdAt: Date.now(), updatedAt: Date.now()
-      });
+    if (el.linkList) el.linkList.innerHTML = "";
+    try {
+      const nodes = (await getAllNodes()) || [];
+      const existing = nodes.find((n) => n.type === "subject" && (n.subject === subject || n.name === subject));
+      const course = { board: candidate.board, code: candidate.code, title: candidate.title, qual: candidate.qual };
+      if (existing) {
+        await addNode({
+          ...existing,
+          officialCourse: course,
+          customized: false,
+          examBoard: existing.examBoard || candidate.boardName,
+          qualification: existing.qualification || candidate.qualName,
+          updatedAt: Date.now()
+        });
+      } else {
+        await addNode({
+          type: "subject", subject, name: subject,
+          examBoard: candidate.boardName,
+          qualification: candidate.qualName,
+          customized: false,
+          officialCourse: course,
+          createdAt: Date.now(), updatedAt: Date.now()
+        });
+      }
+      await loadSubjects();
+      closeLinkPicker();
+      renderPapers();
+      flash(`Linked ${subject} to ${courseSummary(course)}. Boundaries auto-load from the fetched pack.`, true);
+    } catch (err) {
+      if (el.linkList) el.linkList.innerHTML = `<div class="tracker-course-empty">Could not link ${escapeHtml(subject)} (${escapeHtml(err && err.message ? err.message : String(err))}).</div>`;
     }
-    await loadSubjects();
-    closeLinkPicker();
-    renderPapers();
-    flash(`Linked ${subject} to ${courseSummary(course)}. Boundaries auto-load from the fetched pack.`, true);
   }
 
   async function unlinkOfficialCourse(subject) {
     if (!subject) return;
+    if (el.linkList) el.linkList.innerHTML = "";
     const confirmed = await dialog.confirm(`Unlink ${subject} from its official course?`, "Unlink", "danger");
     if (!confirmed) return;
-    const nodes = (await getAllNodes()) || [];
-    const existing = nodes.find((n) => n.type === "subject" && (n.subject === subject || n.name === subject));
-    if (existing) {
-      await addNode({ ...existing, officialCourse: null, updatedAt: Date.now() });
-    } else {
-      await addNode({
-        type: "subject", subject, name: subject,
-        examBoard: "", qualification: "", customized: false, officialCourse: null,
-        createdAt: Date.now(), updatedAt: Date.now()
-      });
+    try {
+      const nodes = (await getAllNodes()) || [];
+      const existing = nodes.find((n) => n.type === "subject" && (n.subject === subject || n.name === subject));
+      if (existing) {
+        await addNode({ ...existing, officialCourse: null, updatedAt: Date.now() });
+      } else {
+        await addNode({
+          type: "subject", subject, name: subject,
+          examBoard: "", qualification: "", customized: false, officialCourse: null,
+          createdAt: Date.now(), updatedAt: Date.now()
+        });
+      }
+      await loadSubjects();
+      closeLinkPicker();
+      renderPapers();
+      flash(`Unlinked ${subject}.`, true);
+    } catch (err) {
+      if (el.linkList) el.linkList.innerHTML = `<div class="tracker-course-empty">Could not unlink ${escapeHtml(subject)} (${escapeHtml(err && err.message ? err.message : String(err))}).</div>`;
     }
-    await loadSubjects();
-    closeLinkPicker();
-    renderPapers();
-    flash(`Unlinked ${subject}.`, true);
   }
 
   // ---- view switching ----
@@ -711,7 +885,7 @@ export function initTrackerTool(deps, context = {}) {
     el.collapseBtn.disabled = !anyNotes;
 
     if (showAll) {
-      if (el.linkArea) el.linkArea.innerHTML = "";
+      if (el.linkPill) el.linkPill.innerHTML = "";
     } else {
       renderLinkArea();
     }
@@ -757,6 +931,68 @@ export function initTrackerTool(deps, context = {}) {
     table.appendChild(tbody);
     scroll.appendChild(table);
     el.paperGroups.appendChild(scroll);
+    maybeWarmBoundaries();
+  }
+
+  // Auto-ensure boundary packs for every dated row that has no cached table
+  // yet. The scraper's own fetch engine (discovery + download + parse) lives in
+  // gradeBoundaries.js and is reused here, so per-year boundaries are populated
+  // automatically — the user never has to "warm" anything by hand.
+  let warmBusy = false;
+  let warmQueued = false;
+  async function maybeWarmBoundaries() {
+    if (warmBusy) {
+      warmQueued = true;
+      return;
+    }
+    warmBusy = true;
+    try {
+      const cache = loadBoundaryCache();
+      const jobs = new Map();
+      for (const sitting of papers || []) {
+        if (!sitting || !sitting.subject) continue;
+        const seriesWord = sitting.series;
+        if (/^(mock|specimen)$/i.test(String(seriesWord || "").trim())) continue;
+        const year = numberEq(sitting.year);
+        if (year === null) continue;
+        const course = resolveCourse(cache, sitting.subject);
+        if (!course) continue;
+        const board = boardToId(course && course.board);
+        const qualId = qualToId(course && course.qual);
+        if (!board || !qualId) continue;
+        // Already resolvable from the cache — nothing to do for this row.
+        if (findGradeTable(cache, course, year, seriesWord)) continue;
+        const target = bestSeriesForYear(board, year, trackerSeriesToMonth(seriesWord));
+        if (!target) continue;
+        const key = `${board}|${qualId}|${target.month}-${target.year}`;
+        if (!jobs.has(key)) jobs.set(key, { board, qualId, series: target });
+      }
+      if (jobs.size === 0) return;
+      // Discovery improves URL accuracy (hashed 2024+ AQA files); best-effort.
+      try {
+        await discoverBoundarySeries(() => {});
+      } catch {
+        /* keep going with deterministic fallback URLs */
+      }
+      let fetchedAny = false;
+      const list = [...jobs.values()];
+      for (const { board, qualId, series } of list) {
+        await sleep(0);
+        try {
+          const subjects = await ensureBoundarySeries(board, qualId, series, () => {});
+          if (subjects && subjects.length) fetchedAny = true;
+        } catch (e) {
+          /* best-effort; a failure just leaves that series uncached */
+        }
+      }
+      if (fetchedAny) renderPapers();
+    } finally {
+      warmBusy = false;
+      if (warmQueued) {
+        warmQueued = false;
+        maybeWarmBoundaries();
+      }
+    }
   }
 
   function shortSeries(s) {
@@ -836,9 +1072,9 @@ export function initTrackerTool(deps, context = {}) {
   }
 
   function renderMainRow(sitting, showSubject, noteOpen, cacheSrc) {
-    const boundary = numberEq(sitting.gradeBoundary);
-    const alive = resolveBoundaryTable(sitting.subject, numberEq(sitting.year), sitting.series, cacheSrc) || sitting.gradeBoundaries || null;
-    const gb = alive;
+    const storedBoundary = numberEq(sitting.gradeBoundary);
+    const gb = effectiveTable(sitting, cacheSrc);
+    const boundary = gb ? null : (storedBoundary === 0 ? null : storedBoundary);
     const hasG = !!(gb && Array.isArray(gb.gradesInOrder) && gb.gradesInOrder.length && gb.grades && typeof gb.grades === "object");
 
     const avg = sittingAverage(sitting);
@@ -898,14 +1134,21 @@ export function initTrackerTool(deps, context = {}) {
   // Boundary column content. Default: the top grade's threshold (from the fetched
   // pack — the source of truth). When the user picked aim grades for the subject,
   // show those thresholds instead so they see hit/miss against their target.
+  // Picked grades always render: from the row's own per-year table when it
+  // resolves, else from the subject's best available table (the same one the
+  // picker populates from) — so custom picks never silently collapse back to the
+  // default top-grade badge just because one year's pack is unfetchable.
   function boundaryBadges(subject, gb, hasG, boundary) {
-    const aim = hasG ? aimFor(subject) : [];
-    const tip = hasG ? boundsTooltip(gb) : null;
-    if (hasG && aim.length) {
-      const items = aim.map((label) => ({
-        label,
-        mark: gb.grades && gb.grades[label] != null ? gb.grades[label] : null
-      }));
+    const aim = aimFor(subject);
+    const pickTable = (aim.length && gb && Array.isArray(gb.gradesInOrder))
+      ? gb
+      : (aim.length ? aimTable(subject) : null);
+    const tip = pickTable && Array.isArray(pickTable.gradesInOrder) ? boundsTooltip(pickTable) : null;
+    if (aim.length && pickTable && Array.isArray(pickTable.gradesInOrder)) {
+      const items = aim.map((label) => {
+        const mark = markForGrade(pickTable, label);
+        return { label, mark };
+      });
       if (items.length) {
         return items.map((x) =>
           `<span class="tracker-sitting-badge bnd" title="${escapeHtml(tip)}">${escapeHtml(x.label)} &ge; ${x.mark != null ? escapeHtml(String(x.mark)) : "&ndash;"}</span>`
@@ -1037,19 +1280,44 @@ export function initTrackerTool(deps, context = {}) {
     editingId = null;
   }
 
-  function collectSitting() {
+  async function collectSitting() {
     const subject = el.formSubject.value.trim();
     const yearRaw = el.formYear.value.trim();
     const year = yearRaw === "" ? null : Number(yearRaw);
     const series = el.formSeries.value;
-    const gradeBoundaries = resolveBoundaryTable(subject, year, series) || null;
-    const boundary = gradeBoundaries ? topGradeOf(gradeBoundaries) : null;
     const notes = el.formNotes.value.trim();
     const examBoard = boardFor(subject);
     const qualification = qualFor(subject);
 
     if (!subject) { flash("Subject is required.", false); return null; }
     if ((year !== null && !Number.isFinite(year))) { flash("Enter a valid year.", false); return null; }
+
+    const gradeBoundaries = resolveBoundaryTable(subject, year, series) || null;
+    let boundary = gradeBoundaries ? topGradeOf(gradeBoundaries) : null;
+    if (boundary === null) {
+      const existing = editingId && papers.find((p) => p.id === editingId);
+      const existingBoundary = existing ? numberEq(existing.gradeBoundary) : null;
+      if (existingBoundary !== null && existingBoundary !== 0) boundary = existingBoundary;
+      else {
+        const sittingLabel = [year, series].filter(Boolean).join(" ") || "this sitting";
+        const continueManual = await dialog.confirm(
+          `No official grade-boundary data is available for ${subject} (${sittingLabel}). You will need to enter the boundary yourself.`,
+          "Enter manually",
+          "primary"
+        );
+        if (!continueManual) { flash("Sitting not saved: a boundary is required.", false); return null; }
+        const raw = await dialog.prompt(
+          `Enter the top-grade boundary mark for ${subject} (${sittingLabel}). This value will be saved with this sitting.`,
+          ""
+        );
+        if (raw === null || raw.trim() === "") { flash("Sitting not saved: enter a boundary mark.", false); return null; }
+        boundary = Number(raw.trim());
+        if (!Number.isFinite(boundary) || boundary < 0) {
+          flash("Sitting not saved: the boundary must be a non-negative number.", false);
+          return null;
+        }
+      }
+    }
 
     const results = [];
     for (const row of el.slotList.querySelectorAll(".tracker-slot-editor")) {
@@ -1086,7 +1354,7 @@ export function initTrackerTool(deps, context = {}) {
   }
 
   async function save() {
-    const data = collectSitting();
+    const data = await collectSitting();
     if (!data) return;
     const now = nowISO();
     if (editingId) {
@@ -1137,7 +1405,7 @@ export function initTrackerTool(deps, context = {}) {
       const gradeCounts = {};
       let projCount = 0, realCount = 0;
       for (const s of set) {
-        const gb = resolveBoundaryTable(s.subject, numberEq(s.year), s.series, cacheSrc) || s.gradeBoundaries || null;
+        const gb = effectiveTable(s, cacheSrc);
         const hasT = !!(gb && Array.isArray(gb.gradesInOrder) && gb.gradesInOrder.length && gb.grades && typeof gb.grades === "object");
         for (const r of s.results || []) {
           const b = bestAttemptScore(r);
@@ -1339,8 +1607,9 @@ export function initTrackerTool(deps, context = {}) {
 
     // ---- link-to-official-subject picker (persistent popover) ----
     el.linkArea.addEventListener("click", (e) => {
-      const pill = e.target.closest("button");
+      const pill = e.target.closest(".tracker-link-pill");
       if (!pill) return;
+      e.preventDefault();
       e.stopPropagation();
       if (pill.dataset.act === "suggest") {
         if (linkHint) applyOfficialCourse(focusedSubject, linkHint);

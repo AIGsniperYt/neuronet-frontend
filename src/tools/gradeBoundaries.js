@@ -6,27 +6,69 @@
 // courses and auto-fill grade boundary tables without re-fetching or manual
 // typing, while the cache itself never enters the user's graph or JSON export.
 
+import * as XLSX from "../vendor/xlsx/index.js";
+import { extractPdfLayoutLines, parsePdfBoundaries } from "./pdfBoundaries.js";
+
 export const BOUNDARY_CACHE_KEY = "neuronet:gradeBoundaries";
+export const BOUNDARY_CACHE_VERSION = 2;
 
 const RESULTS_WINDOW_MS = 60 * 24 * 60 * 60 * 1000; // ~60 days, results-day policy
 
-export function loadBoundaryCache() {
+// In-memory mirror of the persisted cache. The tracker/scraper query the cache
+// on every render and write to it on every fetched series; parsing + re-
+// stringifying the whole localStorage blob each time freezes the UI once the
+// cache grows (opened picker animation stops). We therefore parse once and
+// debounce persistence, only touching localStorage on the eventual write.
+let memCache = null;
+let persistTimer = null;
+
+function freshCache() {
+  return { version: BOUNDARY_CACHE_VERSION, entries: {} };
+}
+
+function persistNow() {
+  const data = memCache || freshCache();
   try {
-    const raw = localStorage.getItem(BOUNDARY_CACHE_KEY);
-    if (!raw) return { version: 1, entries: {} };
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : { version: 1, entries: {} };
+    localStorage.setItem(BOUNDARY_CACHE_KEY, JSON.stringify(data));
   } catch {
-    return { version: 1, entries: {} };
+    /* storage full/unavailable — degrade to memory-only */
   }
 }
 
-export function saveBoundaryCache(cache) {
+export function loadBoundaryCache() {
+  if (memCache) return memCache;
   try {
-    localStorage.setItem(BOUNDARY_CACHE_KEY, JSON.stringify(cache));
+    const raw = localStorage.getItem(BOUNDARY_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && parsed.version === BOUNDARY_CACHE_VERSION) {
+        memCache = parsed;
+        return memCache;
+      }
+    }
   } catch {
-    /* storage full/unavailable — degrade to no-cache */
+    /* corrupt/invalid — fall through to fresh */
   }
+  memCache = freshCache();
+  return memCache;
+}
+
+export function saveBoundaryCache(cache) {
+  memCache = cache || memCache;
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    persistNow();
+  }, 300);
+}
+
+// Forces a synchronous persist (tool teardown / explicit sync points).
+export function flushBoundaryCache() {
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+  persistNow();
 }
 
 // Mutable cache handle used by the scraper. Keeps the raw entry lookup + the
@@ -102,14 +144,59 @@ export function normalizeTitle(t) {
   return String(t || "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+function baseCourseCode(code) {
+  return singleCode(code).toUpperCase().replace(/[FH]$/, "");
+}
+
+function courseTierOf(item) {
+  const t = String(item.title || "");
+  if (/\b(?:higher|h)\b/i.test(t)) return "H";
+  if (/\bfoundation\b/i.test(t)) return "F";
+  if (String(item.code || "").toUpperCase().endsWith("H")) return "H";
+  if (String(item.code || "").toUpperCase().endsWith("F")) return "F";
+  return null;
+}
+
 function findSubjectInEntry(entry, course) {
   const title = normalizeTitle(course.title);
-  const code = singleCode(course.code);
-  for (const item of entry.subjects || []) {
-    if (code && singleCode(item.code) === code) return item;
+  const code = singleCode(course.code).toUpperCase();
+  const baseCode = baseCourseCode(course.code);
+  const subjects = entry.subjects || [];
+  // Exact-code match: when both tiers share a code (e.g. Pearson 1MA1, OCR
+  // J560), keep the tier implied by the course title/code.
+  const codeMatches = subjects.filter((item) =>
+    code && singleCode(item.code).toUpperCase() === code
+  );
+  if (codeMatches.length) {
+    if (codeMatches.length > 1) {
+      const want = courseTierOf(course);
+      const same = codeMatches.filter((item) => courseTierOf(item) === want);
+      if (same.length === 1) return same[0];
+    }
+    return codeMatches[0];
   }
-  for (const item of entry.subjects || []) {
+  for (const item of subjects) {
     if (title && normalizeTitle(item.title) === title) return item;
+  }
+  if (code) {
+    const tiered = subjects.filter((item) =>
+      baseCourseCode(item.code) === baseCode ||
+      (title && normalizeTitle(item.title).replace(/\s+tier\s+[fh]$/i, "") === title)
+    );
+    if (tiered.length) {
+      // Prefer a tier that matches the course title/code, then Higher.
+      const want = courseTierOf(course);
+      if (want) {
+        const same = tiered.filter((item) => courseTierOf(item) === want);
+        if (same.length) return same[0];
+      }
+      tiered.sort((a, b) => {
+        const aHigher = courseTierOf(a) === "H";
+        const bHigher = courseTierOf(b) === "H";
+        return Number(bHigher) - Number(aHigher);
+      });
+      return tiered[0];
+    }
   }
   return null;
 }
@@ -124,7 +211,8 @@ export function listCachedCourses(cache) {
     if (!QUAL_IDS[qualId]) continue;
     for (const item of entry.subjects || []) {
       const code = singleCode(item.code);
-      const key = `${boardId}:${qualId}:${code}`;
+      const tier = courseTierOf(item) || "";
+      const key = `${boardId}:${qualId}:${code}:${tier}`;
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({
@@ -161,7 +249,14 @@ export function matchOfficialCourse(cache, { board, qual, title, code } = {}) {
     if (normTitle && c.title && normalizeTitle(c.title) === normTitle) return true;
     return false;
   });
-  return matches.length === 1 ? matches[0] : null;
+  if (matches.length === 1) return matches[0];
+  // Multiple same-code rows (e.g. Foundation + Higher): prefer the tier named
+  // by the title, otherwise treat as ambiguous.
+  if (matches.length > 1 && normTitle) {
+    const tiered = matches.filter((c) => normalizeTitle(c.title) === normTitle);
+    if (tiered.length === 1) return tiered[0];
+  }
+  return null;
 }
 
 function numberEq(v) {
@@ -173,26 +268,29 @@ function seriesProximity(series, year, monthAbbr) {
   const y = numberEq(year);
   if (y === null || series == null || series.year == null) return { d: 0, exactYear: false, exactMonth: false };
   const d = Math.abs(Number(series.year) - y);
-  const sameMonth = monthAbbr ? series.month === monthAbbr : true;
+  const sameMonth = monthAbbr ? String(series.month || "").trim().toUpperCase() === monthAbbr : true;
   return { d, exactYear: d === 0, exactMonth: sameMonth };
 }
 
 // Resolve the per-grade boundary table for a linked official course and a
-// tracker sitting (year + series word). Picks the cached series closest to the
-// sitting (exact month+year > same year > nearest year > most recent). Returns
-// { subject, series, boardId, qualId, fresh } or null.
+// tracker sitting (year + series word). Dated sittings only use cached data
+// from the same year; within that year, the requested month wins.
+// Undated lookups may use the most recently fetched matching series.
+// Returns { subject, series, boardId, qualId, fresh } or null.
 export function findGradeTable(cache, course, year, seriesWord) {
   const boardId = boardToId(course && course.board);
   const qualId = qualToId(course && course.qual);
   if (!boardId || !qualId) return null;
   const monthAbbr = trackerSeriesToMonth(seriesWord);
+  const requestedYear = numberEq(year);
   const candidates = [];
   for (const entry of Object.values((cache && cache.entries) || {})) {
-    if (String(entry.board || "").toLowerCase() !== boardId) continue;
-    if (String(entry.qual || "").toLowerCase() !== qualId) continue;
+    if (boardToId(entry.board) !== boardId) continue;
+    if (qualToId(entry.qual) !== qualId) continue;
     const subject = findSubjectInEntry(entry, course);
     if (!subject) continue;
     const p = seriesProximity(entry.series, year, monthAbbr);
+    if (requestedYear !== null && !p.exactYear) continue;
     candidates.push({
       subject,
       series: entry.series || null,
@@ -200,10 +298,10 @@ export function findGradeTable(cache, course, year, seriesWord) {
       prox: p
     });
   }
-  if (candidates.length === 0) return null;
-  // Prefer the sitting's exact year+month, then the exact year, then the
-  // closest year, then the most recent fetch. Never lets a different-year row
-  // silently share the latest fetched table.
+  if (candidates.length === 0) {
+    return null;
+  }
+  // Prefer the sitting's exact year+month, then another series in that year.
   candidates.sort((a, b) => {
     const ea = a.prox.exactYear && a.prox.exactMonth;
     const eb = b.prox.exactYear && b.prox.exactMonth;
@@ -211,6 +309,9 @@ export function findGradeTable(cache, course, year, seriesWord) {
     if (a.prox.exactYear !== b.prox.exactYear) return a.prox.exactYear ? -1 : 1;
     if (a.prox.d !== b.prox.d) return a.prox.d - b.prox.d;
     if (a.prox.exactMonth !== b.prox.exactMonth) return a.prox.exactMonth ? -1 : 1;
+    const aMain = !monthAbbr && String(a.series && a.series.month || "").toUpperCase() === "JUN";
+    const bMain = !monthAbbr && String(b.series && b.series.month || "").toUpperCase() === "JUN";
+    if (aMain !== bMain) return aMain ? -1 : 1;
     return b.fetchedAt - a.fetchedAt;
   });
   const best = candidates[0];
@@ -227,14 +328,689 @@ export function singleCode(code) {
   return String(code || "").trim();
 }
 
+export function canonicalGradeKey(value) {
+  if (value === null || value === undefined) return "";
+  const text = String(value).trim();
+  if (!text) return "";
+  const stripped = text.replace(/^grade\s+/i, "").trim();
+  const compact = stripped.replace(/\s+/g, " ");
+  const upper = compact.toUpperCase();
+  return upper === "A*" ? "A*" : upper;
+}
+
+export function normalizeBoundaryTable(table) {
+  if (!table || typeof table !== "object") return null;
+  const rawGrades = table.grades && typeof table.grades === "object" ? table.grades : {};
+  const rawOrder = Array.isArray(table.gradesInOrder) && table.gradesInOrder.length
+    ? table.gradesInOrder
+    : Object.keys(rawGrades);
+  const grades = {};
+  const gradesInOrder = [];
+  const seen = new Set();
+
+  const candidateValue = (label, fallbackKey) => {
+    if (rawGrades[label] != null) return rawGrades[label];
+    if (fallbackKey && rawGrades[fallbackKey] != null) return rawGrades[fallbackKey];
+    const keys = Object.keys(rawGrades);
+    for (const key of keys) {
+      if (canonicalGradeKey(key) === canonicalGradeKey(label)) return rawGrades[key];
+    }
+    return undefined;
+  };
+
+  for (const rawLabel of rawOrder) {
+    const normLabel = canonicalGradeKey(rawLabel);
+    if (!normLabel || seen.has(normLabel)) continue;
+    const mark = candidateValue(rawLabel, normLabel);
+    const numeric = Number(mark);
+    if (!Number.isFinite(numeric)) continue;
+    seen.add(normLabel);
+    grades[normLabel] = numeric;
+    gradesInOrder.push(normLabel);
+  }
+
+  if (!gradesInOrder.length && Object.keys(rawGrades).length) {
+    for (const [key, mark] of Object.entries(rawGrades)) {
+      const normLabel = canonicalGradeKey(key);
+      if (!normLabel || seen.has(normLabel)) continue;
+      const numeric = Number(mark);
+      if (!Number.isFinite(numeric)) continue;
+      seen.add(normLabel);
+      grades[normLabel] = numeric;
+      gradesInOrder.push(normLabel);
+    }
+  }
+
+  return { ...table, grades, gradesInOrder };
+}
+
+export function findGradeMark(table, label) {
+  const normalized = normalizeBoundaryTable(table);
+  if (!normalized || !normalized.grades || typeof normalized.grades !== "object") return null;
+  const wanted = canonicalGradeKey(label);
+  if (!wanted) return null;
+
+  const ordered = Array.isArray(normalized.gradesInOrder) ? normalized.gradesInOrder : Object.keys(normalized.grades);
+  for (const candidate of ordered) {
+    if (canonicalGradeKey(candidate) === wanted) return Number(normalized.grades[candidate]);
+  }
+
+  for (const [key, value] of Object.entries(normalized.grades)) {
+    if (canonicalGradeKey(key) === wanted) return Number(value);
+  }
+
+  return null;
+}
+
+// Union of canonical grade labels for a course across EVERY cached series for
+// that board+qual — so the target-grade picker reflects all usable data, not
+// just whichever series is "most recent". Sorted numeric-desc, then letters.
+export function courseGradeLabels(cache, course) {
+  const boardId = boardToId(course && course.board);
+  const qualId = qualToId(course && course.qual);
+  if (!boardId || !qualId) return [];
+  const labels = [];
+  const seen = new Set();
+  const push = (list) => {
+    for (const value of list || []) {
+      const key = canonicalGradeKey(value);
+      if (key && key !== "U" && !seen.has(key)) {
+        seen.add(key);
+        labels.push(key);
+      }
+    }
+  };
+  for (const entry of Object.values((cache && cache.entries) || {})) {
+    if (String(entry.board || "").toLowerCase() !== boardId) continue;
+    if (String(entry.qual || "").toLowerCase() !== qualId) continue;
+    const subject = findSubjectInEntry(entry, course);
+    if (!subject) continue;
+    push(subject.gradesInOrder);
+    if (subject.grades && typeof subject.grades === "object" && !Array.isArray(subject.gradesInOrder)) {
+      push(Object.keys(subject.grades));
+    }
+  }
+  labels.sort((a, b) => {
+    const na = Number(a);
+    const nb = Number(b);
+    if (Number.isFinite(na) && Number.isFinite(nb)) return nb - na;
+    if (Number.isFinite(na)) return -1;
+    if (Number.isFinite(nb)) return 1;
+    return a.localeCompare(b);
+  });
+  return labels;
+}
+
 // Convert a raw total score to a grade label with a boundary table, e.g.
 // grades: { "9": 132, ... }, gradesInOrder: ["9","8",...,"U"].
 export function scoreToGrade(grades, gradesInOrder, score) {
   const s = numberEq(score);
-  if (s === null || !Array.isArray(gradesInOrder) || gradesInOrder.length === 0) return null;
-  for (const g of gradesInOrder) {
-    const mark = grades && grades[g];
+  const table = normalizeBoundaryTable({ grades: grades || {}, gradesInOrder: gradesInOrder || [] });
+  if (s === null || !table || !table.gradesInOrder.length) return null;
+  for (const g of table.gradesInOrder) {
+    const mark = table.grades && table.grades[g];
     if (Number.isFinite(mark) && s >= mark) return g;
   }
-  return gradesInOrder[gradesInOrder.length - 1];
+  return table.gradesInOrder[table.gradesInOrder.length - 1];
+}
+
+// ============================================================================
+// Boundary fetch engine (headless, DOM-free, shared by scraper + tracker).
+// Given a board / qual / series it discovers the file URL, downloads + parses
+// the workbook/PDF, and writes the subjects into the boundary cache under the
+// canonical board:MONTH-YEAR:qual key. The tracker calls ensureBoundarySeries()
+// for every dated row that has no cached table yet, so boundaries are always
+// populated automatically — no manual "warming" required.
+// ============================================================================
+
+const AQA_SERIES = [
+  { month: "JUN", year: 2018, label: "June 2018", format: "pdf" },
+  { month: "NOV", year: 2018, label: "November 2018", format: "pdf" },
+  { month: "JUN", year: 2019, label: "June 2019", format: "pdf" },
+  { month: "NOV", year: 2019, label: "November 2019", format: "pdf" },
+  { month: "NOV", year: 2020, label: "November 2020", format: "pdf" },
+  { month: "NOV", year: 2021, label: "November 2021", format: "xlsx" },
+  { month: "JUN", year: 2022, label: "June 2022", format: "xlsx" },
+  { month: "NOV", year: 2022, label: "November 2022", format: "xlsx" },
+  { month: "JUN", year: 2023, label: "June 2023", format: "xlsx" },
+  { month: "NOV", year: 2023, label: "November 2023", format: "xlsx" },
+  { month: "JUN", year: 2024, label: "June 2024", format: "xlsx" },
+  { month: "NOV", year: 2024, label: "November 2024", format: "xlsx" },
+  { month: "JUN", year: 2025, label: "June 2025", format: "xlsx" },
+  { month: "NOV", year: 2025, label: "November 2025", format: "xlsx" },
+  { month: "JUN", year: 2026, label: "June 2026", format: "xlsx" }
+];
+
+const AQA_FILE_BASE = "https://filestore.aqa.org.uk/over/stat_pdf";
+const AQA_PAGE_BASE = "https://www.aqa.org.uk/exams-administration/results-days/grade-boundaries";
+const AQA_PAGE_ARCHIVE = `${AQA_PAGE_BASE}/archive`;
+const AQA_MONTHS = [
+  ["January", "JAN"], ["February", "FEB"], ["March", "MAR"], ["April", "APR"],
+  ["May", "MAY"], ["June", "JUN"], ["July", "JUL"], ["August", "AUG"],
+  ["September", "SEP"], ["October", "OCT"], ["November", "NOV"], ["December", "DEC"]
+];
+
+const AQA_LEGACY_PREFIX = {
+  "JUN-2018": { gcse: "AQA-GCSE-RF-GDE-BDY", aLevel: "AQA-A-LEVEL-RL-GDE-BDY", as: "AQA-AS-RL-GDE-BDY" },
+  "NOV-2018": { gcse: "AQA-GCSE-GDE-BDY", aLevel: "AQA-A-LEVEL-GDE-BDY", as: "AQA-AS-GDE-BDY" },
+  "JUN-2019": { gcse: "AQA-GCSE-GDE-BDY", aLevel: "AQA-A-LEVEL-RL-GDE-BDY", as: "AQA-AS-RL-GDE-BDY" },
+  "NOV-2019": { gcse: "AQA-GCSE-GDE-BDY", aLevel: "AQA-A-LEVEL-GDE-BDY", as: "AQA-AS-GDE-BDY" },
+  "NOV-2020": { gcse: "AQA-GCSE-GDE-BDY", aLevel: "AQA-A-LEVEL-RL-GDE-BDY", as: "AQA-AS-RL-GDE-BDY" },
+  "NOV-2021": { gcse: "AQA-GCSE-2-GDE-BDY", aLevel: "AQA-A-LEVEL-GDE-BDY", as: "AQA-AS-GDE-BDY" }
+};
+
+const AQA_QUALIFICATIONS = {
+  gcse: {
+    id: "gcse", name: "GCSE",
+    sheets: ["GCSE", "GCSE subject", "GCSE Subject"],
+    grades: [9, 8, 7, 6, 5, 4, 3, 2, 1],
+    filePrefix: "AQA-GCSE-GDE-BDY"
+  },
+  aLevel: {
+    id: "aLevel", name: "A-level",
+    sheets: ["A level subject"],
+    grades: ["A*", "A", "B", "C", "D", "E"],
+    filePrefix: "AQA-A-LEVEL-GDE-BDY"
+  },
+  as: {
+    id: "as", name: "AS",
+    sheets: ["AS subject"],
+    grades: ["A", "B", "C", "D", "E"],
+    filePrefix: "AQA-AS-GDE-BDY"
+  }
+};
+
+const ENGINE_QR = {
+  gcse: { id: "gcse", name: "GCSE" },
+  aLevel: { id: "aLevel", name: "A-level" },
+  as: { id: "as", name: "AS" }
+};
+
+const OCR_PAGE_BASE = "https://www.ocr.org.uk/administration/grade-boundaries/index.aspx";
+const OCR_PAGE_ARCHIVE = "https://www.ocr.org.uk/administration/grade-boundaries/grade-boundaries-archive/grade-boundaries-archive.aspx";
+const OCR_QUAL_PATTERNS = {
+  gcse: /gcse-grade-boundaries-/,
+  aLevel: /as-and-a-level-grade-boundaries-|a-level-grade-boundaries-/,
+  as: /as-and-a-level-grade-boundaries-|a-level-grade-boundaries-/
+};
+
+const PEARSON_PAGE = "https://qualifications.pearson.com/en/support/support-topics/results-certification/grade-boundaries.html";
+const PEARSON_DAM = "https://qualifications.pearson.com/content/dam/pdf/Support/Grade-boundaries";
+const PEARSON_BASELINE = [
+  { month: "JUN", year: 2023, label: "June 2023" },
+  { month: "JUN", year: 2024, label: "June 2024" },
+  { month: "NOV", year: 2024, label: "November 2024" },
+  { month: "JUN", year: 2025, label: "June 2025" },
+  { month: "NOV", year: 2025, label: "November 2025" }
+];
+
+const discovered = { aqa: new Map(), ocr: new Map(), pearson: new Map() };
+let boundaryDiscoveryPromise = null;
+
+function seriesKey(series) {
+  return `${series.month}-${series.year}`;
+}
+
+function monthAbbrevToFull(abbrev) {
+  const m = AQA_MONTHS.find(([, abb]) => abb === abbrev);
+  return m ? m[0] : abbrev;
+}
+
+function monthAbbrevToSlug(abbrev) {
+  return monthAbbrevToFull(abbrev).toLowerCase();
+}
+
+function monthIndex(abbrev) {
+  const idx = AQA_MONTHS.findIndex(([, abb]) => abb === abbrev);
+  return idx < 0 ? 0 : idx;
+}
+
+function engineQualKey(qid) {
+  const id = qualToId(qid);
+  if (id === "alevel") return "aLevel";
+  return id === "as" ? "as" : "gcse";
+}
+
+export function boundaryQualification(board, qualId) {
+  const bId = boardToId(board) || String(board || "").toLowerCase();
+  const key = engineQualKey(qualId);
+  if (bId === "aqa") return (AQA_QUALIFICATIONS[key] && { ...AQA_QUALIFICATIONS[key] }) || null;
+  return (ENGINE_QR[key] && { ...ENGINE_QR[key] }) || null;
+}
+
+// Fetch a file through the permissive-CORS proxy, falling back to a direct
+// request so a sleeping proxy never blocks boundary resolution.
+function boundaryProxyUrl(real) {
+  const base =
+    (typeof window !== "undefined" && window.__NEURONET_PROXY_BASE) ||
+    (typeof document !== "undefined"
+      ? document.querySelector('meta[name="neuronet-proxy"]')?.getAttribute("content")
+      : null) ||
+    "https://neuronet-backend.onrender.com";
+  const sep = base.endsWith("/") ? "" : "/";
+  return `${base}${sep}api/proxy?url=${encodeURIComponent(real)}`;
+}
+
+async function fetchBoundaryResource(url) {
+  try {
+    const proxied = await fetch(boundaryProxyUrl(url));
+    if (proxied.ok) return proxied;
+  } catch {
+    // Try the board directly below; some deployments have a sleeping proxy.
+  }
+  return fetch(url);
+}
+
+function buildSeriesListFor(board, baseline, found) {
+  const byKey = new Map();
+  for (const s of baseline) byKey.set(seriesKey(s), { ...s });
+  for (const key of found.keys()) {
+    const sk = key.split(":")[0];
+    const [mAbbrev, yearStr] = sk.split("-");
+    const year = Number(yearStr);
+    if (!byKey.has(sk)) {
+      byKey.set(sk, { month: mAbbrev, year, label: `${monthAbbrevToFull(mAbbrev)} ${year}` });
+    }
+  }
+  return [...byKey.values()].sort(
+    (a, b) => b.year - a.year || monthIndex(b.month) - monthIndex(a.month)
+  );
+}
+
+export function boundarySeriesList(board) {
+  const bId = boardToId(board) || String(board || "").toLowerCase();
+  const baseline = bId === "aqa" ? AQA_SERIES : bId === "pearson" ? PEARSON_BASELINE : [];
+  return buildSeriesListFor(bId, baseline, discovered[bId] || new Map());
+}
+
+// The series whose cached boundaries would resolve a dated tracker row: any
+// cached series for the same year wins (the row's exact month first).
+export function bestSeriesForYear(board, year, monthAbbr) {
+  const y = numberEq(year);
+  if (y === null) return null;
+  const sameYear = boundarySeriesList(board).filter((s) => Number(s.year) === y);
+  if (!sameYear.length) return null;
+  if (monthAbbr) {
+    const exact = sameYear.find((s) => String(s.month || "").toUpperCase() === monthAbbr);
+    if (exact) return exact;
+  }
+  const jun = sameYear.find((s) => String(s.month || "").toUpperCase() === "JUN");
+  if (jun) return jun;
+  return [...sameYear].sort((a, b) => monthIndex(b.month) - monthIndex(a.month))[0];
+}
+
+function qualFromAqaFile(fileName) {
+  if (/GCSE/.test(fileName)) return "gcse";
+  if (/A-LEVEL/.test(fileName) || /A-LEVEL-UM/.test(fileName)) return "aLevel";
+  if (/\bAS\b/.test(fileName)) return "as";
+  return null;
+}
+
+function qualFromAqaLabel(label) {
+  if (/^GCSE\b/.test(label)) return "gcse";
+  if (/^A-level/.test(label)) return "aLevel";
+  if (/^AS\b/.test(label)) return "as";
+  return null;
+}
+
+function parseAqaSeriesFromFilename(fileName) {
+  const m = fileName.match(/-((?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(?:UARY|E|Y|EMBER)?)-(20\d\d)\./i);
+  if (!m) return null;
+  const raw = m[1].toUpperCase();
+  const map = {
+    JANUARY: "JAN", FEBRUARY: "FEB", MARCH: "MAR", APRIL: "APR", MAY: "MAY",
+    JUNE: "JUN", JULY: "JUL", AUGUST: "AUG", SEPTEMBER: "SEP",
+    OCTOBER: "OCT", NOVEMBER: "NOV", DECEMBER: "DEC"
+  };
+  const month = map[raw] || raw.slice(0, 3);
+  if (!["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"].includes(month)) return null;
+  const year = Number(m[2]);
+  const fullMonth = { JAN: "January", FEB: "February", MAR: "March", APR: "April", MAY: "May", JUN: "June", JUL: "July", AUG: "August", SEP: "September", OCT: "October", NOV: "November", DEC: "December" }[month];
+  return { month, year, label: `${fullMonth} ${year}`, format: "pdf" };
+}
+
+function extractGradeBoundaryPairs(html) {
+  const escaped = /\\"url\\":\\"(https:\/\/cdn\.sanity\.io\/files\/[^\\"]+?\.xlsx)\\"[\s\S]*?\\"title\\":\\"([^\\"]+?)\\"/g;
+  const plain = /"url":"(https:\/\/cdn\.sanity\.io\/files\/[^"]+?\.xlsx)"[\s\S]*?"title":"([^"]+?)"/g;
+  const out = [];
+  for (const re of [escaped, plain]) {
+    let m;
+    while ((m = re.exec(html)) !== null) out.push({ url: m[1], title: m[2] });
+    if (out.length > 0) break;
+  }
+  return out;
+}
+
+function parseBoundaryTitle(title) {
+  const m = title.match(/(January|February|March|April|May|June|July|August|September|October|November|December) (\d{4})/);
+  if (!m) return null;
+  const month = AQA_MONTHS.find(([full]) => full === m[1]);
+  const series = { month: month[1], year: Number(m[2]), label: `${m[1]} ${m[2]}` };
+  let qualId = null;
+  if (/\bGCSE\b/.test(title)) qualId = "gcse";
+  else if (/A-level/.test(title)) qualId = "aLevel";
+  else if (/\bAS\b/.test(title)) qualId = "as";
+  return qualId ? { qualId, series } : null;
+}
+
+function legacyAqaSeriesUrl(qual, series) {
+  const legacy = AQA_LEGACY_PREFIX[seriesKey(series)];
+  const ext = series.format === "pdf" ? ".PDF" : ".XLSX";
+  if (legacy && legacy[qual.id]) {
+    return `${AQA_FILE_BASE}/${legacy[qual.id]}-${series.month}-${series.year}${ext}`;
+  }
+  const legacyExt = series.format === "pdf" ? ".XLS" : ".XLSX";
+  return `${AQA_FILE_BASE}/${qual.filePrefix}-${series.month}-${series.year}${legacyExt}`;
+}
+
+function aqaSeriesFormat(qual, series) {
+  return discovered.aqa.get(`${seriesKey(series)}:${qual.id}`)?.format || series.format || "xlsx";
+}
+
+function aqaSeriesUrl(qual, series) {
+  return discovered.aqa.get(`${seriesKey(series)}:${qual.id}`)?.url || legacyAqaSeriesUrl(qual, series);
+}
+
+function pearsonSeriesUrl(qual, series) {
+  const url = discovered.pearson.get(`${seriesKey(series)}:${qual.id}`);
+  if (url) return url;
+  const slug = monthAbbrevToSlug(series.month);
+  if (qual.id === "gcse") {
+    return `${PEARSON_DAM}/GCSE/grade-boundaries-${slug}-${series.year}-gcse.pdf`;
+  }
+  return `${PEARSON_DAM}/A-level/grade-boundaries-${slug}-${series.year}-gce.pdf`;
+}
+
+function parseAqaXlsx(wb, qual, fallbackGrades) {
+  let sheet = null;
+  for (const name of qual.sheets || []) {
+    if (wb.Sheets[name]) { sheet = wb.Sheets[name]; break; }
+  }
+  if (!sheet) {
+    let bestCount = -1;
+    for (const name of Object.keys(wb.Sheets || {})) {
+      const r = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1 });
+      let count = 0;
+      for (const row of r) {
+        const code = row && row[0];
+        if (code == null || String(code).trim() === "") continue;
+        if (typeof code === "string" && !/^\d{3,6}[A-Z0-9]*$/.test(String(code).trim())) continue;
+        count++;
+      }
+      if (count > bestCount) { bestCount = count; sheet = wb.Sheets[name]; }
+    }
+  }
+  const rows = sheet ? XLSX.utils.sheet_to_json(sheet, { header: 1 }) : [];
+  const subjects = [];
+  let gradeLabels = [];
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i] || [];
+    if (String(r[0] || "").trim() === "Subject Code") {
+      const gradeRow = rows[i + 1] || [];
+      for (let g = 0; g < 9; g++) {
+        const label = gradeRow[3 + g];
+        if (label === undefined || label === null || String(label).trim() === "") break;
+        gradeLabels.push(String(label).trim());
+      }
+      break;
+    }
+  }
+  if (gradeLabels.length === 0) gradeLabels = fallbackGrades;
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i] || [];
+    const code = r[0];
+    const title = r[1];
+    if (code == null || String(code).trim() === "") continue;
+    if (typeof code === "string" && !/^\d{3,6}[A-Z0-9]*$/.test(String(code).trim())) continue;
+    const maxMark = Number(r[2]);
+    if (!Number.isFinite(maxMark)) continue;
+    const grades = {};
+    for (let g = 0; g < gradeLabels.length; g++) {
+      const v = Number(r[3 + g]);
+      if (Number.isFinite(v)) grades[gradeLabels[g]] = v;
+    }
+    subjects.push({
+      code: String(code).trim(),
+      title: String(title || "").trim(),
+      maxMark,
+      grades,
+      gradesInOrder: gradeLabels
+    });
+  }
+  return subjects;
+}
+
+function parseAqaArchiveAnchors(html) {
+  const liRe = /<li[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<\/li>/gi;
+  let m;
+  const anchors = [];
+  while ((m = liRe.exec(html)) !== null) {
+    anchors.push({ href: m[1], label: m[2].replace(/<[^>]+>/g, "").trim() });
+  }
+  let kept = 0;
+  for (const { href, label } of anchors) {
+    const fileName = href.split("/").pop();
+    const extMatch = fileName.match(/\.(PDF|XLSX|XLS)$/i);
+    if (!extMatch) continue;
+    const format = extMatch[1].toLowerCase() === "pdf" ? "pdf" : "xlsx";
+    const series = parseAqaSeriesFromFilename(fileName);
+    if (!series) continue;
+    if (series.year < 2018) continue;
+    const qualId = qualFromAqaFile(fileName) || qualFromAqaLabel(label);
+    if (!qualId) continue;
+    const key = `${seriesKey(series)}:${qualId}`;
+    const existing = discovered.aqa.get(key);
+    if (!existing) {
+      discovered.aqa.set(key, { url: href, format });
+      kept++;
+    } else if (format === "xlsx" && existing.format === "pdf") {
+      discovered.aqa.set(key, { url: href, format });
+    } else if (format === "xlsx" && existing.format === "xlsx" && /GCSE-2/i.test(href) && !/GCSE-2/i.test(existing.url)) {
+      discovered.aqa.set(key, { url: href, format });
+    }
+  }
+  const seriesBlockRe = /<p[^>]*>\s*(January|February|March|April|May|June|July|August|September|October|November|December)\s+(20\d\d)\s+exams\s*<\/p>([\s\S]*?)(?=<p[^>]*>\s*(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+20\d\d\s+exams\s*<\/p>|$)/gi;
+  while ((m = seriesBlockRe.exec(html)) !== null) {
+    const month = AQA_MONTHS.find(([full]) => full.toLowerCase() === m[1].toLowerCase());
+    if (!month) continue;
+    const series = { month: month[1], year: Number(m[2]), label: `${m[1]} ${m[2]}` };
+    const linkRe = /<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+    let link;
+    while ((link = linkRe.exec(m[3])) !== null) {
+      const linkLabel = link[2].replace(/<[^>]+>/g, "").trim();
+      const qualId = qualFromAqaLabel(linkLabel);
+      if (!qualId) continue;
+      const url = new URL(link[1], AQA_PAGE_BASE).href;
+      const key = `${seriesKey(series)}:${qualId}`;
+      const format = /\.(xlsx|xls)(?:$|\?)/i.test(url) ? "xlsx" : "pdf";
+      const existing = discovered.aqa.get(key);
+      if (!existing) {
+        discovered.aqa.set(key, { url, format });
+        kept++;
+      } else if (format === "xlsx" && existing.format === "pdf") {
+        discovered.aqa.set(key, { url, format });
+      } else if (format === "xlsx" && existing.format === "xlsx" && /GCSE-2/i.test(url) && !/GCSE-2/i.test(existing.url)) {
+        discovered.aqa.set(key, { url, format });
+      }
+    }
+  }
+  return { anchors: anchors.length, kept };
+}
+
+async function discoverAqaSeries(onProgress) {
+  const found = [];
+  const pages = [
+    { url: AQA_PAGE_ARCHIVE, name: "archive page" },
+    { url: AQA_PAGE_BASE, name: "current page" }
+  ];
+  for (const { url: page, name } of pages) {
+    if (onProgress) onProgress(`Scanning AQA ${name}...`);
+    let text;
+    try {
+      const res = await fetchBoundaryResource(page);
+      if (!res.ok) continue;
+      text = await res.text();
+    } catch {
+      continue;
+    }
+    found.push(...extractGradeBoundaryPairs(text));
+    parseAqaArchiveAnchors(text);
+  }
+  for (const { url, title } of found) {
+    const parsed = parseBoundaryTitle(title);
+    if (!parsed) continue;
+    const key = `${seriesKey(parsed.series)}:${parsed.qualId}`;
+    if (!discovered.aqa.has(key)) discovered.aqa.set(key, { url, format: "xlsx" });
+  }
+  return found.length;
+}
+
+function extractOcrPdfLinks(html) {
+  const re = /<a\s+[^>]*href="(\/Images\/[^"]*?grade-boundaries[^"]*?\.pdf)"/gi;
+  const out = [];
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const fileName = m[1].split("/").pop();
+    out.push({ url: `https://www.ocr.org.uk${m[1]}`, fileName });
+  }
+  return out;
+}
+
+async function discoverOcrSeries(onProgress) {
+  const found = [];
+  const pages = [
+    { url: boundaryProxyUrl(OCR_PAGE_BASE), name: "index page" },
+    { url: boundaryProxyUrl(OCR_PAGE_ARCHIVE), name: "archive page" }
+  ];
+  for (const { url: page, name } of pages) {
+    if (onProgress) onProgress(`Scanning OCR ${name}...`);
+    let text;
+    try {
+      const res = await fetch(page);
+      if (!res.ok) continue;
+      text = await res.text();
+    } catch {
+      continue;
+    }
+    found.push(...extractOcrPdfLinks(text));
+  }
+  let kept = 0;
+  for (const { url, fileName } of found) {
+    const fullMatch = fileName.match(/-(january|february|march|april|may|june|july|august|september|october|november|december)-(\d{4})\b/i);
+    if (!fullMatch) continue;
+    const full = fullMatch[1][0].toUpperCase() + fullMatch[1].slice(1).toLowerCase();
+    const month = AQA_MONTHS.find(([f]) => f === full);
+    const seriesObj = { month: month[1], year: Number(fullMatch[2]), label: `${full} ${fullMatch[2]}` };
+    for (const [qualId, pattern] of Object.entries(OCR_QUAL_PATTERNS)) {
+      if (!pattern.test(fileName)) continue;
+      const key = `${seriesKey(seriesObj)}:${qualId}`;
+      if (!discovered.ocr.has(key)) kept++;
+      discovered.ocr.set(key, url);
+    }
+  }
+  return { found: found.length, kept };
+}
+
+async function discoverPearsonSeries(onProgress) {
+  let text;
+  if (onProgress) onProgress("Scanning Pearson grade-boundaries page...");
+  try {
+    const res = await fetch(boundaryProxyUrl(PEARSON_PAGE));
+    if (!res.ok) return { found: 0, kept: 0 };
+    text = await res.text();
+  } catch {
+    return { found: 0, kept: 0 };
+  }
+  const titles = [...text.matchAll(/class= *"hiddenAssetTitle">\s*([^<]+?)\s*<\/span>/g)].map((m) => m[1]);
+  const urls = [...text.matchAll(/class= *"hiddenAssetUrl">\s*([^<]+?)\s*<\/span>/g)].map((m) => m[1]);
+  let kept = 0;
+  for (let i = 0; i < Math.min(titles.length, urls.length); i++) {
+    const title = titles[i];
+    const urlPath = urls[i].trim();
+    if (!urlPath.endsWith(".pdf")) continue;
+    const url = `https://qualifications.pearson.com${urlPath.startsWith("/") ? "" : "/"}${urlPath}`;
+    const m = title.match(/(January|February|March|April|May|June|July|August|September|October|November|December) (\d{4})/i);
+    if (!m) continue;
+    const month = AQA_MONTHS.find(([f]) => f.toLowerCase() === m[1].toLowerCase());
+    const series = { month: month[1], year: Number(m[2]), label: `${m[1][0].toUpperCase()}${m[1].slice(1).toLowerCase()} ${m[2]}` };
+    const norm = title.toLowerCase();
+    if (/gcse \(9-1\)/.test(norm) && /notional/.test(norm)) continue;
+    let quals = [];
+    if (/gcse \(9-1\)/.test(norm) && !/international|\bproject\b|award|maths|\bmath\b|bt|level 3/i.test(norm)) quals.push("gcse");
+    if (/ - gce\b/.test(norm) && !/international|\bproject\b|award|mathematics in context|level 3/i.test(norm)) quals.push("aLevel", "as");
+    for (const q of quals) {
+      const key = `${seriesKey(series)}:${q}`;
+      if (!discovered.pearson.has(key)) kept++;
+      discovered.pearson.set(key, url);
+    }
+  }
+  return { found: titles.length, kept };
+}
+
+// Run discovery for every board once (idempotent). Resolves regardless of
+// individual board failures so partial discovery never blocks boundary use.
+export function discoverBoundarySeries(onProgress) {
+  if (!boundaryDiscoveryPromise) {
+    boundaryDiscoveryPromise = Promise.allSettled([
+      discoverAqaSeries(onProgress),
+      discoverOcrSeries(onProgress),
+      discoverPearsonSeries(onProgress)
+    ]);
+  }
+  return boundaryDiscoveryPromise;
+}
+
+// Download + parse the subjects for a board/qual/series. Throws on failure.
+export async function fetchBoundarySubjects(board, qual, series, onProgress) {
+  const bId = boardToId(board) || String(board || "").toLowerCase();
+  if (!qual || !series) throw new Error("Missing qual or series");
+  let url;
+  let fileType;
+  if (bId === "aqa") {
+    url = aqaSeriesUrl(qual, series);
+    fileType = aqaSeriesFormat(qual, series);
+  } else if (bId === "ocr") {
+    url = discovered.ocr.get(`${seriesKey(series)}:${qual.id}`);
+    fileType = "pdf";
+  } else if (bId === "pearson") {
+    url = pearsonSeriesUrl(qual, series);
+    fileType = "pdf";
+  }
+  if (!url) throw new Error(`No file URL known for ${bId} ${qual.id} ${series.label}`);
+  if (fileType === "xlsx") {
+    const res = await fetchBoundaryResource(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${bId} ${series.label}`);
+    if (onProgress) onProgress(`Reading ${series.label} workbook...`);
+    const wb = XLSX.read(await res.arrayBuffer(), { type: "array" });
+    return parseAqaXlsx(wb, qual, qual.grades).map((s) => ({ ...s, board: bId, qual: qual.id }));
+  }
+  if (onProgress) onProgress(`Reading ${series.label} PDF...`);
+  const lines = await extractPdfLayoutLines(url, boundaryProxyUrl, (p, total) => {
+    if (onProgress) onProgress(`PDF page ${p}/${total}...`);
+  });
+  return parsePdfBoundaries(lines, bId, qual.id).map((s) => ({ ...s, board: bId, qual: qual.id }));
+}
+
+// Idempotently make sure a board/qual/series is cached under the canonical
+// board:MONTH-YEAR:qual key. Skips if an entry already exists. Returns the
+// cached subjects (or null if the fetch produced nothing).
+export async function ensureBoundarySeries(board, qual, series, onProgress) {
+  const bId = boardToId(board) || String(board || "").toLowerCase();
+  const qualObj = boundaryQualification(bId, qual && (qual.id || qual));
+  if (!qualObj || !series || !series.month || !series.year) return null;
+  const cache = loadBoundaryCache();
+  const key = `${bId}:${series.month}-${series.year}:${qualObj.id}`;
+  const existing = cache.entries[key];
+  if (existing && existing.subjects && existing.subjects.length) return existing.subjects;
+  const subjects = await fetchBoundarySubjects(bId, qualObj, series, onProgress);
+  if (!subjects || subjects.length === 0) return null;
+  cache.entries[key] = {
+    series: { month: series.month, year: series.year, label: series.label },
+    qual: qualObj.id,
+    board: bId,
+    fetchedAt: Date.now(),
+    subjects
+  };
+  saveBoundaryCache(cache);
+  return subjects;
 }

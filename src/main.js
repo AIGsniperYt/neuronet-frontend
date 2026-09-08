@@ -6,11 +6,14 @@ import { initMemoryTool } from "./tools/memoryTool.js";
 import { initMindmapTool } from "./tools/mindmapTool.js";
 import { initTrackerTool } from "./tools/trackerTool.js";
 import { initScraperTool } from "./tools/scraperTool.js";
+import { flushBoundaryCache } from "./tools/gradeBoundaries.js";
 import { performMigration } from "./migrations.js";
 import { upgradeDataset, upgradeStoredData, SCHEMA_VERSION } from "./schemaUpgrade.js";
 import { initCanvas } from "./canvas.js";
 
 initCanvas();
+
+addEventListener("pagehide", () => flushBoundaryCache());
 
 const canvasEl = window.__neuronetCanvas.getCanvas();
 const ctx = window.__neuronetCanvas.getCtx();
@@ -143,6 +146,7 @@ const tools = {
     name: "Scraper",
     file: "scraper.html",
     init: (context) => initScraperTool({
+      getAllNodes,
       escapeHtml
     }, context)
   }
@@ -233,6 +237,7 @@ function setActiveTool(toolName) {
 }
 
 async function loadTool(toolName, context = {}) {
+  flushBoundaryCache();
   if (currentToolName === "analysis" && toolName !== "analysis") {
     if (typeof window.__neuronetAnalysisCleanup === "function") {
       window.__neuronetAnalysisCleanup();
@@ -773,6 +778,7 @@ function hideLaunchpad() {
 }
 
 function openTool(toolName, context = {}) {
+  flushBoundaryCache();
   currentToolName = toolName;
   currentSubject = context.subject || null;
   setActiveTool(toolName);

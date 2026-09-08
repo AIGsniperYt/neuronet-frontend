@@ -100,6 +100,78 @@ function lineTokens(line) {
   return line.items.map((it) => it.str.trim()).filter((s) => s.length > 0);
 }
 
+// Detect the grade-label column header on a line like
+//   Max Mark  9  8  7  6  5  4  3  2  1  u
+//   Max Mark  a*  a  b  c  d  e  u
+// and return the grade label at each column x-position. The whole-file column
+// layout is fixed, so values in tiered rows (which right-align to only the
+// grades that apply to that tier) can be mapped to their true label instead
+// of being read positionally.
+function extractGradeColumns(line) {
+  const items = line.items || [];
+  let markIdx = -1;
+  for (let i = 0; i < items.length; i++) {
+    const s = String(items[i].str || "").trim();
+    if (s === "Mark" || s === "Max Mark") { markIdx = i; break; }
+  }
+  if (markIdx < 0) {
+    const lead = items[0] && String(items[0].str || "").trim();
+    if (lead && /^Max\s*Mark$/i.test(lead)) markIdx = 0;
+  }
+  if (markIdx < 0) return null;
+  const cols = [];
+  for (let i = markIdx + 1; i < items.length; i++) {
+    const s = String(items[i].str || "").trim();
+    if (!LABEL_RE.test(s)) break;
+    cols.push({ x: items[i].x, label: normalizeLabel(s) });
+  }
+  return cols.length >= 3 ? cols : null;
+}
+
+// Map a data row's numeric value items to grade labels by column x-position,
+// returning the grades object keyed by label. Only columns that actually hold
+// a numeric value are recorded, so tiered rows that right-align values (e.g.
+// OCR/Pearson Foundation) produce a correct max grade (5..U) instead of being
+// lent the full 9..1 label range.
+function alignGradeValues(items, columns) {
+  if (!columns || !columns.length) return null;
+  const used = new Set();
+  const grades = {};
+  const numeric = items
+    .map((it, i) => ({ i, x: it.x !== undefined ? it.x : -1, v: Number(String(it.str || "").trim()) }))
+    .filter((o) => /^-?\d+$/.test(String(items[o.i].str || "").trim()));
+  numeric.sort((a, b) => a.x - b.x);
+  for (const o of numeric) {
+    let best = null;
+    let bestD = Infinity;
+    for (let c = 0; c < columns.length; c++) {
+      if (used.has(c)) continue;
+      const d = Math.abs(o.x - columns[c].x);
+      if (d < bestD) { bestD = d; best = c; }
+    }
+    if (best !== null && bestD <= 20) {
+      used.add(best);
+      grades[columns[best].label] = o.v;
+    }
+  }
+  return Object.keys(grades).length ? grades : null;
+}
+
+// Normalise a tier marker for a subject row: "F" / "H" / null.
+function tierFromRow(lineTokens) {
+  for (const t of Array.isArray(lineTokens) ? lineTokens : []) {
+    if (t === "F" || t === "H") return t;
+  }
+  return null;
+}
+
+function tierFromTitle(title) {
+  const t = String(title || "");
+  if (/\b(?:higher|h)\b/i.test(t)) return "H";
+  if (/\bfoundation\b/i.test(t) || /\(F\)/i.test(t)) return "F";
+  return null;
+}
+
 // Map OCR lowercase grade labels to display labels.
 const LABEL_RE = /^(9|8|7|6|5|4|3|2|1|u|A\*|a\*|A|B|C|D|E)$/i;
 
@@ -255,6 +327,7 @@ function parseOcr(lines, qual) {
   let blockCode = null;
   let blockComponents = [];
   let currentGrades = gradeLabels;
+  let currentColumns = null;
 
   for (const line of lines) {
     const toks = lineTokens(line);
@@ -287,11 +360,14 @@ function parseOcr(lines, qual) {
       if (qual === "gcse" && isALevelBlock) continue;
     }
 
-    // Detect grade header to override defaults.
+    // Detect the grade-label header line and capture its column x-positions.
+    // Tiered rows right-align values to only the grades that apply to that
+    // tier, so aligning by x (not position) keeps Foundation max at 5 while
+    // Higher tops out at 9.
     const detected = detectGradeLabels(toks);
     if (detected) {
       currentGrades = detected;
-      // Reset per-new-header only if header appears (some PDFs stamp it every page)
+      currentColumns = extractGradeColumns(line);
       continue;
     }
 
@@ -323,21 +399,36 @@ function parseOcr(lines, qual) {
     const code = isCode(toks[0]) ? toks[0] : blockCode;
     if (!code) continue;
 
-    const title = blockTitle || code;
-    const grades = {};
-    for (let g = 0; g < currentGrades.length && g + 1 < rest.length; g++) {
-      const v = parseInt(rest[g + 1], 10);
-      if (isFinite(v)) grades[currentGrades[g]] = v;
+    let grades = {};
+    let gradesInOrder = [];
+    if (currentColumns) {
+      grades = alignGradeValues(line.items, currentColumns) || {};
+      // Keep only the columns that actually carry a value, in header order, so
+      // tiered rows expose their real top grade (Foundation = 5..U).
+      gradesInOrder = currentColumns
+        .filter((c) => grades[c.label] !== undefined)
+        .map((c) => c.label);
     }
+    if (!gradesInOrder.length) {
+      for (let g = 0; g < currentGrades.length && g + 1 < rest.length; g++) {
+        const v = parseInt(rest[g + 1], 10);
+        if (isFinite(v)) grades[currentGrades[g]] = v;
+      }
+      gradesInOrder = currentGrades;
+    }
+
+    const tier = tierFromRow(toks);
+    const title = (blockTitle || code) + (tier ? ` (${tier === "F" ? "Foundation" : "Higher"})` : "");
 
     subjects.push({
       board: "ocr",
       qual,
       code,
       title,
+      tier,
       maxMark,
       grades,
-      gradesInOrder: currentGrades,
+      gradesInOrder,
       papers: blockComponents.length ? blockComponents : null
     });
     blockComponents = [];
@@ -365,6 +456,7 @@ function parsePearsonSections(lines, qual) {
   const subjects = [];
   let section = null; // "AS" | "A level" | null
   let inSection = false;
+  let columns = null;
   const gradeLabels =
     qual === "gcse" ? PEARSON_GCSE_LABELS
     : qual === "as" ? PEARSON_AS_LABELS
@@ -380,16 +472,19 @@ function parsePearsonSections(lines, qual) {
     if (/^AS\s+overall grade boundaries/i.test(joined)) {
       section = "AS";
       inSection = qual === "as";
+      columns = extractGradeColumns(line);
       continue;
     }
     if (/^A level\s+overall grade boundaries/i.test(joined)) {
       section = "A level";
       inSection = qual === "aLevel";
+      columns = extractGradeColumns(line);
       continue;
     }
     if (/^GCSE overall grade boundaries/i.test(joined) || !section && /^Overall grade boundaries/i.test(joined)) {
       section = "GCSE";
       inSection = qual === "gcse";
+      columns = extractGradeColumns(line);
       continue;
     }
 
@@ -410,10 +505,20 @@ function parsePearsonSections(lines, qual) {
     if (section === "AS" && qual !== "as") continue;
     if (section === "A level" && qual !== "aLevel") continue;
 
-    const grades = {};
-    for (let g = 0; g < gradeLabels.length && g + 1 < rest.length; g++) {
-      const v = parseInt(rest[g + 1], 10);
-      if (isFinite(v)) grades[gradeLabels[g]] = v;
+    let grades = {};
+    let gradesInOrder = [];
+    if (columns) {
+      grades = alignGradeValues(line.items, columns) || {};
+      gradesInOrder = columns
+        .filter((c) => grades[c.label] !== undefined)
+        .map((c) => c.label);
+    }
+    if (!gradesInOrder.length) {
+      for (let g = 0; g < gradeLabels.length && g + 1 < rest.length; g++) {
+        const v = parseInt(rest[g + 1], 10);
+        if (isFinite(v)) grades[gradeLabels[g]] = v;
+      }
+      gradesInOrder = gradeLabels;
     }
 
     subjects.push({
@@ -421,9 +526,10 @@ function parsePearsonSections(lines, qual) {
       qual,
       code: first,
       title,
+      tier: tierFromTitle(title),
       maxMark,
       grades,
-      gradesInOrder: gradeLabels
+      gradesInOrder
     });
   }
   return subjects;

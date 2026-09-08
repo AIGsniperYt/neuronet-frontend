@@ -1,9 +1,14 @@
 import * as XLSX from "../vendor/xlsx/index.js";
 import { extractPdfLayoutLines, parsePdfBoundaries } from "./pdfBoundaries.js";
-import { createBoundaryCacheStore } from "./gradeBoundaries.js";
+import {
+  createBoundaryCacheStore,
+  boardToId,
+  qualToId,
+  trackerSeriesToMonth
+} from "./gradeBoundaries.js";
 
 export function initScraperTool(deps, context = {}) {
-  const { escapeHtml } = deps;
+  const { escapeHtml, getAllNodes } = deps;
   const $ = (id) => document.getElementById(id);
 
   const el = {
@@ -64,7 +69,7 @@ export function initScraperTool(deps, context = {}) {
     { month: "JUN", year: 2019, label: "June 2019", format: "pdf" },
     { month: "NOV", year: 2019, label: "November 2019", format: "pdf" },
     { month: "NOV", year: 2020, label: "November 2020", format: "pdf" },
-    { month: "NOV", year: 2021, label: "November 2021", format: "pdf" },
+    { month: "NOV", year: 2021, label: "November 2021", format: "xlsx" },
     { month: "JUN", year: 2022, label: "June 2022", format: "xlsx" },
     { month: "NOV", year: 2022, label: "November 2022", format: "xlsx" },
     { month: "JUN", year: 2023, label: "June 2023", format: "xlsx" },
@@ -198,6 +203,16 @@ export function initScraperTool(deps, context = {}) {
     return `${base}${sep}api/proxy?url=${encodeURIComponent(real)}`;
   }
 
+  async function fetchAqaResource(url) {
+    try {
+      const proxied = await fetch(proxyUrl(url));
+      if (proxied.ok) return proxied;
+    } catch {
+      // Try the board directly below; some deployments have a sleeping proxy.
+    }
+    return fetch(url);
+  }
+
   // ---------- series list building ----------
   function buildSeriesListFor(board, baseline, discovered) {
     const byKey = new Map();
@@ -222,14 +237,14 @@ export function initScraperTool(deps, context = {}) {
   async function discoverAqaSeries(onProgress) {
     const found = [];
     const pages = [
-      { url: proxyUrl(AQA_PAGE_ARCHIVE), name: "archive page" },
-      { url: proxyUrl(AQA_PAGE_BASE), name: "current page" }
+      { url: AQA_PAGE_ARCHIVE, name: "archive page" },
+      { url: AQA_PAGE_BASE, name: "current page" }
     ];
     for (const { url: page, name } of pages) {
       if (onProgress) onProgress(`Fetching AQA ${name} for hashed xlsx + legacy PDFs...`);
       let text;
       try {
-        const res = await fetch(page);
+        const res = await fetchAqaResource(page);
         if (!res.ok) continue;
         text = await res.text();
       } catch {
@@ -244,7 +259,11 @@ export function initScraperTool(deps, context = {}) {
     for (const { url, title } of found) {
       const parsed = parseBoundaryTitle(title);
       if (!parsed) continue;
-      discoveredAqa.set(`${seriesKey(parsed.series)}:${parsed.qualId}`, { url, format: "xlsx" });
+      // Prefer the direct archive file discovered above. The page may also
+      // contain older Sanity metadata for the same series, and overwriting the
+      // archive URL can send the fetcher to a stale or unavailable asset.
+      const key = `${seriesKey(parsed.series)}:${parsed.qualId}`;
+      if (!discoveredAqa.has(key)) discoveredAqa.set(key, { url, format: "xlsx" });
     }
     return found.length;
   }
@@ -274,8 +293,42 @@ export function initScraperTool(deps, context = {}) {
       const qualId = qualFromAqaFile(fileName) || qualFromAqaLabel(label);
       if (!qualId) continue;
       const key = `${seriesKey(series)}:${qualId}`;
-      if (!discoveredAqa.has(key)) kept++;
-      discoveredAqa.set(key, { url: href, format });
+      const existing = discoveredAqa.get(key);
+      if (!existing) {
+        discoveredAqa.set(key, { url: href, format });
+        kept++;
+      } else if (format === "xlsx" && existing.format === "pdf") {
+        discoveredAqa.set(key, { url: href, format });
+      } else if (format === "xlsx" && existing.format === "xlsx" && /GCSE-2/i.test(href) && !/GCSE-2/i.test(existing.url)) {
+        discoveredAqa.set(key, { url: href, format });
+      }
+    }
+    // Current AQA archive pages use opaque /files/... paths and put the
+    // qualification in the link text, with the series in the preceding heading.
+    const seriesBlockRe = /<p[^>]*>\s*(January|February|March|April|May|June|July|August|September|October|November|December)\s+(20\d\d)\s+exams\s*<\/p>([\s\S]*?)(?=<p[^>]*>\s*(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+20\d\d\s+exams\s*<\/p>|$)/gi;
+    while ((m = seriesBlockRe.exec(html)) !== null) {
+      const month = AQA_MONTHS.find(([full]) => full.toLowerCase() === m[1].toLowerCase());
+      if (!month) continue;
+      const series = { month: month[1], year: Number(m[2]), label: `${m[1]} ${m[2]}` };
+      const linkRe = /<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+      let link;
+      while ((link = linkRe.exec(m[3])) !== null) {
+        const linkLabel = link[2].replace(/<[^>]+>/g, "").trim();
+        const qualId = qualFromAqaLabel(linkLabel);
+        if (!qualId) continue;
+        const url = new URL(link[1], AQA_PAGE_BASE).href;
+        const key = `${seriesKey(series)}:${qualId}`;
+        const format = /\.(xlsx|xls)(?:$|\?)/i.test(url) ? "xlsx" : "pdf";
+        const existing = discoveredAqa.get(key);
+        if (!existing) {
+          discoveredAqa.set(key, { url, format });
+          kept++;
+        } else if (format === "xlsx" && existing.format === "pdf") {
+          discoveredAqa.set(key, { url, format });
+        } else if (format === "xlsx" && existing.format === "xlsx" && /GCSE-2/i.test(url) && !/GCSE-2/i.test(existing.url)) {
+          discoveredAqa.set(key, { url, format });
+        }
+      }
     }
     return { anchors: anchors.length, kept };
   }
@@ -339,11 +392,12 @@ export function initScraperTool(deps, context = {}) {
   function legacyAqaSeriesUrl(qual, series) {
     // Pre-2022 series used qual-specific PDF prefixes; 2022+ use XLSX.
     const legacy = AQA_LEGACY_PREFIX[seriesKey(series)];
+    const ext = series.format === "pdf" ? ".PDF" : ".XLSX";
     if (legacy && legacy[qual.id]) {
-      return `${AQA_FILE_BASE}/${legacy[qual.id]}-${series.month}-${series.year}.PDF`;
+      return `${AQA_FILE_BASE}/${legacy[qual.id]}-${series.month}-${series.year}${ext}`;
     }
-    const ext = series.format === "pdf" ? ".XLS" : ".XLSX";
-    return `${AQA_FILE_BASE}/${qual.filePrefix}-${series.month}-${series.year}${ext}`;
+    const legacyExt = series.format === "pdf" ? ".XLS" : ".XLSX";
+    return `${AQA_FILE_BASE}/${qual.filePrefix}-${series.month}-${series.year}${legacyExt}`;
   }
 
   function aqaSeriesFormat(qual, series) {
@@ -575,6 +629,20 @@ export function initScraperTool(deps, context = {}) {
     let sheet = null;
     for (const name of qual.sheets) {
       if (wb.Sheets[name]) { sheet = wb.Sheets[name]; break; }
+    }
+    if (!sheet) {
+      let bestCount = -1;
+      for (const name of Object.keys(wb.Sheets || {})) {
+        const r = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1 });
+        let count = 0;
+        for (const row of r) {
+          const code = row && row[0];
+          if (code == null || String(code).trim() === "") continue;
+          if (typeof code === "string" && !/^\d{3,6}[A-Z0-9]*$/.test(String(code).trim())) continue;
+          count++;
+        }
+        if (count > bestCount) { bestCount = count; sheet = wb.Sheets[name]; }
+      }
     }
     const rows = sheet ? XLSX.utils.sheet_to_json(sheet, { header: 1 }) : [];
     const subjects = [];
@@ -903,7 +971,7 @@ export function initScraperTool(deps, context = {}) {
 
   async function fetchAqaXlsx(url, board, qual, series, onProgress) {
     if (onProgress) onProgress(`Downloading spreadsheet (size may be a few hundred KB)...`);
-    const res = await fetch(proxyUrl(url));
+    const res = await fetchAqaResource(url);
     if (!res.ok) throw new Error(`HTTP ${res.status} fetching spreadsheet`);
     if (onProgress) onProgress("Spreadsheet downloaded. Reading workbook buffer...");
     const buf = await res.arrayBuffer();
@@ -1136,22 +1204,88 @@ export function initScraperTool(deps, context = {}) {
     const boards = ["aqa", "ocr", "pearson"];
     const qualIds = ["gcse", "aLevel", "as"];
     const jobs = [];
+    const queued = new Set();
+    const qualificationForCourse = (board, course, meta) => {
+      const qualValue = course?.qual || meta?.qualification;
+      if (!board || !qualValue) return null;
+      const wanted = qualToId(qualValue);
+      return Object.values(boardQuals[board] || QR).find((q) =>
+        q && (q.id === qualValue || qualToId(q.id) === wanted || qualToId(q.name) === wanted)
+      ) || null;
+    };
+    const queue = (board, qual, series) => {
+      if (!qual || !series) return;
+      const key = `${board}:${qual.id}:${series.month}-${series.year}`;
+      if (queued.has(key) || boundary.getCachedSubjects(board, qual.id, series)) return;
+      queued.add(key);
+      jobs.push({ board, qual, series });
+    };
+
+    // Warm every exact sitting represented in the user's tracker. The generic
+    // latest-pack warmup below cannot cover older rows such as June 2025.
+    if (typeof getAllNodes === "function") {
+      const nodes = (await getAllNodes()) || [];
+      const subjectMeta = new Map(
+        nodes.filter((n) => n && n.type === "subject").map((n) => [n.subject || n.name, n])
+      );
+      const seriesLists = Object.fromEntries(
+        boards.map((board) => [board, boardSeriesBuilders[board]?.() || []])
+      );
+      for (const paper of nodes.filter((n) => n && n.type === "pastpaper")) {
+        const meta = subjectMeta.get(paper.subject);
+        const course = meta && meta.officialCourse;
+        const board = boardToId(course?.board || meta?.examBoard);
+        const qual = qualificationForCourse(board, course, meta);
+        const year = Number(paper.year);
+        if (!board || !qual || !Number.isFinite(year)) continue;
+        const month = trackerSeriesToMonth(paper.series);
+        const series = seriesLists[board].find((s) => s.year === year && (!month || s.month === month));
+        queue(board, qual, series);
+      }
+      for (const meta of subjectMeta.values()) {
+        const course = meta && meta.officialCourse;
+        const board = boardToId(course?.board || meta?.examBoard);
+        const qual = qualificationForCourse(board, course, meta);
+        const newest = board && seriesLists[board] && seriesLists[board][0];
+        queue(board, qual, newest);
+      }
+    }
+
+    // A saved series is part of the user's active workflow. Warm it as well
+    // as the newest series so existing tracker rows recover after a cache reset.
+    if (statePrefs.board === "aqa" && statePrefs.series) {
+      const savedSeries = (boardSeriesBuilders.aqa?.() || []).find((s) => `${s.month}-${s.year}` === statePrefs.series);
+      const qual = (boardQuals.aqa || QR)[statePrefs.qual || "gcse"];
+      queue("aqa", qual, savedSeries);
+    }
+    // Rebuild the two 2025 AQA GCSE packs after the cache migration. They are
+    // small, current archive workbooks and cover existing 2025 tracker rows.
+    const aqaGcse = (boardQuals.aqa || QR).gcse;
+    for (const key of ["JUN-2025", "NOV-2025"]) {
+      const series = (boardSeriesBuilders.aqa?.() || []).find((s) => `${s.month}-${s.year}` === key);
+      queue("aqa", aqaGcse, series);
+    }
+    // Warm EVERY series in each board's list, not just the newest, so old
+    // tracker rows (e.g. AQA GCSE June 2020-2024) resolve their own year's
+    // boundary table instead of falling flat. queue() dedupes already-cached
+    // series, so this only fetches what the cache is missing.
     for (const board of boards) {
       const list = boardSeriesBuilders[board]?.() || [];
       if (list.length === 0) continue;
-      const newest = list[0]; // builders sort newest-first
       const quals = boardQuals[board] || QR;
-      for (const qid of qualIds) {
-        const qual = quals[qid];
-        if (!qual) continue;
-        if (boundary.getCachedSubjects(board, qual.id, newest)) continue; // fresh already
-        jobs.push({ board, qual, series: newest });
+      for (const series of list) {
+        for (const qid of qualIds) {
+          const qual = quals[qid];
+          if (!qual) continue;
+          queue(board, qual, series);
+        }
       }
     }
     if (jobs.length === 0) return;
     appendLog(`Background: caching latest series for ${jobs.length} board×qual combo(s)...`);
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     for (const { board, qual, series } of jobs) {
-      if (document.hidden) break;
+      await sleep(0);
       try {
         await fetchBoundariesFor(board, qual, series, (m) => scratch(m));
       } catch {
@@ -1183,7 +1317,7 @@ export function initScraperTool(deps, context = {}) {
     if (onProgress) onProgress(`[bg] ${board} ${qual.name} ${series.label}: fetching...`);
 
     if (fileType === "xlsx") {
-      const res = await fetch(proxyUrl(url));
+      const res = await fetchAqaResource(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       if (onProgress) onProgress(`[bg] ${board} ${qual.name}: parsing workbook...`);
       const wb = XLSX.read(await res.arrayBuffer(), { type: "array" });
