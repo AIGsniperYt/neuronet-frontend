@@ -466,6 +466,145 @@ export function matchOfficialCourse(cache, { board, qual, title, code } = {}) {
   return null;
 }
 
+// ---- Tolerant course resolution ---------------------------------------------
+//
+// Cached titles boards publish ("Mathematics (Higher)", "Geography B (incl.
+// fieldwork)", "English Literature") rarely match the short subject names users
+// type ("Maths", "Geography", "English Lit"), so exact-title matching silently
+// returns null and the whole pipeline (auto-warm, chips, boundary badge) dead-
+// ends. This resolver matches on normalized word tokens with subject aliases and
+// prefix tolerance, narrows to the subject's known board/qual/code when present,
+// and returns the single best cached course. Tier-unknown subjects prefer the
+// Higher row so a bare "Maths"/"1MA1" resolves to 9-1, never to Foundation.
+const SUBJECT_TITLE_ALIASES = {
+  math: "mathematics", maths: "mathematics",
+  bio: "biology", chem: "chemistry",
+  geog: "geography",
+  lang: "language", lit: "literature",
+  psych: "psychology", stats: "statistics",
+  phys: "physics", compsci: "computer science"
+};
+const COURSE_EXCLUDE = /\b(international|award|legacy|notional|bt|btec|functional skills|project|level 3|level2|certificate|extended certificate|mathematics in context|in context)\b/i;
+
+export function titleTokens(text) {
+  return String(text || "").toLowerCase()
+    .normalize("NFKC")
+    .replace(/[()]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter((t) => t.length > 0 && /^[a-z0-9]+$/.test(t));
+}
+
+function tokenAlias(token) {
+  return SUBJECT_TITLE_ALIASES[token] || token;
+}
+
+function titleTokensMatch(subjectToken, courseToken) {
+  if (subjectToken === courseToken) return true;
+  const a = tokenAlias(subjectToken);
+  const b = tokenAlias(courseToken);
+  if (a === b) return true;
+  if (a.length >= 3 && b.length >= 3 && (a.startsWith(b) || b.startsWith(a))) return true;
+  return false;
+}
+
+// Deep metrics for tie-breaking between otherwise-equal candidates: prefer the
+// board we actually know the most about (most cached series, freshest data,
+// component papers) so a board-unknown subject resolves to the pack we've got.
+function courseDataDepth(cache, boardId, qualId, code) {
+  const base = baseCourseCode(singleCode(code));
+  let series = 0;
+  let lastFetched = 0;
+  for (const entry of Object.values((cache && cache.entries) || {})) {
+    if (boardToId(entry.board) !== boardId) continue;
+    if (qualToId(entry.qual) !== qualId) continue;
+    const has = (entry.subjects || []).some((item) => baseCourseCode(item.code) === base);
+    if (!has) continue;
+    series++;
+    lastFetched = Math.max(lastFetched, Number(entry.fetchedAt) || 0);
+  }
+  return { series, lastFetched };
+}
+
+// Best single cached course for a subject. Returns null only when nothing
+// plausible is cached yet (then the fetch pipeline warms by board instead).
+export function resolveTrackedCourse(cache, { board, qual, title, code, tier } = {}) {
+  if (!cache || !title) return null;
+  const wantBoard = boardToId(board);
+  const wantQual = qualToId(qual);
+  const normCode = singleCode(code).trim().toUpperCase();
+  const wantTier = tier === "H" || tier === "F" ? tier : null;
+  const excludeMe = COURSE_EXCLUDE.test(String(title || ""));
+  const subjectTokens = titleTokens(String(title));
+  if (subjectTokens.length === 0) return null;
+
+  const scored = [];
+  const depthCache = new Map();
+  for (const c of listCachedCourses(cache)) {
+    if (wantBoard && c.board !== wantBoard) continue;
+    if (wantQual && c.qual !== wantQual) continue;
+    if (wantTier && c.tier && c.tier !== wantTier) continue;
+    const cTitle = String(c.title || "");
+    const cCode = singleCode(c.code).toUpperCase();
+    if (normCode) {
+      if (cCode !== normCode && baseCourseCode(c.code) !== baseCourseCode(normCode)) continue;
+      scored.push({ c, score: 100, exact: true, depth: 0, lastFetched: 0 });
+      continue;
+    }
+    if (!cTitle) continue;
+    if (!excludeMe && COURSE_EXCLUDE.test(cTitle)) continue;
+    if (wantQual === "gcse" && /\b(al[\s-]?level)\b/i.test(cTitle)) continue;
+    const courseTokens = titleTokens(cTitle);
+    if (courseTokens.length === 0) continue;
+    const missing = subjectTokens.filter((st) => !courseTokens.some((ct) => titleTokensMatch(st, ct)));
+    if (missing.length) continue; // every typed word must be accounted for
+    const courseMatched = courseTokens.filter((ct) => subjectTokens.some((st) => titleTokensMatch(st, ct))).length;
+    const exact = courseTokens.length === subjectTokens.length && missing.length === 0 && courseTokens.every((ct, i) => titleTokensMatch(subjectTokens[i], ct));
+    const ratio = courseMatched / Math.max(subjectTokens.length, courseTokens.length);
+    scored.push({
+      c,
+      score: (exact ? 3 : 0) + ratio,
+      exact,
+      depth: 0,
+      lastFetched: 0
+    });
+  }
+  if (scored.length === 0) return null;
+
+  for (const s of scored) {
+    const key = `${s.c.board}:${s.c.qual}:${baseCourseCode(s.c.code)}`;
+    let d = depthCache.get(key);
+    if (!d) { d = courseDataDepth(cache, s.c.board, s.c.qual, s.c.code); depthCache.set(key, d); }
+    s.depth = d.series;
+    s.lastFetched = d.lastFetched;
+  }
+
+  const tierRank = (t) => (t === "H" ? 0 : t === "F" ? 2 : 1);
+  scored.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    const ta = tierRank(a.c.tier);
+    const tb = tierRank(b.c.tier);
+    if (wantTier) {
+      const am = a.c.tier === wantTier ? 0 : 1;
+      const bm = b.c.tier === wantTier ? 0 : 1;
+      if (am !== bm) return am - bm;
+    } else if (ta !== tb) {
+      if (a.c.tier && !b.c.tier) return -1;
+      if (!a.c.tier && b.c.tier) return 1;
+      if (a.c.tier && b.c.tier) return ta - tb;
+    }
+    if (b.depth !== a.depth) return b.depth - a.depth;
+    if (b.lastFetched !== a.lastFetched) return b.lastFetched - a.lastFetched;
+    const ap = a.c.papers ? 1 : 0;
+    const bp = b.c.papers ? 1 : 0;
+    if (bp !== ap) return bp - ap;
+    if (String(a.c.title).length !== String(b.c.title).length) return String(b.c.title).length - String(a.c.title).length;
+    return String(a.c.board).localeCompare(String(b.c.board));
+  });
+  return scored[0].c;
+}
+
 // Reconcile a stored officialCourse (possibly stale / tier-less / pre-picker-fix)
 // against the live cache so a linked subject always resolves to the exact row
 // the cache actually carries for its board+qual+code. Heals old Foundation
@@ -520,6 +659,10 @@ export function reconcileCourse(cache, course, preferredTier) {
 }
 
 function numberEq(v) {
+  // null/undefined/empty are "no value", NOT 0 — Number(null) coerces to 0
+  // which would turn an undated lookup into a phantom year-0 lookup that can
+  // never match any cached series.
+  if (v === null || v === undefined || v === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }

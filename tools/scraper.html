@@ -32,9 +32,15 @@
     .scraper-btn:disabled { cursor: not-allowed; opacity: 0.6; }
 
     .scraper-status { font-size: 0.85rem; color: var(--text-muted); }
-    .scraper-status.busy { color: var(--accent); }
     .scraper-status.ok { color: var(--accent); }
     .scraper-status.err { color: #ff8c8c; }
+    .scraper-status.busy {
+      background-image: linear-gradient(100deg, rgba(230,255,245,0.55) 30%, rgba(44,255,179,0.95) 50%, rgba(230,255,245,0.55) 70%);
+      background-size: 200% 100%;
+      -webkit-background-clip: text; background-clip: text;
+      -webkit-text-fill-color: transparent; color: transparent;
+      animation: scraper-shimmer-sweep 1.25s linear infinite;
+    }
 
     .scraper-pick { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-muted); position: relative; }
     .scraper-pick select {

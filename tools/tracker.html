@@ -216,7 +216,16 @@
     .tracker-chip.tracker-grade-chip .bmark { font-weight: 700; font-size: 0.8rem; }
     .tracker-cus-note { font-size: 0.7rem; color: var(--text-muted); margin-top: 8px; line-height: 1.45; }
     .tracker-cus-empty { font-size: 0.78rem; color: var(--text-muted); line-height: 1.5; }
-    .tracker-cus-busy { display: inline-block; width: 10px; height: 10px; margin-right: 7px; border: 2px solid var(--text-muted); border-top-color: transparent; border-radius: 50%; vertical-align: -1px; animation: trackerCusSpin 0.9s linear infinite; }
+    /* AI-style fetch status, matching the tracker/scraper scratch buffers: a
+       bright green peak sweeps across the text instead of a ring spinner. */
+    .tracker-cus-busy-text {
+      background-image: linear-gradient(100deg, rgba(230,255,245,0.55) 30%, rgba(44,255,179,0.95) 50%, rgba(230,255,245,0.55) 70%);
+      background-size: 200% 100%;
+      -webkit-background-clip: text; background-clip: text;
+      -webkit-text-fill-color: transparent; color: transparent;
+      animation: trackerCusBusySweep 1.25s linear infinite;
+    }
+    @keyframes trackerCusBusySweep { from { background-position: 200% 0; } to { background-position: -200% 0; } }
     .tracker-cus-preview { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--border-hard); }
     .tracker-cus-preview-title { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 5px; }
     .tracker-cus-preview-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 9px; font-size: 0.84rem; color: var(--text-main); }
@@ -224,7 +233,6 @@
     .tracker-cus-preview-sep { color: var(--text-muted); }
     .tracker-cus-reset-mini { background: none; border: none; color: var(--text-muted); font-size: 0.7rem; text-decoration: underline; padding: 0; margin-left: 4px; cursor: pointer; }
     .tracker-cus-reset-mini:hover { color: var(--accent); }
-    @keyframes trackerCusSpin { to { transform: rotate(360deg); } }
     .tracker-col-toggle {
       display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
       background: none; border: none; color: var(--text-main); font: inherit; font-size: 0.86rem;

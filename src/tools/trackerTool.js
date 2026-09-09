@@ -4,7 +4,7 @@ import {
   loadBoundaryCache,
   reloadBoundaryCache,
   listCachedCourses,
-  matchOfficialCourse,
+  resolveTrackedCourse,
   reconcileCourse,
   getBoundaryStatus,
   subscribeBoundaryStatus,
@@ -287,20 +287,19 @@ export function initTrackerTool(deps, context = {}) {
       return linked;
     }
     const meta = subjectMeta[name] || {};
-    if (meta.examBoard || meta.qualification) {
-      const hit = matchOfficialCourse(cache, {
-        board: meta.examBoard,
-        qual: meta.qualification,
-        title: name,
-        code: meta.code
-      });
-      if (hit) {
-        return hit;
-      }
-    }
-    const norm = normalizeTitle(name);
-    const hit2 = listCachedCourses(cache).find((c) => c.title && normalizeTitle(c.title) === norm) || null;
-    return hit2;
+    // Tolerant resolver: matches by code when known, else by normalized word
+    // tokens with subject aliases ("Maths" → "Mathematics (Higher)", "Geography"
+    // → "Geography B", "English Lit" → "English Literature"). Without this, an
+    // unlinked "Maths"/"Geography" row resolves to null and the whole pipeline
+    // (auto-warm fetch, grade chips, boundary badge) silently dead-ends even
+    // after a successful pack fetch.
+    return resolveTrackedCourse(cache, {
+      board: meta.examBoard,
+      qual: meta.qualification,
+      title: name,
+      code: meta.code,
+      tier: tierFromName(name)
+    }) || null;
   }
 
   function resolveBoundaryTable(subject, year, series, cacheSrc) {
@@ -490,7 +489,7 @@ export function initTrackerTool(deps, context = {}) {
       // user to wait instead of dead-ending with "go use another tool".
       if (busy) {
         const msg = sweepMessage(s) || "Fetching grade boundaries...";
-        if (el.boundaryChips) el.boundaryChips.innerHTML = `<div class="tracker-cus-empty"><span class="tracker-cus-busy"></span>${escapeHtml(msg)}</div>`;
+        if (el.boundaryChips) el.boundaryChips.innerHTML = `<div class="tracker-cus-empty"><span class="tracker-cus-busy-text">${escapeHtml(msg)}</span></div>`;
       } else {
         if (el.boundaryChips) el.boundaryChips.innerHTML = `<div class="tracker-cus-empty">No grade boundaries fetched for ${escapeHtml(focusedSubject)} yet &mdash; they'll be fetched in the background (or open the <b>Scraper</b> tool / link the official subject).</div>`;
       }
@@ -578,14 +577,11 @@ export function initTrackerTool(deps, context = {}) {
     if (course) {
       el.linkPill.innerHTML = `<button type="button" class="tracker-link-pill linked" data-act="open" title="${escapeHtml(courseSummary(course))}"><i class="fa-solid fa-link"></i> ${escapeHtml(courseSummary(course))}</button>`;
     } else {
-      linkHint = subject ? matchOfficialCourse(loadBoundaryCache(), {
-        board: boardFor(subject),
-        qual: qualFor(subject),
-        title: subject,
-        code: ""
-      }) : null;
+      linkHint = subject && !coursesBySubject[subject]
+        ? resolveCourse(loadBoundaryCache(), subject)
+        : null;
       if (linkHint) {
-        el.linkPill.innerHTML = `<button type="button" class="tracker-link-pill suggest" data-act="suggest" title="Automatically linked from your fetched pack. Click to confirm.">Link: ${escapeHtml(courseSummary(linkHint))}</button>`;
+        el.linkPill.innerHTML = `<button type="button" class="tracker-link-pill suggest" data-act="suggest" title="Matched from your fetched pack. Click to confirm.">Link: ${escapeHtml(courseSummary(linkHint))}</button>`;
       } else {
         el.linkPill.innerHTML = `<button type="button" class="tracker-link-pill" data-act="open"><i class="fa-solid fa-link"></i> Link subject</button>`;
       }
@@ -935,6 +931,9 @@ export function initTrackerTool(deps, context = {}) {
   }
 
   function numberEq(v) {
+    // null/undefined/empty are "no value", NOT 0 — Number(null) coerces to 0
+    // which turns an undated lookup into a phantom year-0 lookup.
+    if (v === null || v === undefined || v === "") return null;
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
   }
@@ -1273,7 +1272,10 @@ export function initTrackerTool(deps, context = {}) {
   // Picked grades always render: from the row's own per-year table when it
   // resolves, else from the subject's best available table (the same one the
   // picker populates from) — so custom picks never silently collapse back to the
-  // default top-grade badge just because one year's pack is unfetchable.
+  // default top-grade badge just because one year's pack is unfetchable. The
+  // DEFAULT top-grade badge does the same: when this row's exact year has no
+  // cached table, it falls back to the subject's best any-year table instead of
+  // silently rendering a dash.
   function boundaryBadges(subject, gb, hasG, boundary) {
     const aim = aimFor(subject);
     // Per-series table first, falling back to the subject's best other table so
@@ -1294,10 +1296,25 @@ export function initTrackerTool(deps, context = {}) {
         ).join("");
       }
     }
-    if (boundary !== null || hasG) {
+    const fallback = (!hasG || !gb)
+      ? aimTable(subject)
+      : null;
+    const fallbackUsable = !!(fallback && Array.isArray(fallback.gradesInOrder) && fallback.gradesInOrder.length);
+    if (boundary !== null || hasG || fallbackUsable) {
       const topLabel = escapeHtml(highestGradeLabel(subject));
-      const shownMark = hasG ? topGradeOf(gb) : boundary;
-      return `<span class="tracker-sitting-badge bnd"${tip !== null ? ` title="${escapeHtml(tip)}"` : ""}>${topLabel}${shownMark !== null ? ` &ge; ${shownMark}` : ""}</span>`;
+      let shownMark;
+      let badgeTip = tip;
+      if (hasG) {
+        shownMark = topGradeOf(gb);
+      } else if (boundary !== null) {
+        shownMark = boundary;
+      } else if (fallbackUsable) {
+        shownMark = topGradeOf(fallback);
+        badgeTip = boundsTooltip(fallback);
+      } else {
+        shownMark = null;
+      }
+      return `<span class="tracker-sitting-badge bnd"${badgeTip !== null ? ` title="${escapeHtml(badgeTip)}"` : ""}>${topLabel}${shownMark !== null ? ` &ge; ${shownMark}` : ""}</span>`;
     }
     return `<span class="tracker-sitting-badge">&ndash;</span>`;
   }
@@ -1804,6 +1821,14 @@ export function initTrackerTool(deps, context = {}) {
       }
     });
     el.colsPop.addEventListener("click", (e) => {
+      // Stop the click from reaching the document-level outside-click handler,
+      // which uses e.target.closest(".tracker-cus-wrap") to decide whether to
+      // close. Toggling a chip re-renders the chip list (toggleAim ->
+      // renderPapers -> renderBoundaryChips), detaching the clicked node BEFORE
+      // the event finishes bubbling, so closest() returns null and the popover
+      // gets wrongly closed on every grade pick. Clicking inside the popover
+      // must never close it.
+      e.stopPropagation();
       const chip = e.target.closest(".tracker-grade-chip");
       if (chip) {
         toggleAim(focusedSubject, chip.dataset.g);
