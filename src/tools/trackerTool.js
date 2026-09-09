@@ -24,7 +24,8 @@ import {
   normalizeBoundaryTable,
   findGradeMark,
   courseGradeLabels,
-  tierFromName
+  tierFromName,
+  seriesRecentlyAttempted
 } from "./gradeBoundaries.js";
 
 export function initTrackerTool(deps, context = {}) {
@@ -184,6 +185,7 @@ export function initTrackerTool(deps, context = {}) {
     await addNode(record);
     await loadPapers();
     await loadSubjects();
+    scheduleWarm();
   }
 
   async function persistMany(list) {
@@ -198,6 +200,7 @@ export function initTrackerTool(deps, context = {}) {
     await addNodes(records);
     await loadPapers();
     await loadSubjects();
+    scheduleWarm();
   }
 
   async function removePaper(paper) {
@@ -207,6 +210,7 @@ export function initTrackerTool(deps, context = {}) {
     if (!paper.id) paper.id = `paper-${crypto.randomUUID()}`;
     await deleteNode(paper.id);
     await loadPapers();
+    scheduleWarm();
     renderPapers();
   }
 
@@ -242,6 +246,7 @@ export function initTrackerTool(deps, context = {}) {
       });
     }
     await loadSubjects();
+    scheduleWarm();
   }
 
   async function setSubjectBoard(subject, board) {
@@ -263,6 +268,7 @@ export function initTrackerTool(deps, context = {}) {
       });
     }
     await loadSubjects();
+    scheduleWarm();
     renderPapers();
   }
 
@@ -1036,7 +1042,6 @@ export function initTrackerTool(deps, context = {}) {
     scroll.appendChild(table);
     el.paperGroups.appendChild(scroll);
     renderBoundaryChips();
-    maybeWarmBoundaries();
   }
 
   // Auto-ensure boundary packs for every dated row that has no cached table
@@ -1046,53 +1051,83 @@ export function initTrackerTool(deps, context = {}) {
   // version called a full sweep + renderPapers() from here, which made
   // focus-subject spin render -> warm -> render -> ... forever with no idle
   // between microtasks: the whole app froze with no clicks.
-  let warmBusy = false;
-  let warmQueued = false;
-  async function maybeWarmBoundaries() {
-    if (warmBusy) {
-      warmQueued = true;
-      return;
+  //
+  // The warm path is deliberately decoupled from rendering:
+  //  - renderPapers() does NOT kick it, so a cache-change render can never
+  //    re-enter network work from inside the render pass.
+  //  - scheduleWarm() defers to a macrotask and is single-flight (a running
+  //    warm consumes pending kicks; there is no recursion in a finally).
+  //  - each kick fetches at most MAX_WARM_JOBS_PER_KICK series, yields
+  //    between every fetch, and continues via a fresh macrotask only when it
+  //    actually made progress, so it provably terminates.
+  //  - series that failed within the retry window are skipped, so a dead
+  //    legacy URL cannot churn fetch+parse churn from every schedule.
+  const MAX_WARM_JOBS_PER_KICK = 6;
+  let warmTimer = null;
+  let warmRunning = false;
+
+  function collectWarmJobs(cache) {
+    const jobs = new Map();
+    for (const sitting of papers || []) {
+      if (!sitting || !sitting.subject) continue;
+      if (/^(mock|specimen)$/i.test(String(sitting.series || "").trim())) continue;
+      const year = numberEq(sitting.year);
+      if (year === null) continue;
+      const course = resolveCourse(cache, sitting.subject);
+      if (!course) continue;
+      const board = boardToId(course && course.board);
+      const qualId = qualToId(course && course.qual);
+      if (!board || !qualId) continue;
+      // Already resolvable from the cache — nothing to do for this row.
+      if (findGradeTable(cache, course, year, sitting.series)) continue;
+      const target = bestSeriesForYear(board, year, trackerSeriesToMonth(sitting.series));
+      if (!target) continue;
+      const key = `${board}:${target.month}-${target.year}:${qualId}`;
+      if (!jobs.has(key)) jobs.set(key, { board, qualId, series: target });
     }
-    warmBusy = true;
-    try {
-      const cache = loadBoundaryCache();
-      const jobs = new Map();
-      for (const sitting of papers || []) {
-        if (!sitting || !sitting.subject) continue;
-        if (/^(mock|specimen)$/i.test(String(sitting.series || "").trim())) continue;
-        const year = numberEq(sitting.year);
-        if (year === null) continue;
-        const course = resolveCourse(cache, sitting.subject);
-        if (!course) continue;
-        const board = boardToId(course && course.board);
-        const qualId = qualToId(course && course.qual);
-        if (!board || !qualId) continue;
-        // Already resolvable from the cache — nothing to do for this row.
-        if (findGradeTable(cache, course, year, sitting.series)) continue;
-        const target = bestSeriesForYear(board, year, trackerSeriesToMonth(sitting.series));
-        if (!target) continue;
-        const key = `${board}|${qualId}|${target.month}-${target.year}`;
-        if (!jobs.has(key)) jobs.set(key, { board, qualId, series: target });
-      }
-      if (jobs.size === 0) return;
-      // Best-effort; a failure just leaves that series uncached. Concurrent
-      // runs share one in-flight fetch inside ensureBoundarySeries.
-      for (const { board, qualId, series } of jobs.values()) {
-        await new Promise((r) => setTimeout(r, 0));
+    return jobs;
+  }
+
+  function scheduleWarm() {
+    if (warmRunning || warmTimer) return;
+    warmTimer = setTimeout(() => {
+      warmTimer = null;
+      warmRunning = true;
+      (async () => {
         try {
-          await ensureBoundarySeries(board, { id: qualId }, series, () => {});
-        } catch (e) {
-          /* best-effort */
+          await runWarmFlight();
+        } finally {
+          warmRunning = false;
         }
+      })();
+    }, 0);
+  }
+
+  // Best-effort; a failure just leaves that series uncached. Concurrent runs
+  // share one in-flight fetch inside ensureBoundarySeries.
+  async function runWarmFlight() {
+    const cache = loadBoundaryCache();
+    const jobs = collectWarmJobs(cache);
+    if (jobs.size === 0) return;
+    let madeFetch = false;
+    let attempted = 0;
+    for (const { board, qualId, series } of jobs.values()) {
+      const key = `${board}:${series.month}-${series.year}:${qualId}`;
+      if (seriesRecentlyAttempted(key)) continue;
+      if (attempted >= MAX_WARM_JOBS_PER_KICK) break;
+      attempted++;
+      await new Promise((r) => setTimeout(r, 0));
+      try {
+        await ensureBoundarySeries(board, { id: qualId }, series, () => {});
+        madeFetch = true;
+      } catch (e) {
+        /* best-effort */
       }
-      // No renderPapers() here. The cache-change bus re-renders the table the
-      // moment any series lands; a render call here is what trapped the loop.
-    } finally {
-      warmBusy = false;
-      if (warmQueued) {
-        warmQueued = false;
-        maybeWarmBoundaries();
-      }
+    }
+    // If this kick did real work and rows still need series, continue in a
+    // fresh macrotask rather than recursively re-entering the flight.
+    if (madeFetch && collectWarmJobs(loadBoundaryCache()).size > 0) {
+      scheduleWarm();
     }
   }
 
@@ -1844,12 +1879,14 @@ export function initTrackerTool(deps, context = {}) {
     await loadSubjects();
     await ensureQualifications();
     renderPapers();
-    // Background fill of the shared boundary cache. Deferred off the first
-    // render and never wired into a click path, so first paint + focus always
-    // stay interactive; cached series / a fresh sweep make this a no-op.
-    setTimeout(() => {
-      runBoundarySweep({}).catch(() => { /* best-effort background */ });
-    }, 0);
+    // Targeted auto-warm for the rows' own series. Single-flight, decoupled
+    // from the render path (see runWarmFlight), so it can neither re-enter a
+    // render nor loop. This is the ONLY background fetcher the tracker runs:
+    // the full board-wide sweep is triggered on demand by the link picker
+    // (seedLinkCourses), never from init. Firing it here stormed the whole
+    // AQA history (proxy + CORS fallback per series) plus OCR/Pearson PDF
+    // parses on every scope, janking the main thread for a minute+.
+    scheduleWarm();
   }
 
   if (typeof context.onload === "function") {

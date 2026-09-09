@@ -859,13 +859,27 @@ function boundaryProxyUrl(real) {
 }
 
 async function fetchBoundaryResource(url) {
+  // Try the permissive-CORS proxy first. A proxy that ANSWERS is authoritative,
+  // status included: boards (filestore.aqa.org.uk etc.) send no CORS headers,
+  // so a direct browser fetch can never succeed here — firing a second request
+  // after a proxy 404/5xx is pure waste.
+  let proxied;
   try {
-    const proxied = await fetch(boundaryProxyUrl(url));
+    proxied = await fetch(boundaryProxyUrl(url));
     if (proxied.ok) return proxied;
-  } catch {
-    // Try the board directly below; some deployments have a sleeping proxy.
+    throw new Error(`HTTP ${proxied.status} via proxy for ${url}`);
+  } catch (e) {
+    // No answer from the proxy at all (deployment sleeping / down): fall
+    // through to the direct request, which *might* work when the board allows
+    // cross-origin reads. Otherwise rethrow the original proxy error.
+    try {
+      const direct = await fetch(url);
+      if (direct.ok) return direct;
+    } catch {
+      /* direct fetch has no CORS access either */
+    }
+    throw e;
   }
-  return fetch(url);
 }
 
 function buildSeriesListFor(board, baseline, found) {
@@ -1429,4 +1443,11 @@ function sweepReentryOld(seriesKey, now) {
   const ts = status.attemptedFailed && status.attemptedFailed[seriesKey];
   if (!ts) return false;
   return now - ts < RETRY_WINDOW_MS;
+}
+
+// Whether a canonical "board:MONTH-YEAR:qual" series key was recently attempted
+// and failed (used by the tracker's targeted auto-warm so a dead series isn't
+// re-fetched on every render — same policy the full sweep already applies).
+export function seriesRecentlyAttempted(seriesKey) {
+  return sweepReentryOld(seriesKey, Date.now());
 }
