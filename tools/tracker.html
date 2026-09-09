@@ -98,6 +98,7 @@
     .tracker-sitting-title .series { color: var(--text-muted); font-weight: 400; font-size: 0.82rem; margin-left: 6px; }
     .tracker-sitting-badge { font-size: 0.75rem; padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.14); color: var(--text-muted); }
     .tracker-sitting-badge.bnd { border-color: rgba(44,255,179,0.25); color: var(--accent); }
+    .tracker-sitting-badge.bnd.bnd-unknown { border-style: dashed; border-color: rgba(255,255,255,0.2); color: var(--text-muted); opacity: 0.65; cursor: help; }
     .tracker-sitting-chev { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; margin-left: auto; padding: 4px 8px; border-radius: 7px; color: var(--text-muted); transition: transform 0.2s ease; }
     .tracker-sitting.open .tracker-sitting-chev { transform: rotate(0deg); }
     .head-scores { display: flex; flex-wrap: wrap; gap: 6px; font-size: 0.76rem; }
@@ -231,6 +232,9 @@
     .tracker-cus-preview-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 9px; font-size: 0.84rem; color: var(--text-main); }
     .tracker-cus-preview-row b { color: var(--accent); font-weight: 700; }
     .tracker-cus-preview-sep { color: var(--text-muted); }
+    .tracker-cus-preview-group { display: inline-flex; align-items: baseline; gap: 7px; }
+    .tracker-cus-preview-key { color: var(--text-muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+    .tracker-cus-preview-grades { display: inline-flex; gap: 0; }
     .tracker-cus-reset-mini { background: none; border: none; color: var(--text-muted); font-size: 0.7rem; text-decoration: underline; padding: 0; margin-left: 4px; cursor: pointer; }
     .tracker-cus-reset-mini:hover { color: var(--accent); }
     .tracker-col-toggle {
@@ -247,14 +251,20 @@
     /* link-to-official-subject control */
     .tracker-link-area { position: relative; display: inline-flex; align-items: center; margin-left: 10px; }
     .tracker-link-pill {
-      display: inline-flex; align-items: center; gap: 6px; max-width: 300px;
+      display: inline-flex; align-items: center; gap: 7px;
+      max-width: none;
       background: none; border: 1px dashed rgba(255,255,255,0.22); color: var(--text-muted);
-      border-radius: 999px; padding: 4px 11px; font: inherit; font-size: 0.76rem; cursor: pointer;
-      transition: all 0.15s ease; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      border-radius: 999px; padding: 5px 14px; font: inherit; font-size: 0.76rem; cursor: pointer;
+      transition: all 0.15s ease; white-space: nowrap; flex: 0 0 auto; box-sizing: border-box;
     }
     .tracker-link-pill:hover { border-color: var(--accent-soft); color: var(--accent); }
     .tracker-link-pill.linked { border-style: solid; border-color: rgba(44,255,179,0.4); color: var(--accent); background: rgba(44,255,179,0.08); }
-    .tracker-link-pill.suggest { border-style: solid; border-color: rgba(255,196,0,0.4); color: #ffd166; background: rgba(255,196,0,0.08); }
+    .tracker-link-pill.suggest { border-style: solid; border-color: rgba(64,173,255,0.45); color: #7cc4ff; background: rgba(64,173,255,0.09); }
+    .tracker-link-pill.suggest::after {
+      content: "?";
+      color: #8ecbff;
+      font-size: 0.85rem; font-weight: 700; line-height: 1; flex: 0 0 auto;
+    }
     #trackerLinkPop {
       position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
       width: 300px; max-width: calc(100vw - 32px); background: #1c1c1e;

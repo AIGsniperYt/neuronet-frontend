@@ -712,6 +712,14 @@ export function findGradeTable(cache, course, year, seriesWord) {
     if (a.prox.exactYear !== b.prox.exactYear) return a.prox.exactYear ? -1 : 1;
     if (a.prox.d !== b.prox.d) return a.prox.d - b.prox.d;
     if (a.prox.exactMonth !== b.prox.exactMonth) return a.prox.exactMonth ? -1 : 1;
+    // Undated (subject-level / any-year) lookups: newest EXAM year first, so a
+    // stale fetch order or equal timestamps can never make 2024 win over 2025.
+    // Dated lookups are already year-exact and skip this.
+    if (requestedYear === null) {
+      const ya = Number(a.series && a.series.year) || 0;
+      const yb = Number(b.series && b.series.year) || 0;
+      if (ya !== yb) return yb - ya;
+    }
     const aMain = !monthAbbr && String(a.series && a.series.month || "").toUpperCase() === "JUN";
     const bMain = !monthAbbr && String(b.series && b.series.month || "").toUpperCase() === "JUN";
     if (aMain !== bMain) return aMain ? -1 : 1;
@@ -849,6 +857,35 @@ export function courseGradeLabels(cache, course) {
     return a.localeCompare(b);
   });
   return labels;
+}
+
+// Every cached series that actually resolves a row for this course, newest
+// exam year first (then freshest fetch). The customise preview renders one
+// threshold group per series through the SAME per-year lookups the rows use,
+// so the numbers shown are faithful to the pack that year instead of one
+// arbitrary any-year table repeated for all years.
+export function courseBoundarySeries(cache, course) {
+  const boardId = boardToId(course && course.board);
+  const qualId = qualToId(course && course.qual);
+  if (!boardId || !qualId) return [];
+  const out = [];
+  for (const entry of Object.values((cache && cache.entries) || {})) {
+    if (boardToId(entry.board) !== boardId) continue;
+    if (qualToId(entry.qual) !== qualId) continue;
+    const subject = findSubjectInEntry(entry, course);
+    if (!subject) continue;
+    out.push({ series: entry.series || null, fetchedAt: Number(entry.fetchedAt) || 0, subject });
+  }
+  out.sort((a, b) => {
+    const ya = Number(a.series && a.series.year) || 0;
+    const yb = Number(b.series && b.series.year) || 0;
+    if (ya !== yb) return yb - ya;
+    if (a.fetchedAt !== b.fetchedAt) return b.fetchedAt - a.fetchedAt;
+    const ma = String(a.series && a.series.month || "").toUpperCase();
+    const mb = String(b.series && b.series.month || "").toUpperCase();
+    return mb.localeCompare(ma);
+  });
+  return out;
 }
 
 // Convert a raw total score to a grade label with a boundary table, e.g.
